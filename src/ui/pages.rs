@@ -435,7 +435,125 @@ fn update_card(app: &mut App, ui: &mut Ui) {
     ui.add_space(12.0);
 }
 
+/// The card the Home feed leads with, large: the album or playlist that opens the
+/// first shelf of cards to open with one. `(shelf, card)`, or none when no shelf does
+/// (a feed of songs and artists only), and then Home has no hero.
+fn hero_pick(shelves: &[crate::model::Shelf]) -> Option<(usize, usize)> {
+    shelves.iter().position(|s| matches!(&s.kind, ShelfKind::Cards(cards) if matches!(cards.first().map(|c| &c.target), Some(Target::Album(_) | Target::Playlist(_))))).map(|shelf| (shelf, 0))
+}
+
+/// The feed's moods as filter chips, led by "All" (no mood): a tap asks for that feed.
+fn home_chips(app: &mut App, ui: &mut Ui) {
+    let Some(h) = app.home.as_ref().filter(|h| !h.chips.is_empty()) else { return };
+    let all = !h.chips.iter().any(|c| c.selected);
+    let mut pick = None;
+    m3::chip_row(ui, "home-chips", super::phone::SIDE, |ui| {
+        if m3::filter_chip(ui, "All", all).clicked() && !all {
+            pick = Some(None);
+        }
+        for c in &h.chips {
+            if m3::filter_chip(ui, &c.title, c.selected).clicked() {
+                pick = Some(if c.selected { None } else { c.params.clone() });
+            }
+        }
+    });
+    if let Some(params) = pick {
+        app.actions.push(Action::HomeChip(params));
+    }
+}
+
+/// A shelf of songs as tiles, two to a row and two rows to a page, turning sideways
+/// (Quick picks). A tap starts the song's radio; "Play all" plays the shelf in order.
+/// Returns whether the shelf is at its end.
+fn song_tiles(ui: &mut Ui, rows_ctx: &Rows, liked: &HashSet<String>, acts: &mut Vec<Action>, id: &str, title: &str, strap: Option<&str>, tracks: &[Track]) -> bool {
+    const ROWS: usize = 2;
+    if m3::section_header(ui, &m3::SectionHeader { title, overline: strap, avatar: None, trailing: m3::Trailing::Text("Play all") }) {
+        acts.push(Action::Play(tracks.to_vec(), 0));
+    }
+    let tile = m3::tile_width(ui.available_width());
+    let mut picked = None;
+    let (_, reached_end) = h_scroll(ui, id, 0, tracks.len().div_ceil(ROWS), tile, m3::TILE_GAP, |ui| {
+        ui.spacing_mut().item_spacing = vec2(m3::TILE_GAP, m3::TILE_GAP);
+        for (c, col) in tracks.chunks(ROWS).enumerate() {
+            ui.vertical(|ui| {
+                for (i, t) in col.iter().enumerate() {
+                    let o = rows_ctx.opts(liked, t, None, false);
+                    if m3::song_tile(ui, tile, t, &o, acts).clicked() {
+                        picked = Some(c * ROWS + i);
+                    }
+                }
+            });
+        }
+    });
+    if let Some(i) = picked {
+        acts.push(Action::Radio(tracks[i].clone()));
+    }
+    reached_end
+}
+
+/// Home on a phone, in Material 3: the moods as chips, a hero card, the songs as
+/// tiles and the shelves as carousels. (The greeting is the frame's top bar.)
+fn home_material(app: &mut App, ui: &mut Ui, now: f64) {
+    update_card(app, ui);
+    home_chips(app, ui);
+    // A refresh keeps showing the current feed; the skeleton is only for an empty one.
+    if app.home.as_ref().is_none_or(|h| app.home_loading && h.shelves.is_empty()) {
+        placeholder(app, ui, now, 3, CARD);
+        return;
+    }
+    let rows = Rows::new(app, now);
+    let Some(h) = &app.home else { return };
+    if h.shelves.is_empty() {
+        ui.add_space(40.0);
+        ui.label(RichText::new("Nothing here yet").color(theme::text_dim()));
+    }
+    let hero = hero_pick(&h.shelves);
+    if let Some((shelf, card)) = hero
+        && let ShelfKind::Cards(cards) = &h.shelves[shelf].kind
+    {
+        ui.add_space(2.0);
+        m3::hero_card(ui, &h.shelves[shelf].title, &cards[card], &mut app.actions);
+    }
+    let mut more_picks = None;
+    for (i, s) in h.shelves.iter().enumerate() {
+        let id = format!("home-{i}-{}", s.title);
+        match &s.kind {
+            ShelfKind::Cards(cards) => {
+                // The hero card is not shown a second time in its own shelf.
+                let cards = if hero == Some((i, 0)) { &cards[1..] } else { &cards[..] };
+                if cards.is_empty() {
+                    continue;
+                }
+                let (overline, avatar) = if s.title == "Listen again" { (None, None) } else { (s.strapline.as_deref(), s.strap_thumb.as_deref()) };
+                let next = format!("More of {}", s.title);
+                let trailing = if cards.len() > 2 { m3::Trailing::Icon(icon::CHEVRON_RIGHT, &next) } else { m3::Trailing::None };
+                let nudge = m3::section_header(ui, &m3::SectionHeader { title: &s.title, overline, avatar, trailing }) as i32;
+                m3::carousel(ui, &id, nudge, cards, &app.liked, &mut app.actions);
+            }
+            ShelfKind::Songs { tracks, .. } => {
+                let reached_end = song_tiles(ui, &rows, &app.liked, &mut app.actions, &id, &s.title, s.strapline.as_deref(), tracks);
+                if s.title == "Quick picks" && reached_end && !h.picks_loading && !h.picks_expanded {
+                    more_picks = tracks.last().map(|t| t.id.clone());
+                }
+            }
+        }
+    }
+    let loading_more = h.loading_more.is_some();
+    if let Some(seed) = more_picks
+        && let Some(h) = &mut app.home
+    {
+        h.picks_loading = true;
+        app.backend.request(crate::backend::Req::MoreQuickPicks(seed));
+    }
+    if loading_more {
+        widgets::skeleton(ui, now, 1, CARD);
+    }
+}
+
 fn home(app: &mut App, ui: &mut Ui, now: f64) {
+    if crate::platform::phone() && crate::material::on() {
+        return home_material(app, ui, now);
+    }
     page_title(ui, "Home");
     if crate::platform::phone() {
         update_card(app, ui);
@@ -2948,6 +3066,44 @@ mod tests {
         assert_eq!(song_column(270.0, 380.0, true), 344.0);
         // Never wider than a screen narrower than a tile.
         assert_eq!(song_column(270.0, 250.0, true), 250.0);
+    }
+
+    fn card(target: Target) -> Card {
+        Card { title: "A".into(), subtitle: "B".into(), thumbs: vec![], target, round: false, links: vec![] }
+    }
+
+    fn shelf(title: &str, kind: ShelfKind) -> crate::model::Shelf {
+        crate::model::Shelf { title: title.into(), strapline: None, strap_thumb: None, kind }
+    }
+
+    #[test]
+    fn the_hero_is_the_album_or_playlist_that_opens_the_first_shelf_of_cards() {
+        let feed = [
+            shelf("Quick picks", ShelfKind::Songs { tracks: vec![], rows: 4 }),
+            shelf("Trending community playlists", ShelfKind::Cards(vec![card(Target::Playlist("PL1".into())), card(Target::Playlist("PL2".into()))])),
+            shelf("New releases", ShelfKind::Cards(vec![card(Target::Album("AL1".into()))])),
+        ];
+        assert_eq!(hero_pick(&feed), Some((1, 0)));
+    }
+
+    #[test]
+    fn a_shelf_that_opens_with_an_artist_does_not_give_the_hero() {
+        let feed = [
+            shelf("Artists for you", ShelfKind::Cards(vec![card(Target::Artist("UC1".into())), card(Target::Album("AL0".into()))])),
+            shelf("Mixed for you", ShelfKind::Cards(vec![card(Target::Album("AL1".into()))])),
+        ];
+        assert_eq!(hero_pick(&feed), Some((1, 0)));
+    }
+
+    #[test]
+    fn a_feed_with_nothing_to_lead_with_has_no_hero() {
+        assert_eq!(hero_pick(&[]), None);
+        let feed = [
+            shelf("Quick picks", ShelfKind::Songs { tracks: vec![], rows: 4 }),
+            shelf("Artists for you", ShelfKind::Cards(vec![card(Target::Artist("UC1".into()))])),
+            shelf("Empty", ShelfKind::Cards(vec![])),
+        ];
+        assert_eq!(hero_pick(&feed), None);
     }
 
     #[test]
