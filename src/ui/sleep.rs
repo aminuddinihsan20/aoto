@@ -368,7 +368,7 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
     widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Fade out", theme::regular(17.0), theme::text(), text_w);
     let note = format!("Turns the volume down over the last {FADE_SECS:.0} seconds");
     widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), &note, theme::regular(13.5), theme::text_dim(), text_w);
-    let switch = Rect::from_center_size(pos2(r.right() - 8.0 - 22.0, r.center().y), vec2(44.0, 26.0));
+    let switch = Rect::from_center_size(pos2(r.right() - 8.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut pick.fade, "Fade out");
     ui.add_space(12.0);

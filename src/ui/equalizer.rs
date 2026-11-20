@@ -172,7 +172,7 @@ fn header(ui: &mut Ui, on: &mut bool) {
     if named(ui.interact(reach, switch_id(), Sense::click()), "Equalizer").clicked() {
         *on = !*on;
     }
-    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(r.right() - 22.0, r.center().y), vec2(44.0, 26.0))));
+    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(r.right() - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size())));
     pages::toggle(&mut sui, on, "Equalizer");
 }
 
@@ -180,15 +180,16 @@ fn header(ui: &mut Ui, on: &mut bool) {
 /// one that plays (Custom, the moment a band is moved) is seen to light up.
 fn presets(ui: &mut Ui, tuning: &mut Tuning) {
     const ROW: f32 = 44.0;
-    let widths = Preset::ALL.map(|p| ui.painter().layout_no_wrap(p.name().to_owned(), theme::semibold(13.5), Color32::PLACEHOLDER).size().x + 28.0);
+    let sizes = Preset::ALL.map(|p| widgets::chip_size(ui, p.name(), tuning.preset == p));
+    let widths = sizes.map(|s| s.x);
     let places = wrap(&widths, ui.available_width(), 8.0);
     let rows = places.last().map_or(0, |(row, _)| row + 1);
     let (area, _) = ui.allocate_exact_size(vec2(ui.available_width(), rows as f32 * ROW), Sense::hover());
-    for ((preset, width), (row, x)) in Preset::ALL.into_iter().zip(widths).zip(places) {
+    for ((preset, size), (row, x)) in Preset::ALL.into_iter().zip(sizes).zip(places) {
         // The chip, and a finger's height round it.
-        let cell = Rect::from_min_size(pos2(area.left() + x, area.top() + row as f32 * ROW), vec2(width, ROW));
+        let cell = Rect::from_min_size(pos2(area.left() + x, area.top() + row as f32 * ROW), vec2(size.x, ROW));
         let reach = named(ui.interact(cell, preset_id(preset), Sense::click()), preset.name());
-        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(cell.center(), vec2(width, 34.0))));
+        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(cell.center(), size)));
         if widgets::chip(&mut cui, preset.name(), tuning.preset == preset).clicked() || reach.clicked() {
             tuning.pick(preset);
         }
@@ -295,7 +296,7 @@ fn switch_row(ui: &mut Ui, id: egui::Id, title: &str, note: &str, on: &mut bool)
     let text_w = w - 60.0;
     widgets::text_at(ui, pos2(r.left(), r.top() + 10.0), title, theme::regular(17.0), theme::text(), text_w);
     widgets::text_at(ui, pos2(r.left(), r.top() + 34.0), note, theme::regular(13.5), theme::text_dim(), text_w);
-    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(r.right() - 22.0, r.center().y), vec2(44.0, 26.0))));
+    let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(r.right() - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size())));
     pages::toggle(&mut sui, on, title);
 }
 

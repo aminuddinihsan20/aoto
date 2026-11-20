@@ -134,7 +134,9 @@ pub enum Weight {
     Bold,
 }
 
-/// A role in Material 3's type scale.
+/// A role in Material 3's type scale. The whole scale is here; a screen takes the
+/// roles it needs.
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Type {
     DisplaySmall,
@@ -163,7 +165,8 @@ pub struct Spec {
 }
 
 impl Type {
-    pub const ALL: [Type; 13] = [
+    #[cfg(test)]
+    const ALL: [Type; 13] = [
         Type::DisplaySmall,
         Type::HeadlineLarge,
         Type::HeadlineMedium,
@@ -200,14 +203,9 @@ impl Type {
     }
 
     /// The role's font, for painters that take only a font (its line height and
-    /// tracking come with `format`).
+    /// tracking come with `Spec::format`).
     pub fn font(self) -> FontId {
         self.spec().font()
-    }
-
-    /// The role as a text format in `color`: font, line height and tracking.
-    pub fn format(self, color: Color32) -> egui::TextFormat {
-        self.spec().format(color)
     }
 }
 
@@ -225,6 +223,7 @@ impl Spec {
         }
     }
 
+    /// The role as a text format in `color`: font, line height and tracking.
     pub fn format(&self, color: Color32) -> egui::TextFormat {
         egui::TextFormat { font_id: self.font(), color, extra_letter_spacing: self.tracking, line_height: Some(self.line_height), ..Default::default() }
     }
@@ -245,12 +244,8 @@ pub mod shape {
     /// Cards and sheets.
     pub const CARD: f32 = 28.0;
     /// The big artwork of Now Playing and a collection's header.
+    #[allow(dead_code)]
     pub const ARTWORK: f32 = 36.0;
-
-    /// A full pill: half the shorter side of what it rounds.
-    pub fn full(size: egui::Vec2) -> f32 {
-        size.min_elem() / 2.0
-    }
 }
 
 #[cfg(test)]
@@ -364,7 +359,7 @@ mod tests {
 
     #[test]
     fn a_format_carries_the_roles_size_line_and_tracking() {
-        let f = Type::TitleMedium.format(Color32::WHITE);
+        let f = Type::TitleMedium.spec().format(Color32::WHITE);
         assert_eq!(f.font_id.size, 16.0);
         assert_eq!(f.line_height, Some(24.0));
         assert_eq!(f.extra_letter_spacing, 0.15);
@@ -382,6 +377,5 @@ mod tests {
     fn the_shape_scale_grows_from_chips_to_artwork() {
         let scale = [shape::CHIP, shape::TILE_SMALL, shape::TILE, shape::CARD_SMALL, shape::CARD, shape::ARTWORK];
         assert_eq!(scale, [8.0, 12.0, 16.0, 20.0, 28.0, 36.0]);
-        assert_eq!(shape::full(egui::vec2(120.0, 40.0)), 20.0);
     }
 }

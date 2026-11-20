@@ -405,7 +405,7 @@ fn contents(ui: &mut Ui, s: &Showing) -> Option<Tap> {
     let text_w = w - 16.0 - 60.0;
     widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Wi-Fi only", theme::regular(17.0), theme::text(), text_w);
     widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), "Starts when this phone is on Wi-Fi", theme::regular(13.5), theme::text_dim(), text_w);
-    let switch = Rect::from_center_size(pos2(r.right() - 8.0 - 22.0, r.center().y), vec2(44.0, 26.0));
+    let switch = Rect::from_center_size(pos2(r.right() - 8.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut on, "Wi-Fi only");
     if on != s.wifi_only {
@@ -558,7 +558,7 @@ pub(super) fn wifi_row(app: &mut App, ui: &mut Ui) {
     let text_w = (r.right() - 60.0 - text_l).max(40.0);
     widgets::text_at(ui, pos2(text_l, r.center().y - 20.0), NAME, theme::semibold(16.0), theme::text(), text_w);
     widgets::text_at(ui, pos2(text_l, r.center().y + 2.0), "Waits for Wi-Fi, saves mobile data", theme::regular(13.0), theme::text_dim(), text_w);
-    let switch = Rect::from_center_size(pos2(r.right() - 4.0 - 22.0, r.center().y), vec2(44.0, 26.0));
+    let switch = Rect::from_center_size(pos2(r.right() - 4.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut on, NAME);
     if on != was {

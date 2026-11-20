@@ -15,7 +15,13 @@ pub fn named(resp: Response, name: &str) -> Response {
 /// Single-line text truncated with an ellipsis to `width`. Right-to-left text is put in
 /// display order (`bidi`), and cut at its end (the left) when it doesn't fit.
 pub fn galley(ui: &Ui, text: &str, font: egui::FontId, color: Color32, width: f32) -> std::sync::Arc<egui::Galley> {
+    galley_fmt(ui, text, egui::TextFormat::simple(font, color), width)
+}
+
+/// [`galley`] set in a whole text format: a type role's line height and tracking too.
+pub fn galley_fmt(ui: &Ui, text: &str, format: egui::TextFormat, width: f32) -> std::sync::Arc<egui::Galley> {
     let width = width.max(10.0);
+    let (font, color) = (format.font_id.clone(), format.color);
     let mut job = if !crate::bidi::has_rtl(text) {
         egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color)
     } else if crate::bidi::rtl_base(text) {
@@ -23,8 +29,16 @@ pub fn galley(ui: &Ui, text: &str, font: egui::FontId, color: Color32, width: f3
     } else {
         crate::bidi::job(text, font, color)
     };
+    set_format(&mut job, &format);
     job.wrap = egui::text::TextWrapping::truncate_at_width(width);
     ui.fonts_mut(|f| f.layout_job(job))
+}
+
+/// Give every run of `job` this format.
+fn set_format(job: &mut egui::text::LayoutJob, format: &egui::TextFormat) {
+    for section in &mut job.sections {
+        section.format = format.clone();
+    }
 }
 
 /// Right-to-left `text`, shortened at its logical end with "…" until it fits `width`
@@ -54,7 +68,14 @@ pub fn galley_wrapped(
     width: f32,
     rows: usize,
 ) -> std::sync::Arc<egui::Galley> {
+    galley_wrapped_fmt(ui, text, egui::TextFormat::simple(font, color), width, rows)
+}
+
+/// [`galley_wrapped`] set in a whole text format: a type role's line height and tracking too.
+pub fn galley_wrapped_fmt(ui: &Ui, text: &str, format: egui::TextFormat, width: f32, rows: usize) -> std::sync::Arc<egui::Galley> {
+    let (font, color) = (format.font_id.clone(), format.color);
     let mut job = egui::text::LayoutJob::simple(text.to_owned(), font.clone(), color, width.max(10.0));
+    set_format(&mut job, &format);
     job.wrap.max_rows = rows;
     job.wrap.break_anywhere = false;
     job.wrap.overflow_character = Some('…');
@@ -77,6 +98,7 @@ pub fn galley_wrapped(
         rows_text.push(s.trim_end().to_owned());
     }
     let mut job = crate::bidi::job(&rows_text.join("\n"), font, color);
+    set_format(&mut job, &format);
     job.halign = g.job.halign;
     ui.fonts_mut(|f| f.layout_job(job))
 }
@@ -206,6 +228,10 @@ pub fn icon_button(ui: &mut Ui, glyph: char, size: f32, name: &str, active: bool
 
 /// Rounded pill button. `primary` = white with dark text (YouTube Music's Play button).
 pub fn pill(ui: &mut Ui, label: &str, glyph: Option<char>, primary: bool) -> Response {
+    if crate::material::on() {
+        let style = if primary { super::m3::ButtonStyle::Filled } else { super::m3::ButtonStyle::Tonal };
+        return super::m3::button(ui, label, glyph, style);
+    }
     // Laid out once; the colour is given when it's painted.
     let text = ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(14.0), Color32::PLACEHOLDER);
     let icon_w = if glyph.is_some() { 24.0 } else { 0.0 };
@@ -228,8 +254,19 @@ pub fn pill(ui: &mut Ui, label: &str, glyph: Option<char>, primary: bool) -> Res
     resp
 }
 
+/// How much room `chip` takes, for a row that places its chips itself.
+pub fn chip_size(ui: &Ui, label: &str, selected: bool) -> Vec2 {
+    if crate::material::on() {
+        return super::m3::filter_chip_size(ui, label, selected);
+    }
+    vec2(ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(13.5), Color32::PLACEHOLDER).size().x + 28.0, 34.0)
+}
+
 /// Selectable chip (home moods, library tabs).
 pub fn chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    if crate::material::on() {
+        return super::m3::filter_chip(ui, label, selected);
+    }
     let text = ui.painter().layout_no_wrap(label.to_owned(), theme::semibold(13.5), Color32::PLACEHOLDER);
     let (rect, resp) = ui.allocate_exact_size(vec2(text.size().x + 28.0, 34.0), Sense::click());
     let resp = named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -353,6 +390,25 @@ pub fn paint_cover_fill(ui: &Ui, rect: Rect, thumbs: &[Thumb], tint: Color32) {
     let size = if aspect >= 1.0 { vec2(uv.width(), uv.height() / aspect) } else { vec2(uv.width() * aspect, uv.height()) };
     let url = steady_url(ui.ctx(), &t.url, px);
     paint_remote(ui, &url, rect, 0.0, Rect::from_center_size(uv.center(), size), tint);
+}
+
+/// Paint the cover cropped to fill `rect` whatever its shape (a carousel item, a hero
+/// card), keeping its centre, with each corner rounded as `corners` says.
+pub fn paint_cover_cropped(ui: &Ui, rect: Rect, thumbs: &[Thumb], corners: CornerRadius) {
+    if !ui.is_rect_visible(rect) || rect.width() <= 0.0 || rect.height() <= 0.0 {
+        return;
+    }
+    ui.painter().rect_filled(rect, corners, theme::glass(0.07));
+    let px = fetch_px((rect.width().max(rect.height()) * ui.ctx().pixels_per_point()) as u32);
+    let Some(t) = pick_thumb(thumbs, px.min(544)) else {
+        icon_at(ui, rect.center(), icon::MUSIC, rect.height().min(rect.width()) * 0.3, theme::text_faint());
+        return;
+    };
+    let uv = t.square_uv();
+    let aspect = rect.width() / rect.height();
+    let size = if aspect >= 1.0 { vec2(uv.width(), uv.height() / aspect) } else { vec2(uv.width() * aspect, uv.height()) };
+    let url = steady_url(ui.ctx(), &t.url, px);
+    paint_remote_rounded(ui, &url, rect, corners, Rect::from_center_size(uv.center(), size), Color32::WHITE);
 }
 
 /// Start loading a cover at `px` without drawing it, so it's ready when it appears.
@@ -1169,8 +1225,16 @@ fn h_scroll_on<R>(ui: &mut Ui, phone: bool, id: &str, nudge: i32, count: usize, 
         let pages = Pages { starts: &starts, step, max: (out.content_size.x - out.inner_rect.width()).max(0.0) };
         let touch = Touch { rect: shelf_rect(out.inner_rect, out.content_size, ui.clip_rect()), layer: ui.layer_id() };
         follow_horizontal_swipe(ui.ctx(), touch, out.state.clamped_offset().x, &pages, drag_id, held_id, target_id, anim_id);
+        // Swiped to its last page: the end is reached as the arrows reach it.
+        reached_end |= at_last_page(count, visible, step, out.state.clamped_offset().x);
     }
     (out.inner, reached_end)
+}
+
+/// Is a shelf of `count` items, `visible` to a page, scrolled `offset` to its last page?
+/// A shelf that fits on one page has no end to reach.
+fn at_last_page(count: usize, visible: usize, step: f32, offset: f32) -> bool {
+    count > visible && offset >= (count - visible) as f32 * step - 0.5
 }
 
 /// Where a shelf is on the screen. `inner` is the room the scroll area was offered, not
@@ -1215,29 +1279,10 @@ fn follow_horizontal_swipe(ctx: &egui::Context, touch: Touch, offset: f32, pages
     let (origin, latest, down, velocity) = ctx.input(|i| (i.pointer.press_origin(), i.pointer.latest_pos(), i.pointer.primary_down(), i.pointer.velocity()));
     let drag: Option<ShelfDrag> = ctx.data(|d| d.get_temp(drag_id));
     match (down, origin.filter(|o| touch.began_at(ctx, *o)), latest) {
-        (true, Some(origin), Some(now)) => {
-            let mut d = drag.unwrap_or(ShelfDrag { start_offset: offset, axis: None, dx: 0.0 });
-            let delta = now - origin;
-            d.dx = delta.x;
-            if d.axis.is_none() {
-                d.axis = drag_axis(delta);
-            }
-            if d.axis == Some(true) {
-                ctx.data_mut(|data| {
-                    data.insert_temp(held_id, (d.start_offset - delta.x).clamp(0.0, pages.max));
-                    data.insert_temp(shelf_swipe_id(), true);
-                });
-                ctx.request_repaint();
-            }
-            ctx.data_mut(|data| data.insert_temp(drag_id, d));
-        }
+        (true, Some(origin), Some(now)) => hold(ctx, drag, offset, now - origin, pages.max, drag_id, held_id),
         _ => {
             if let Some(d) = drag {
-                ctx.data_mut(|data| {
-                    data.remove::<ShelfDrag>(drag_id);
-                    data.remove::<f32>(held_id);
-                    data.remove::<bool>(shelf_swipe_id());
-                });
+                let_go(ctx, drag_id, held_id);
                 if d.axis == Some(true) {
                     // From the page it started on, one page the way the finger went (or
                     // back to it); the shelf glides there from where the finger left it.
@@ -1264,6 +1309,68 @@ fn follow_horizontal_swipe(ctx: &egui::Context, touch: Touch, offset: f32, pages
     }
 }
 
+/// A finger that came down on a shelf is still down, `delta` from where it landed: once
+/// it is going sideways the shelf (scrolled `offset`, at most `max`) goes with it.
+fn hold(ctx: &egui::Context, drag: Option<ShelfDrag>, offset: f32, delta: Vec2, max: f32, drag_id: egui::Id, held_id: egui::Id) {
+    let mut d = drag.unwrap_or(ShelfDrag { start_offset: offset, axis: None, dx: 0.0 });
+    d.dx = delta.x;
+    if d.axis.is_none() {
+        d.axis = drag_axis(delta);
+    }
+    if d.axis == Some(true) {
+        ctx.data_mut(|data| {
+            data.insert_temp(held_id, (d.start_offset - delta.x).clamp(0.0, max));
+            data.insert_temp(shelf_swipe_id(), true);
+        });
+        ctx.request_repaint();
+    }
+    ctx.data_mut(|data| data.insert_temp(drag_id, d));
+}
+
+/// The finger is up: the shelf is its own again, and so is the page.
+fn let_go(ctx: &egui::Context, drag_id: egui::Id, held_id: egui::Id) {
+    ctx.data_mut(|data| {
+        data.remove::<ShelfDrag>(drag_id);
+        data.remove::<f32>(held_id);
+        data.remove::<bool>(shelf_swipe_id());
+    });
+}
+
+/// A row wider than the screen that has no pages (chips): on a phone it follows a
+/// finger going sideways and stays where it is let go; a finger going up or down is
+/// the page's.
+pub fn h_strip<R>(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    h_strip_on(ui, crate::platform::phone(), id, add)
+}
+
+/// [`h_strip`], told whether a finger swipes it (a phone) or a wheel does.
+fn h_strip_on<R>(ui: &mut Ui, phone: bool, id: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let sid = egui::Id::unique(("hstrip", id));
+    let (drag_id, held_id) = (sid.with("strip-drag"), sid.with("strip-held"));
+    let mut area = egui::ScrollArea::horizontal().id_salt(sid).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden);
+    if phone {
+        // As for a shelf: its own drag would take the page's vertical swipes too.
+        area = area.scroll_source(egui::scroll_area::ScrollSource { drag: egui::scroll_area::DragScroll::Never, ..Default::default() });
+        if let Some(x) = ui.ctx().data(|d| d.get_temp::<f32>(held_id)) {
+            area = area.horizontal_scroll_offset(x);
+        }
+    }
+    let out = area.show(ui, |ui| ui.horizontal(|ui| add(ui)).inner);
+    if phone {
+        let ctx = ui.ctx();
+        let touch = Touch { rect: shelf_rect(out.inner_rect, out.content_size, ui.clip_rect()), layer: ui.layer_id() };
+        let max = (out.content_size.x - out.inner_rect.width()).max(0.0);
+        let (origin, latest, down) = ctx.input(|i| (i.pointer.press_origin(), i.pointer.latest_pos(), i.pointer.primary_down()));
+        let drag: Option<ShelfDrag> = ctx.data(|d| d.get_temp(drag_id));
+        match (down, origin.filter(|o| touch.began_at(ctx, *o)), latest) {
+            (true, Some(origin), Some(now)) => hold(ctx, drag, out.state.clamped_offset().x, now - origin, max, drag_id, held_id),
+            _ if drag.is_some() => let_go(ctx, drag_id, held_id),
+            _ => {}
+        }
+    }
+    out.inner
+}
+
 /// The skeleton's light band sweeping across `r`, for anything still loading.
 pub fn shimmer_band(ui: &Ui, r: Rect, radius: f32, time: f64) {
     let phase = ((time * 0.8) % 1.6) as f32 - 0.3;
@@ -1277,6 +1384,11 @@ pub fn shimmer_band(ui: &Ui, r: Rect, radius: f32, time: f64) {
 /// Paint a remote image into `rect`: the skeleton's shimmer while it downloads (not
 /// egui's spinner), then a quick fade-in. One already loaded just shows.
 pub fn paint_remote(ui: &Ui, url: &str, rect: Rect, radius: f32, uv: Rect, tint: Color32) {
+    paint_remote_rounded(ui, url, rect, CornerRadius::same(radius as u8), uv, tint);
+}
+
+/// [`paint_remote`] with each corner's own radius.
+pub fn paint_remote_rounded(ui: &Ui, url: &str, rect: Rect, corners: CornerRadius, uv: Rect, tint: Color32) {
     const FADE: f64 = 0.22;
     let ctx = ui.ctx();
     let now = ctx.input(|i| i.time);
@@ -1295,11 +1407,11 @@ pub fn paint_remote(ui: &Ui, url: &str, rect: Rect, radius: f32, uv: Rect, tint:
             if a < 1.0 {
                 ctx.request_repaint();
             }
-            egui::Image::from_texture(texture).uv(uv).corner_radius(CornerRadius::same(radius as u8)).tint(tint.gamma_multiply(theme::ease_out(a))).paint_at(ui, rect);
+            egui::Image::from_texture(texture).uv(uv).corner_radius(corners).tint(tint.gamma_multiply(theme::ease_out(a))).paint_at(ui, rect);
         }
         Ok(egui::load::TexturePoll::Pending { .. }) => {
             ctx.data_mut(|d| d.insert_temp::<Option<f64>>(id, None));
-            shimmer_band(ui, rect, radius, now);
+            shimmer_band(ui, rect, corners.average(), now);
             ctx.request_repaint_after(std::time::Duration::from_millis(66));
         }
         // A failed image keeps its plain placeholder.
@@ -1556,6 +1668,73 @@ mod shelf_scroll_tests {
         assert_eq!(moved, [0.0; 6]);
     }
 
+    /// A phone page with a strip of twelve 100-point chips under a 100-point gap, then
+    /// room to scroll: 400 x 600 in a headless egui.
+    struct Strip {
+        ctx: egui::Context,
+        time: f64,
+    }
+
+    impl Strip {
+        fn new() -> Strip {
+            let mut s = Strip { ctx: egui::Context::default(), time: 0.0 };
+            s.frame(vec![]);
+            s.frame(vec![]);
+            s
+        }
+
+        /// One frame; where the first chip's left edge and the strip's top were drawn.
+        fn frame(&mut self, events: Vec<egui::Event>) -> (f32, f32) {
+            self.time += 1.0 / 60.0;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 600.0))), time: Some(self.time), events, ..Default::default() };
+            let mut at = (0.0, 0.0);
+            let out = self.ctx.run_ui(input, |ui| {
+                egui::ScrollArea::vertical().id_salt("page").auto_shrink(false).show(ui, |ui| {
+                    ui.add_space(100.0);
+                    super::h_strip_on(ui, true, "test-strip", |ui| {
+                        at = (ui.cursor().min.x, ui.cursor().min.y);
+                        for _ in 0..12 {
+                            ui.allocate_exact_size(vec2(100.0, 48.0), Sense::click());
+                        }
+                    });
+                    ui.add_space(900.0);
+                });
+            });
+            out.drop_without_applying_deltas();
+            at
+        }
+
+        /// A finger goes down at `from`, slides to `to` and lifts; how far the strip
+        /// has scrolled sideways once it is up.
+        fn swipe(&mut self, from: Pos2, to: Pos2) -> f32 {
+            let before = self.frame(vec![]).0;
+            self.frame(vec![egui::Event::PointerMoved(from), egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            self.frame(vec![egui::Event::PointerMoved(to)]);
+            self.frame(vec![]);
+            self.frame(vec![egui::Event::PointerButton { pos: to, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+            self.frame(vec![]);
+            (before - self.frame(vec![]).0).round()
+        }
+    }
+
+    #[test]
+    fn a_strip_follows_a_finger_sideways_and_stays_where_it_is_let_go() {
+        let mut s = Strip::new();
+        assert_eq!(s.swipe(pos2(300.0, 124.0), pos2(180.0, 128.0)), 120.0);
+        // And back again, as far as its start.
+        assert_eq!(s.swipe(pos2(100.0, 124.0), pos2(390.0, 126.0)), -120.0);
+    }
+
+    #[test]
+    fn a_strip_leaves_a_finger_going_down_the_page_alone() {
+        assert_eq!(Strip::new().swipe(pos2(300.0, 124.0), pos2(304.0, 220.0)), 0.0);
+    }
+
+    #[test]
+    fn a_swipe_below_a_strip_does_not_move_it() {
+        assert_eq!(Strip::new().swipe(pos2(300.0, 300.0), pos2(180.0, 304.0)), 0.0);
+    }
+
     #[test]
     fn arrows_visit_aligned_pages_in_both_directions() {
         let pages = shelf_page_starts(14, 5);
@@ -1566,6 +1745,21 @@ mod shelf_scroll_tests {
         }
         assert_eq!(target, 5.0 * 198.0);
         assert_eq!(shelf_page_target(&pages, 198.0, 0.0, -1), 0.0);
+    }
+
+    #[test]
+    fn a_shelf_swiped_to_its_last_page_has_reached_its_end() {
+        // Eleven items, three to a page of 436 points each: the last page starts at the eighth.
+        assert!(super::at_last_page(11, 3, 436.0, 8.0 * 436.0));
+        assert!(super::at_last_page(11, 3, 436.0, 8.0 * 436.0 - 0.3), "landed a hair short");
+        assert!(!super::at_last_page(11, 3, 436.0, 6.0 * 436.0));
+        assert!(!super::at_last_page(11, 3, 436.0, 0.0));
+    }
+
+    #[test]
+    fn a_shelf_that_fits_one_page_has_no_end_to_reach() {
+        assert!(!super::at_last_page(3, 3, 436.0, 0.0));
+        assert!(!super::at_last_page(2, 3, 436.0, 0.0));
     }
 
     #[test]

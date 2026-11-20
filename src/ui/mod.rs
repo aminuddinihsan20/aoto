@@ -17,6 +17,7 @@ mod karaoke;
 mod keys;
 mod lists;
 mod lyric_prefs;
+mod m3;
 mod mini;
 mod notes;
 mod nowplaying;

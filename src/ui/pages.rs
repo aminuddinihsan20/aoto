@@ -2841,8 +2841,16 @@ pub(super) fn divider(ui: &mut Ui) {
     ui.painter().rect_filled(rect, 0.0, theme::glass(0.07));
 }
 
+/// The room a switch takes, for a place measured by hand.
+pub(super) fn toggle_size() -> Vec2 {
+    if crate::material::on() { super::m3::SWITCH } else { vec2(44.0, 26.0) }
+}
+
 /// On/off switch tinted with the accent.
 pub(super) fn toggle(ui: &mut Ui, on: &mut bool, name: &str) -> egui::Response {
+    if crate::material::on() {
+        return super::m3::switch(ui, on, name);
+    }
     let (rect, mut resp) = ui.allocate_exact_size(vec2(44.0, 26.0), Sense::click());
     if resp.clicked() {
         *on = !*on;
