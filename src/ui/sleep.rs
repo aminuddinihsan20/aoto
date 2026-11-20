@@ -266,7 +266,7 @@ fn cancel_id() -> egui::Id {
 }
 
 /// Text and icons on a fill of the accent: dark on a pale one.
-fn on_accent(accent: Color32) -> Color32 {
+pub(super) fn on_accent(accent: Color32) -> Color32 {
     if accent.r() as u32 + accent.g() as u32 + accent.b() as u32 > 480 { Color32::from_gray(15) } else { Color32::WHITE }
 }
 
@@ -300,7 +300,7 @@ const PILL_H: f32 = 52.0;
 /// One of the sheet's pills, filled in the accent while `on`; `outlined`: a line
 /// round it instead of a fill until then. True when tapped.
 #[allow(clippy::too_many_arguments)]
-fn pill(ui: &mut Ui, rect: Rect, id: egui::Id, label: &str, glyph: Option<char>, on: bool, outlined: bool, accent: Color32) -> bool {
+pub(super) fn pill(ui: &mut Ui, rect: Rect, id: egui::Id, label: &str, glyph: Option<char>, on: bool, outlined: bool, accent: Color32) -> bool {
     let resp = named(ui.interact(rect, id, Sense::click()), label);
     let t = theme::anim_bool(ui.ctx(), id.with("on"), on, 0.15);
     let press = if resp.is_pointer_button_down_on() { 0.08 } else { 0.0 };

@@ -3,7 +3,9 @@
 //! downloads folder. A downloaded song plays from its file, so it works offline.
 //!
 //! `downloads.json` in the data dir maps video ids to their files; a file that was
-//! moved or deleted just stops counting as downloaded.
+//! moved or deleted just stops counting as downloaded. `download_collections.json`
+//! beside it keeps the albums and playlists that were downloaded whole, so their saved
+//! songs can be shown together.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,7 +13,7 @@ use std::sync::{Arc, LazyLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Track;
+use crate::model::{Thumb, Track};
 use crate::stream::Shared;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -28,7 +30,44 @@ struct Entry {
     song: Option<Track>,
 }
 
+/// An album or playlist that was asked for whole.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Kept {
+    pub id: String,
+    pub title: String,
+    pub is_album: bool,
+    pub thumbs: Vec<Thumb>,
+    /// Its songs (video ids) in its own order, saved or not.
+    pub songs: Vec<String>,
+}
+
+/// A kept album or playlist as the Downloads page shows it: the songs of it that are
+/// saved, and what they take on disk.
+pub struct Saved {
+    pub id: String,
+    pub title: String,
+    pub is_album: bool,
+    pub thumbs: Vec<Thumb>,
+    pub songs: Vec<Track>,
+    pub bytes: u64,
+}
+
+/// Keep `kept`, in place of what was kept of it before, newest first.
+fn keep(list: &mut Vec<Kept>, kept: Kept) {
+    list.retain(|k| k.id != kept.id);
+    list.insert(0, kept);
+}
+
+/// What is saved of `kept`: `file` gives a saved song and its size. `None` when
+/// nothing of it is saved.
+fn saved_of(kept: &Kept, file: impl Fn(&str) -> Option<(Track, u64)>) -> Option<Saved> {
+    let (songs, sizes): (Vec<Track>, Vec<u64>) = kept.songs.iter().filter_map(|id| file(id)).unzip();
+    (!songs.is_empty()).then(|| Saved { id: kept.id.clone(), title: kept.title.clone(), is_album: kept.is_album, thumbs: kept.thumbs.clone(), songs, bytes: sizes.iter().sum() })
+}
+
 struct State {
+    /// The albums and playlists downloaded whole, newest first.
+    kept: Vec<Kept>,
     index: HashMap<String, Entry>,
     /// Where the index is saved (the data dir's downloads.json).
     file: PathBuf,
@@ -39,7 +78,7 @@ struct State {
 }
 
 static STATE: LazyLock<RwLock<State>> =
-    LazyLock::new(|| RwLock::new(State { index: HashMap::new(), file: PathBuf::new(), folder: default_folder(), tree: None }));
+    LazyLock::new(|| RwLock::new(State { kept: Vec::new(), index: HashMap::new(), file: PathBuf::new(), folder: default_folder(), tree: None }));
 
 fn format_tree(uri: &str, label: &str) -> String {
     format!("{uri}\n{label}")
@@ -81,6 +120,54 @@ pub fn human_size(bytes: u64) -> String {
 pub fn total_bytes() -> u64 {
     let st = STATE.read().unwrap();
     st.index.values().filter_map(|e| std::fs::metadata(&e.path).ok()).map(|m| m.len()).sum()
+}
+
+/// The room on the disk `folder` is (or will be) on, in bytes: what an app may still
+/// fill, and the disk's size. `None` where the system has no way to ask.
+#[cfg(unix)]
+pub fn disk_space(folder: &Path) -> Option<(u64, u64)> {
+    use std::os::unix::ffi::OsStrExt;
+    // A folder not made yet: the one above it is on the same disk.
+    let at = folder.ancestors().find(|p| p.exists())?;
+    let path = std::ffi::CString::new(at.as_os_str().as_bytes()).ok()?;
+    let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: `path` is a NUL-terminated string, and `stat` is room for the one
+    // `statvfs` the call fills in when it returns 0.
+    let stat = unsafe {
+        if libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) != 0 {
+            return None;
+        }
+        stat.assume_init()
+    };
+    // The fields' widths differ from system to system.
+    #[allow(clippy::unnecessary_cast)]
+    let (block, free, all) = (stat.f_frsize as u64, stat.f_bavail as u64, stat.f_blocks as u64);
+    Some((free * block, all * block))
+}
+
+#[cfg(not(unix))]
+pub fn disk_space(_folder: &Path) -> Option<(u64, u64)> {
+    None
+}
+
+/// An album or playlist is being downloaded whole: remember what it holds (as of now).
+pub fn keep_collection(kept: Kept) {
+    let mut st = STATE.write().unwrap();
+    keep(&mut st.kept, kept);
+    if let Ok(json) = serde_json::to_vec(&st.kept) {
+        let _ = std::fs::write(st.file.with_file_name("download_collections.json"), json);
+    }
+}
+
+/// The albums and playlists downloaded whole that have a song saved, newest first.
+pub fn collections() -> Vec<Saved> {
+    let st = STATE.read().unwrap();
+    let file = |id: &str| {
+        let entry = st.index.get(id)?;
+        let size = std::fs::metadata(&entry.path).ok().filter(|m| m.is_file())?.len();
+        Some((entry.song.clone()?, size))
+    };
+    st.kept.iter().filter_map(|kept| saved_of(kept, file)).collect()
 }
 
 /// The folder chosen for downloads (address, name), on Android.
@@ -125,6 +212,7 @@ pub fn init(data_dir: &Path, folder: &str) {
     let index = std::fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     let mut st = STATE.write().unwrap();
     st.index = index;
+    st.kept = std::fs::read(file.with_file_name("download_collections.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
     st.tree = std::fs::read_to_string(file.with_file_name("download_tree")).ok().and_then(|t| parse_tree(&t));
     st.file = file;
     st.folder = if folder.is_empty() { default_folder() } else { PathBuf::from(folder) };
@@ -323,6 +411,51 @@ mod tests {
         assert_eq!(parse_tree(""), None);
         assert_eq!(parse_tree("only-one-line"), None);
         assert_eq!(parse_tree("\nlabel"), None, "an empty address is no folder");
+    }
+
+    fn song(id: &str) -> Track {
+        Track { id: id.into(), title: format!("Song {id}"), artists: Vec::new(), album: None, duration: None, thumbs: Vec::new(), track_nr: None, plays: None, music_video: false }
+    }
+
+    fn kept(id: &str, songs: &[&str]) -> Kept {
+        Kept { id: id.into(), title: format!("List {id}"), is_album: false, thumbs: Vec::new(), songs: songs.iter().map(|s| (*s).to_owned()).collect() }
+    }
+
+    #[test]
+    fn a_kept_collection_shows_its_saved_songs_in_its_own_order_and_what_they_take() {
+        // "b" was never saved (it failed, or the download was cancelled).
+        let file = |id: &str| match id {
+            "a" => Some((song("a"), 3_000)),
+            "c" => Some((song("c"), 4_000)),
+            _ => None,
+        };
+        let saved = saved_of(&kept("p", &["c", "b", "a"]), file).unwrap();
+        assert_eq!(saved.songs.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["c", "a"]);
+        assert_eq!((saved.title.as_str(), saved.bytes), ("List p", 7_000));
+    }
+
+    #[test]
+    fn a_kept_collection_with_no_song_saved_is_not_shown() {
+        assert!(saved_of(&kept("p", &["a", "b"]), |_| None).is_none());
+    }
+
+    #[test]
+    fn keeping_a_collection_again_brings_it_up_to_date_and_first() {
+        let mut list = Vec::new();
+        keep(&mut list, kept("p", &["a"]));
+        keep(&mut list, kept("r", &["x"]));
+        keep(&mut list, kept("p", &["a", "b"]));
+        assert_eq!(list.iter().map(|k| k.id.as_str()).collect::<Vec<_>>(), ["p", "r"]);
+        assert_eq!(list[0].songs, ["a", "b"]);
+    }
+
+    #[test]
+    fn the_room_left_is_that_of_the_disk_the_folder_is_on() {
+        let dir = std::env::temp_dir();
+        let (free, total) = disk_space(&dir).expect("a unix system tells");
+        assert!(free > 0 && free <= total, "{free} of {total}");
+        // A folder not made yet is on the disk of the folder above it.
+        assert!(disk_space(&dir.join("not-made-yet").join("downloads")).is_some());
     }
 
     #[test]

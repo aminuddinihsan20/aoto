@@ -51,8 +51,9 @@ pub enum Req {
     /// Upload audio files to the account's library.
     Upload(Vec<PathBuf>),
     /// Save a song's audio to the downloads folder. `for_video`: the music video it's the
-    /// song version of, which then plays it from the file (offline too).
-    Download { track: Track, for_video: Option<String> },
+    /// song version of, which then plays it from the file (offline too). `ticket` comes
+    /// back with the answer; `stop` turning true gives the download up.
+    Download { track: Track, for_video: Option<String>, ticket: u64, stop: tokio::sync::watch::Receiver<bool> },
     Lyrics(Track),
     /// SponsorBlock's parts of a video to skip.
     Segments { video_id: String },
@@ -286,8 +287,11 @@ pub enum Resp {
     ServerQueue(ytm::ServerQueue),
     /// Upload finished: how many files went up, and which failed.
     Uploaded { done: usize, failed: Vec<String> },
-    /// `copied`: Android's copy into the listener's chosen folder (its name, or why not).
-    Downloaded { title: String, path: PathBuf, copied: Option<Result<String, String>> },
+    /// `bytes`: the saved file's size. `copied`: Android's copy into the listener's chosen
+    /// folder (its name, or why not).
+    Downloaded { ticket: u64, id: String, title: String, path: PathBuf, bytes: u64, copied: Option<Result<String, String>> },
+    /// A download that saved nothing: it failed, or was told to stop.
+    DownloadFailed { ticket: u64, id: String, title: String, error: String },
     /// Every source's lyrics for a song (empty when nobody has them).
     Lyrics { video_id: String, lyrics: LyricsSet },
     Segments { video_id: String, segments: Vec<crate::sponsorblock::Segment> },
@@ -651,6 +655,10 @@ impl Backend {
             Req::Album { id, load } | Req::Playlist { id, load, .. } => Some((id.clone(), *load)),
             _ => None,
         };
+        let download = match &req {
+            Req::Download { track, ticket, .. } => Some((*ticket, track.id.clone(), track.title.clone())),
+            _ => None,
+        };
         let this = self.clone();
         let t0 = std::time::Instant::now();
         let epoch = self.api.epoch();
@@ -667,9 +675,11 @@ impl Backend {
                 Ok(resp) => resp,
                 Err(e) if e.is_panic() => {
                     log::error!("{what}: request panicked");
-                    match play_gen {
-                        Some(generation) => Some(Resp::PlayError { generation, msg: "YouTube didn't respond properly".into() }),
-                        None => (!quiet).then(|| Resp::Error(format!("{what} failed: YouTube didn't respond properly"))),
+                    match (play_gen, download) {
+                        (Some(generation), _) => Some(Resp::PlayError { generation, msg: "YouTube didn't respond properly".into() }),
+                        // The queue waits for every download's answer.
+                        (None, Some((ticket, id, title))) => Some(Resp::DownloadFailed { ticket, id, title, error: "YouTube didn't respond properly".into() }),
+                        (None, None) => (!quiet).then(|| Resp::Error(format!("{what} failed: YouTube didn't respond properly"))),
                     }
                 }
                 Err(_) => None,
@@ -826,16 +836,28 @@ impl Backend {
                     };
                     Resp::PlayQueue { target, tracks }
                 }
-                Req::Download { track: t, for_video } => {
-                    let path = self.download(&t, for_video).await?;
-                    // Android: a copy into the folder the listener chose.
-                    let copied = if cfg!(target_os = "android") {
-                        let from = path.clone();
-                        Some(tokio::task::spawn_blocking(move || crate::downloads::export(&from)).await?)
-                    } else {
-                        None
+                Req::Download { track: t, for_video, ticket, stop } => {
+                    let saved = tokio::select! {
+                        saved = self.download(&t, for_video) => saved.inspect_err(|e| log::warn!("download of {} failed: {e:#}", t.id)),
+                        () = told_to_stop(stop) => {
+                            log::info!("download of {} stopped", t.id);
+                            Err(anyhow::anyhow!("stopped"))
+                        }
                     };
-                    Resp::Downloaded { title: t.title, path, copied }
+                    match saved {
+                        Ok(path) => {
+                            let bytes = std::fs::metadata(&path).map_or(0, |m| m.len());
+                            // Android: a copy into the folder the listener chose.
+                            let copied = if cfg!(target_os = "android") {
+                                let from = path.clone();
+                                Some(tokio::task::spawn_blocking(move || crate::downloads::export(&from)).await.unwrap_or_else(|e| Err(e.to_string())))
+                            } else {
+                                None
+                            };
+                            Resp::Downloaded { ticket, id: t.id, title: t.title, path, bytes, copied }
+                        }
+                        Err(e) => Resp::DownloadFailed { ticket, id: t.id, title: t.title, error: e.to_string() },
+                    }
                 }
                 Req::Play { video_id, generation, at, report, song_of, song, track } => match self.start_playback(&video_id, song_of.as_ref(), song, track.as_ref(), generation, at, report).await {
                     Ok(()) => return Ok(None),
@@ -1401,6 +1423,7 @@ impl Backend {
     }
 
     /// Download a song into the downloads folder, at the best quality the account gets.
+    /// Dropped before it is done (see `told_to_stop`), it fetches no more.
     async fn download(&self, t: &Track, for_video: Option<String>) -> anyhow::Result<PathBuf> {
         let (source, s) = self.resolve(&t.id, true, Some(t), false, false).await?;
         log::info!("download {}: {} bytes from {source:?}", t.id, s.size);
@@ -1933,6 +1956,14 @@ pub fn art_url(t: &Track) -> Option<String> {
     model::pick(&t.thumbs, 120).map(|u| sized(u, 544))
 }
 
+/// Waits until `stop` turns true: the download it belongs to is given up then. One whose
+/// stop nobody holds any more just goes on.
+async fn told_to_stop(mut stop: tokio::sync::watch::Receiver<bool>) {
+    if stop.wait_for(|stopped| *stopped).await.is_err() {
+        std::future::pending::<()>().await;
+    }
+}
+
 #[cfg(test)]
 mod explore_tests {
     use super::*;
@@ -1970,5 +2001,28 @@ mod explore_tests {
         let t = |id: &str| model::Track { id: id.into(), title: id.into(), artists: vec![], album: None, duration: None, thumbs: vec![], track_nr: None, plays: None, music_video: false };
         let out = weave(vec![vec![t("s1"), t("s2"), t("s3")], vec![t("v1"), t("s2"), t("v3")]]);
         assert_eq!(out.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["s1", "v1", "s2", "s3", "v3"]);
+    }
+}
+
+#[cfg(test)]
+mod download_stop_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn a_download_told_to_stop_gives_up_at_once() {
+        let (stop, told) = tokio::sync::watch::channel(false);
+        let waiting = tokio::spawn(told_to_stop(told));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!waiting.is_finished(), "not before it is told");
+        stop.send_replace(true);
+        tokio::time::timeout(Duration::from_secs(2), waiting).await.expect("it stops").unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_download_nobody_can_stop_any_more_goes_on() {
+        let (stop, told) = tokio::sync::watch::channel(false);
+        drop(stop);
+        assert!(tokio::time::timeout(Duration::from_millis(50), told_to_stop(told)).await.is_err());
     }
 }

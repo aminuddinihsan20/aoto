@@ -8,6 +8,7 @@ mod actions;
 mod collections;
 mod dev;
 mod dialogs;
+mod downloading;
 mod glyphs;
 mod integrations;
 mod jam;
@@ -81,6 +82,8 @@ pub enum Page {
     LocalAlbum(String),
     /// Every local song of every folder, as one list.
     LocalSongs,
+    /// The saved songs of an album or playlist that was downloaded whole (its id).
+    Downloaded(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
@@ -358,7 +361,9 @@ pub struct App {
     /// Android: answers from the folder chooser and the music lists (see `storage`).
     storage: storage::Shared,
     /// A download held until a download folder is chosen.
-    pending_download: Option<(Track, Option<String>)>,
+    pending_download: Option<crate::download_queue::Ask>,
+    /// The download queue and what it has under way (see `downloading`).
+    downloads: downloading::Downloading,
     liked: HashSet<String>,
     /// Songs whose unlike is queued and hasn't gone through yet.
     unliking: HashMap<String, Track>,
@@ -635,6 +640,7 @@ impl App {
         // and keep the Start menu link pointing at this exe.
         crate::appicon::sync_shortcuts(app_icon, backend.data_dir());
         crate::downloads::init(backend.data_dir(), &get("download_dir").unwrap_or_default());
+        let downloads = downloading::Downloading::load(backend.data_dir(), get("download_wifi_only").is_none_or(|v| v == "1"));
         crate::local::init(backend.data_dir());
         crate::lastfm::init(backend.data_dir());
         let logged_in = backend.is_logged_in();
@@ -722,6 +728,7 @@ impl App {
             picked_uploads: Default::default(),
             storage: Default::default(),
             pending_download: None,
+            downloads,
             liked: HashSet::new(),
             unliking: HashMap::new(),
             selection: Selection::default(),
@@ -901,6 +908,7 @@ impl App {
             Ok("downloads") => app.go(Page::Downloads),
             Ok(p) if p.starts_with("local:") => app.go(Page::LocalFolder(p[6..].to_owned())),
             Ok("localsongs") => app.go(Page::LocalSongs),
+            Ok(p) if p.starts_with("downloaded:") => app.go(Page::Downloaded(p[11..].to_owned())),
             Ok(p) if p.starts_with("localalbum:") => app.go(Page::LocalAlbum(p[11..].replace('|', "\u{1f}"))),
             Ok("settings") => app.go(Page::Settings),
             Ok("transfer") => app.go(Page::Transfer),
@@ -1334,6 +1342,9 @@ impl eframe::App for App {
         if let Some(wait) = self.sleep_wake() {
             ctx.request_repaint_after(wait);
         }
+        if let Some(wait) = self.downloads_wake() {
+            ctx.request_repaint_after(wait);
+        }
         let np = widgets::NowPlaying {
             song: self.current_id().map(str::to_owned),
             source: self.queue_source.clone(),
@@ -1521,6 +1532,9 @@ impl eframe::App for App {
             sleep::sheet(self, &ctx);
             theme::set_mode(&ctx, pages);
         }
+        if phone {
+            downloading::sheet(self, &ctx);
+        }
         self.draw_dialog(&ctx);
         notes::card(self, &ctx);
         notes::dialog(self, &ctx);
@@ -1627,6 +1641,7 @@ impl eframe::App for App {
         storage.set_string("play_songs", b(self.play_songs));
         let folder = crate::downloads::folder();
         storage.set_string("download_dir", if folder == crate::downloads::default_folder() { String::new() } else { folder.display().to_string() });
+        storage.set_string("download_wifi_only", b(self.downloads.queue.wifi_only()));
         let (device, device_name) = self.output_device.clone().unzip();
         storage.set_string("output_device", device.unwrap_or_default());
         storage.set_string("output_device_name", device_name.unwrap_or_default());

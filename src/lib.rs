@@ -15,6 +15,7 @@ mod bidi;
 mod deeplink;
 mod discord;
 mod dash;
+mod download_queue;
 mod downloads;
 mod hires;
 mod images;

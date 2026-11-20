@@ -77,6 +77,7 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
             Page::LocalFolder(uri) => local_folder(app, ui, uri, now),
             Page::LocalAlbum(key) => local_album(app, ui, key, now),
             Page::LocalSongs => local_songs(app, ui, now),
+            Page::Downloaded(id) => super::downloading::saved_page(app, ui, id, now),
         }
         // Room to scroll the last rows clear of the player's frosted strip.
         ui.add_space(96.0);
@@ -729,6 +730,8 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     let mut toggle_search = false;
     let mut start_select = false;
     let mut stop_select = false;
+    let mut download = false;
+    let downloading = app.downloads.queue.collection(id).is_some();
     ui.add_space(18.0);
     // Beside the art on a wide screen; below it, and smaller, on a phone.
     let phone = crate::platform::phone();
@@ -773,6 +776,10 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
             let owned = !is_album && c.owned;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
+                // A phone downloads the whole of it: its sheet asks first, and shows one on its way.
+                if phone && circle_action(ui, CircleGlyph::Char(icon::DOWNLOAD), if downloading { "Downloading" } else { "Download" }, downloading).clicked() {
+                    download = true;
+                }
                 play_pill(ui, acts, &target, tracks);
                 if circle_action(ui, CircleGlyph::Char(icon::SHUFFLE), "Shuffle", false).clicked() && !tracks.is_empty() {
                     let mut t = tracks.clone();
@@ -902,6 +909,9 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     list(ui, &rows, &app.liked, shown, !is_album, number, ListCtx { sel: &mut app.selection, page: &app.page, own }, acts);
     if more {
         widgets::skeleton_rows(ui, now, 3);
+    }
+    if download {
+        super::downloading::open_sheet(app, id);
     }
 }
 
@@ -1250,7 +1260,14 @@ fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
     let songs = crate::downloads::list();
     ui.add_space(6.0);
     storage_card(app, ui, songs.len());
-    ui.add_space(28.0);
+    ui.add_space(10.0);
+    super::downloading::wifi_row(app, ui);
+    if super::downloading::any_on_their_way(app) {
+        ui.add_space(18.0);
+        phone_section(ui, "Downloading", "");
+        super::downloading::on_their_way(app, ui);
+    }
+    ui.add_space(22.0);
     phone_section(ui, "Music on this phone", "Only the folders you add are read. Ringtones and other sounds stay out.");
     local_tabs(app, ui);
     match app.local_tab {
@@ -1264,6 +1281,8 @@ fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
         nothing_saved(ui);
         return;
     }
+    // The albums and playlists downloaded whole, then every saved song.
+    super::downloading::saved_collections(app, ui);
     play_shuffle(app, ui, &songs);
     ui.add_space(16.0);
     let rows = Rows::new(app, now);
@@ -1295,12 +1314,21 @@ fn play_shuffle(app: &mut App, ui: &mut Ui, songs: &[Track]) {
     }
 }
 
-/// Where downloads go and what they take up, with a way to change it.
+/// Where downloads go and what they take up, with a way to change it, and the room
+/// left on the phone where the system tells it.
 fn storage_card(app: &mut App, ui: &mut Ui, count: usize) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 84.0), Sense::hover());
+    use super::downloading::{DISK_H, disk_usage};
+    let used = crate::downloads::total_bytes();
+    let disk = crate::downloads::disk_space(&crate::downloads::folder());
+    let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), 84.0 + if disk.is_some() { DISK_H } else { 0.0 }), Sense::hover());
+    let rect = Rect::from_min_size(card.min, vec2(card.width(), 84.0));
     let painter = ui.painter();
-    painter.rect_filled(rect, 22.0, theme::glass(0.075));
-    painter.rect_stroke(rect, 22.0, egui::Stroke::new(1.0, theme::glass(0.09)), egui::StrokeKind::Inside);
+    painter.rect_filled(card, 22.0, theme::glass(0.075));
+    painter.rect_stroke(card, 22.0, egui::Stroke::new(1.0, theme::glass(0.09)), egui::StrokeKind::Inside);
+    if let Some((free, total)) = disk {
+        let room = Rect::from_min_max(pos2(card.left() + 18.0, rect.bottom() - 4.0), pos2(card.right() - 18.0, card.bottom()));
+        disk_usage(ui, room, used, free, total, app.accent_color());
+    }
     let art = Rect::from_center_size(pos2(rect.left() + 18.0 + 25.0, rect.center().y), Vec2::splat(50.0));
     let tex = widgets::folder_art(ui.ctx(), "downloads");
     painter.image(tex.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
@@ -1310,7 +1338,7 @@ fn storage_card(app: &mut App, ui: &mut Ui, count: usize) {
         None if crate::platform::HAS_SAF => "Choose where to save".to_owned(),
         None => "Saved on this device".to_owned(),
     };
-    let summary = format!("{} \u{2022} {} song{}", crate::downloads::human_size(crate::downloads::total_bytes()), count, if count == 1 { "" } else { "s" });
+    let summary = format!("{} \u{2022} {} song{}", crate::downloads::human_size(used), count, if count == 1 { "" } else { "s" });
     let text_l = art.right() + 14.0;
     let chip_w = 82.0;
     let text_w = (rect.right() - chip_w - 22.0 - text_l).max(40.0);
@@ -1428,7 +1456,7 @@ fn song_preview(app: &mut App, ui: &mut Ui) {
 }
 
 /// A list of local songs under a heading: Play / Shuffle and the rounded group.
-fn local_song_page(app: &mut App, ui: &mut Ui, title: &str, sub: &str, songs: Vec<Track>, now: f64) {
+pub(super) fn local_song_page(app: &mut App, ui: &mut Ui, title: &str, sub: &str, songs: Vec<Track>, now: f64) {
     page_title(ui, title);
     ui.add_space(2.0);
     ui.label(RichText::new(sub).font(theme::regular(14.0)).color(theme::text_dim()));

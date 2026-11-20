@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use super::App;
-use crate::backend::Req;
-use crate::model::Track;
+use crate::download_queue::Ask;
 use crate::platform::LOGIN_CANCELLED;
 
 /// What a chosen folder is for.
@@ -77,8 +76,8 @@ impl App {
 
     /// A download asked for with no download folder chosen yet: choose it first, once,
     /// then the download goes ahead.
-    pub(super) fn download_after_folder(&mut self, track: Track, for_video: Option<String>) {
-        self.pending_download = Some((track, for_video));
+    pub(super) fn download_after_folder(&mut self, ask: Ask) {
+        self.pending_download = Some(ask);
         self.toast("Choose where downloads are saved: once, then they go there");
         self.ask_folder(Purpose::Downloads);
     }
@@ -95,9 +94,8 @@ impl App {
                 (Purpose::Downloads, Ok((uri, label))) => {
                     crate::downloads::set_tree(&uri, &label);
                     self.toast(format!("Downloads are saved to {}", crate::local::folder_name(&label)));
-                    if let Some((track, for_video)) = self.pending_download.take() {
-                        self.toast(format!("Downloading \u{201c}{}\u{201d}", track.title));
-                        self.backend.request(Req::Download { track, for_video });
+                    if let Some(ask) = self.pending_download.take() {
+                        self.queue_download(ask);
                     }
                 }
                 (Purpose::Downloads, Err(e)) => {

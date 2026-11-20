@@ -31,6 +31,7 @@ impl App {
         while let Ok(r) = self.ch.resp_rx.try_recv() {
             self.on_resp(r, now);
         }
+        self.tick_downloads();
         while let Ok(ev) = self.ch.audio_rx.try_recv() {
             match ev {
                 AudioEvent::Finished { generation } if generation == self.generation && self.jam.follows() => {}
@@ -276,14 +277,11 @@ impl App {
                     self.loading = false;
                 }
             }
-            Resp::Downloaded { title, path, copied } => {
+            Resp::Downloaded { ticket, id, title, path, bytes, copied } => {
                 log::info!("downloaded to {}", path.display());
-                self.toast(match copied {
-                    Some(Ok(folder)) => format!("Downloaded \u{201c}{title}\u{201d} to {folder}"),
-                    Some(Err(e)) => format!("Downloaded \u{201c}{title}\u{201d}, but couldn't copy it to your folder: {e}"),
-                    None => format!("Downloaded \u{201c}{title}\u{201d}"),
-                });
+                self.on_downloaded(ticket, &id, &title, bytes, copied);
             }
+            Resp::DownloadFailed { ticket, id, title, error } => self.on_download_failed(ticket, &id, &title, &error),
             Resp::Uploaded { done, failed } => {
                 let songs = |n: usize| if n == 1 { "1 song".to_owned() } else { format!("{n} songs") };
                 self.toast(match (done, failed.len()) {
