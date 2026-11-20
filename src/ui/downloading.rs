@@ -6,15 +6,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use egui::{Color32, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
+use egui::{Color32, Rect, Sense, Ui, Vec2, pos2, vec2};
 use tokio::sync::watch;
 
-use super::sleep::{on_accent, pill};
+use super::sleep::pill;
 use super::widgets::{self, named};
-use super::{App, pages, sheet};
+use super::{App, glyphs, m3, pages, sheet};
 use crate::backend::{Collection, Req};
 use crate::download_queue::{Ask, Job, Kind, Outcome, Plan, Queue, STREAK, Song, State, Summary, Update};
 use crate::downloads::{Kept, human_size};
+use crate::material::{self, Type, Weight, shape};
 use crate::model::Track;
 use crate::platform::Network;
 use crate::theme::{self, icon};
@@ -524,41 +525,26 @@ pub(super) fn sheet(app: &mut App, ctx: &egui::Context) {
     app.downloads.sheet.open = open;
 }
 
-/// A Wi-Fi sign in the icon font's line (the font has none): Lucide's, on its 24-unit
-/// grid: three arcs over the dot they share as their centre.
-fn wifi_sign(ui: &Ui, center: Pos2, size: f32, color: Color32) {
-    let k = size / 24.0;
-    let dot = center + vec2(0.0, 7.5) * k;
-    let stroke = egui::Stroke::new(2.0 * k, color);
-    for (radius, half) in [(5.0, 44.4_f32), (10.0, 44.4), (15.0, 41.8)] {
-        let arc = (0..=12).map(|i| {
-            let a = (-90.0 - half + 2.0 * half * i as f32 / 12.0).to_radians();
-            dot + vec2(a.cos(), a.sin()) * radius * k
-        });
-        ui.painter().add(egui::Shape::line(arc.collect(), stroke));
-    }
-    ui.painter().circle_filled(dot, 1.3 * k, color);
-}
-
 /// The Downloads page's switch: downloads wait for Wi-Fi.
 pub(super) fn wifi_row(app: &mut App, ui: &mut Ui) {
     const NAME: &str = "Download over Wi-Fi only";
-    let accent = app.accent_color();
-    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
+    let m = material::scheme();
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
     let row = named(ui.interact(r, ui.scope_id().with("dl-wifi-only"), Sense::click()), NAME);
     let was = app.downloads.queue.wifi_only();
     let mut on = was;
     if row.clicked() {
         on = !on;
     }
-    let badge = pos2(r.left() + 4.0 + 22.0, r.center().y);
-    ui.painter().circle_filled(badge, 22.0, theme::with_alpha(accent, 0.2));
-    wifi_sign(ui, badge, 20.0, accent);
-    let text_l = badge.x + 22.0 + 14.0;
-    let text_w = (r.right() - 60.0 - text_l).max(40.0);
-    widgets::text_at(ui, pos2(text_l, r.center().y - 20.0), NAME, theme::semibold(16.0), theme::text(), text_w);
-    widgets::text_at(ui, pos2(text_l, r.center().y + 2.0), "Waits for Wi-Fi, saves mobile data", theme::regular(13.0), theme::text_dim(), text_w);
-    let switch = Rect::from_center_size(pos2(r.right() - 4.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
+    if row.is_pointer_button_down_on() {
+        ui.painter().rect_filled(r.expand2(vec2(8.0, 0.0)), shape::CARD_SMALL, m.on_surface.gamma_multiply(0.08));
+    }
+    let badge = pos2(r.left() + 20.0, r.center().y);
+    ui.painter().circle_filled(badge, 20.0, m.secondary_container);
+    m3::drawn::wifi(ui, badge, 20.0, m.on_secondary_container);
+    let switch = Rect::from_center_size(pos2(r.right() - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
+    let text_l = badge.x + 20.0 + 16.0;
+    m3::two_lines(ui, text_l, r.center().y, (switch.left() - 12.0 - text_l).max(40.0), NAME, Type::BodyLarge, m.on_surface, "Waits for Wi-Fi, saves mobile data", Type::BodyMedium, m.on_surface_variant);
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut on, NAME);
     if on != was {
@@ -571,49 +557,73 @@ pub(super) fn any_on_their_way(app: &App) -> bool {
     !app.downloads.queue.jobs().is_empty()
 }
 
+/// Where the parts of a card of something on its way are: its cover, its text, the
+/// progress under the text (an album's or a playlist's), and the touch targets of
+/// its cancel and its pause.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct JobGeom {
+    cover: Rect,
+    text: Rect,
+    progress: Rect,
+    cancel: Rect,
+    pause: Rect,
+}
+
+/// How tall a job's card is: its title, its `lines`, and for a collection its progress.
+fn job_height(whole: bool, lines: usize) -> f32 {
+    let text = 24.0 + 20.0 * lines as f32 + if whole { 22.0 } else { 0.0 };
+    (text + 24.0).max(80.0)
+}
+
+fn job_geom(card: Rect, whole: bool, lines: usize) -> JobGeom {
+    let cy = card.center().y;
+    let cover = Rect::from_min_size(pos2(card.left() + 12.0, cy - 28.0), Vec2::splat(56.0));
+    let pause = Rect::from_center_size(pos2(card.right() - 12.0 - m3::TOUCH / 2.0, cy), Vec2::splat(m3::TOUCH));
+    let cancel = Rect::from_center_size(pos2(pause.left() - m3::TOUCH / 2.0, cy), Vec2::splat(m3::TOUCH));
+    let left = cover.right() + 12.0;
+    let height = 24.0 + 20.0 * lines as f32 + if whole { 22.0 } else { 0.0 };
+    let text = Rect::from_min_size(pos2(left, cy - height / 2.0), vec2((cancel.left() - left).max(40.0), 24.0 + 20.0 * lines as f32));
+    JobGeom { cover, text, progress: Rect::from_min_size(pos2(left, text.bottom()), vec2(text.width(), 22.0)), cancel, pause }
+}
+
 /// What is on its way, on the Downloads page: a card for each album, playlist or song
 /// in the queue, with how far it is, and its cancel and pause.
 pub(super) fn on_their_way(app: &mut App, ui: &mut Ui) {
-    let accent = app.accent_color();
-    let ink = on_accent(accent);
+    let m = material::scheme();
+    let ink = m.on_primary_container;
     let queue = &app.downloads.queue;
+    let time = ui.input(|i| i.time);
     let mut command = None;
     for job in queue.jobs() {
-        let lines = job_lines(job, queue.state(job));
+        let state = queue.state(job);
+        let lines = job_lines(job, state);
         let whole = job.kind != Kind::Song;
-        // A collection: its name, its lines, and its bar under them.
-        let height = if whole { 66.0 + 18.0 * lines.len() as f32 } else { 84.0 };
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-        ui.painter().rect_filled(rect, 22.0, theme::with_alpha(accent, 0.2));
-        let art = Rect::from_center_size(pos2(rect.left() + 14.0 + 28.0, rect.center().y), Vec2::splat(56.0));
-        widgets::paint_cover(ui, art, &job.thumbs, 12.0, 1.0);
-        // Pause at the right, cancel beside it.
-        let pause = Rect::from_center_size(pos2(rect.right() - 14.0 - 24.0, rect.center().y), Vec2::splat(48.0));
-        let cancel = Rect::from_center_size(pos2(pause.left() - 2.0 - 22.0, rect.center().y), Vec2::splat(44.0));
-        let text_l = art.right() + 14.0;
-        let text_w = (cancel.left() - 4.0 - text_l).max(40.0);
-        let top = if whole { rect.top() + 14.0 } else { rect.center().y - 20.0 };
-        widgets::text_at(ui, pos2(text_l, top), &job.title, theme::semibold(16.0), theme::text(), text_w);
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), job_height(whole, lines.len())), Sense::hover());
+        let g = job_geom(rect, whole, lines.len());
+        ui.painter().rect_filled(rect, shape::CARD, m.primary_container);
+        widgets::paint_cover(ui, g.cover, &job.thumbs, shape::TILE, 1.0);
+        m3::text(ui, g.text.min, &job.title, Type::TitleMedium.spec().weight(Weight::Bold), ink, g.text.width());
         for (i, line) in lines.iter().enumerate() {
-            widgets::text_at(ui, pos2(text_l, top + 22.0 + 18.0 * i as f32), line, theme::regular(13.0), theme::text_dim(), text_w);
+            m3::text(ui, pos2(g.text.left(), g.text.top() + 24.0 + 20.0 * i as f32), line, Type::BodyMedium, ink.gamma_multiply(0.85), g.text.width());
         }
         if whole {
-            progress_bar(ui, Rect::from_min_size(pos2(text_l, rect.bottom() - 18.0), vec2(text_w, 4.0)), job.fraction(), accent);
+            // The wave runs while songs come in, and lies flat while the job waits.
+            let running = state == State::Downloading;
+            let wave = theme::anim_bool(ui.ctx(), ("dl-wave", job.id), running, 0.3);
+            m3::wavy_progress(ui, g.progress, job.fraction(), -(time as f32) * 4.0, wave);
+            if running {
+                ui.ctx().request_repaint_after(Duration::from_millis(33));
+            }
         }
         let id = ui.scope_id().with(("dl-job", job.id));
-        let resp = named(ui.interact(cancel, id.with("cancel"), Sense::click()), "Cancel download");
-        widgets::icon_at(ui, cancel.center(), icon::X, 18.0, if resp.is_pointer_button_down_on() { theme::text() } else { theme::text_dim() });
-        if resp.clicked() {
+        if m3::IconButton::new(icon::X, "Cancel download").show_at(ui, g.cancel.center(), id.with("cancel")).clicked() {
             command = Some(Command::Cancel(job.id));
         }
-        let (name, glyph, turn) = if job.paused { ("Resume download", icon::PLAY, Command::Resume(job.id)) } else { ("Pause download", icon::PAUSE, Command::Pause(job.id)) };
-        let resp = named(ui.interact(pause, id.with("pause"), Sense::click()), name);
-        ui.painter().rect_filled(pause, 16.0, if resp.is_pointer_button_down_on() { theme::lerp_color(accent, ink, 0.12) } else { accent });
-        widgets::icon_at(ui, pause.center(), glyph, 20.0, ink);
-        if resp.clicked() {
+        let (name, glyph, turn) = if job.paused { ("Resume download", glyphs::PLAY, Command::Resume(job.id)) } else { ("Pause download", glyphs::PAUSE, Command::Pause(job.id)) };
+        if m3::IconButton::new(glyph, name).style(m3::IconStyle::Filled).size(m3::TOUCH).radius(shape::TILE).show_at(ui, g.pause.center(), id.with("pause")).clicked() {
             command = Some(turn);
         }
-        ui.add_space(10.0);
+        ui.add_space(8.0);
     }
     if let Some(command) = command {
         app.download_command(command);
@@ -625,28 +635,14 @@ fn saved_line(is_album: bool, songs: usize, bytes: u64) -> String {
     format!("{} \u{2022} {} \u{2022} {}", if is_album { "Album" } else { "Playlist" }, count(songs, "song"), human_size(bytes))
 }
 
-/// The albums and playlists downloaded whole, on the Downloads page: a card each, which
-/// opens its saved songs.
+/// The albums and playlists downloaded whole, on the Downloads page: a row each, marked
+/// as downloaded, which opens its saved songs.
 pub(super) fn saved_collections(app: &mut App, ui: &mut Ui) {
-    let saved = crate::downloads::collections();
-    for c in &saved {
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-        let resp = named(ui.interact(rect, ui.scope_id().with(("dl-saved", &c.id)), Sense::click()), &c.title);
-        ui.painter().rect_filled(rect, 18.0, theme::glass(if resp.is_pointer_button_down_on() { 0.13 } else { 0.075 }));
-        let art = Rect::from_center_size(pos2(rect.left() + 12.0 + 24.0, rect.center().y), Vec2::splat(48.0));
-        widgets::paint_cover(ui, art, &c.thumbs, 10.0, 1.0);
-        let text_l = art.right() + 14.0;
-        let text_w = (rect.right() - 36.0 - text_l).max(40.0);
-        widgets::text_at(ui, pos2(text_l, rect.center().y - 20.0), &c.title, theme::semibold(16.0), theme::text(), text_w);
-        widgets::text_at(ui, pos2(text_l, rect.center().y + 2.0), &saved_line(c.is_album, c.songs.len(), c.bytes), theme::regular(13.0), theme::text_dim(), text_w);
-        widgets::icon_at(ui, pos2(rect.right() - 20.0, rect.center().y), icon::CHEVRON_RIGHT, 16.0, theme::text_faint());
-        ui.add_space(8.0);
-        if resp.clicked() {
+    for c in &crate::downloads::collections() {
+        let row = m3::ListRow { title: &c.title, subtitle: &saved_line(c.is_album, c.songs.len(), c.bytes), thumbs: &c.thumbs, mark: Some(m3::Icon::Drawn(m3::drawn::saved)), chevron: true, ..Default::default() };
+        if ui.push_id(("dl-saved", &c.id), |ui| m3::list_row(ui, &row)).inner.row.clicked() {
             app.actions.push(super::Action::Go(super::Page::Downloaded(c.id.clone())));
         }
-    }
-    if !saved.is_empty() {
-        ui.add_space(10.0);
     }
 }
 
@@ -669,21 +665,30 @@ fn disk_shares(downloads: u64, free: u64, total: u64) -> (f32, f32) {
     (downloads as f32 / total as f32, (used - downloads) as f32 / total as f32)
 }
 
-/// How tall `disk_usage` is.
-pub(super) const DISK_H: f32 = 44.0;
+/// The storage bar's three parts across `bar`, with a gap between them: the downloads
+/// (`mine` of the disk; at least a dot of them, when there are any), everything else
+/// (`other`), and the free room.
+fn disk_segments(bar: Rect, mine: f32, other: f32) -> [Rect; 3] {
+    const GAP: f32 = 4.0;
+    let room = bar.width() - 2.0 * GAP;
+    let mine_w = if mine > 0.0 { (room * mine).max(bar.height()) } else { 0.0 };
+    let other_w = (room * other).clamp(0.0, (room - mine_w - bar.height()).max(0.0));
+    let part = |from: f32, width: f32| Rect::from_min_size(pos2(from, bar.top()), vec2(width.max(0.0), bar.height()));
+    let other_from = bar.left() + mine_w + if mine_w > 0.0 { GAP } else { 0.0 };
+    let free_from = other_from + other_w + if other_w > 0.0 { GAP } else { 0.0 };
+    [part(bar.left(), mine_w), part(other_from, other_w), part(free_from, bar.right() - free_from)]
+}
 
-/// The room on the phone, across `rect` (`DISK_H` tall): how much is free, over a bar
-/// of the downloads, everything else, and the free room.
-pub(super) fn disk_usage(ui: &Ui, rect: Rect, downloads: u64, free: u64, total: u64, accent: Color32) {
-    widgets::text_at(ui, rect.min, &format!("{} free on this phone", human_size(free)), theme::regular(13.0), theme::text_dim(), rect.width());
-    let bar = Rect::from_min_size(pos2(rect.left(), rect.top() + 26.0), vec2(rect.width(), 8.0));
-    ui.painter().rect_filled(bar, 4.0, theme::glass(0.12));
+/// The room on the phone as a bar across `bar`: the downloads, everything else, and
+/// the free room.
+pub(super) fn disk_bar(ui: &Ui, bar: Rect, downloads: u64, free: u64, total: u64) {
+    let m = material::scheme();
     let (mine, other) = disk_shares(downloads, free, total);
-    // Everything in use, then the downloads over its left end: at least a dot of them.
-    let used = Rect::from_min_size(bar.min, vec2(bar.width() * (mine + other), 8.0));
-    ui.painter().rect_filled(used, 4.0, theme::glass(0.34));
-    if downloads > 0 {
-        ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2((bar.width() * mine).max(8.0), 8.0)), 4.0, accent);
+    let [mine, other, free] = disk_segments(bar, if downloads > 0 { mine.max(f32::MIN_POSITIVE) } else { 0.0 }, other);
+    for (part, color) in [(mine, m.primary), (other, m.outline), (free, m.surface_container_highest)] {
+        if part.width() > 0.0 {
+            ui.painter().rect_filled(part, bar.height() / 2.0, color);
+        }
     }
 }
 
@@ -734,6 +739,47 @@ mod tests {
         // Counted a moment apart, the downloads can come out larger than what is in use.
         assert_eq!(disk_shares(10 * GB, 60 * GB, 64 * GB), (4.0 / 64.0, 0.0));
         assert_eq!(disk_shares(GB, 0, 0), (0.0, 0.0), "a disk that says nothing");
+    }
+
+    #[test]
+    fn the_storage_bars_parts_follow_each_other_with_a_gap_and_fill_it() {
+        let bar = Rect::from_min_size(pos2(40.0, 200.0), vec2(280.0, 8.0));
+        let [mine, other, free] = disk_segments(bar, 0.05, 0.35);
+        assert_eq!(mine.left(), bar.left());
+        assert!(mine.right() < other.left() && other.right() < free.left(), "a gap between the parts");
+        assert!((free.right() - bar.right()).abs() < 0.01);
+        assert!(other.width() > mine.width() * 5.0, "in proportion: {mine:?} {other:?}");
+        // A sliver of downloads still shows as a dot, and a full disk keeps a dot of free room.
+        let [mine, _, _] = disk_segments(bar, 0.0001, 0.5);
+        assert_eq!(mine.width(), bar.height());
+        let [_, _, free] = disk_segments(bar, 0.1, 0.9);
+        assert!(free.width() >= bar.height() - 0.01, "{free:?}");
+        // No downloads: the bar starts with everything else.
+        let [mine, other, _] = disk_segments(bar, 0.0, 0.4);
+        assert_eq!(mine.width(), 0.0);
+        assert_eq!(other.left(), bar.left());
+    }
+
+    #[test]
+    fn a_card_of_something_on_its_way_keeps_its_parts_apart_and_its_buttons_a_fingers_size() {
+        for width in [328.0, 344.0, 361.0, 380.0] {
+            for (whole, lines) in [(true, 1), (true, 2), (false, 1)] {
+                let card = Rect::from_min_size(pos2(16.0, 300.0), vec2(width, job_height(whole, lines)));
+                let g = job_geom(card, whole, lines);
+                for part in [g.cover, g.text, g.cancel, g.pause] {
+                    assert!(card.contains_rect(part), "{width} {whole} {lines}: {part:?}");
+                }
+                if whole {
+                    assert!(card.contains_rect(g.progress), "{width} {lines}: {:?}", g.progress);
+                    assert!(g.progress.top() >= g.text.bottom() && g.progress.height() >= 22.0);
+                }
+                assert!(g.cover.right() < g.text.left() && g.text.right() <= g.cancel.left() && g.cancel.right() <= g.pause.left());
+                for target in [g.cancel, g.pause] {
+                    assert!(target.width() >= m3::TOUCH && target.height() >= m3::TOUCH);
+                }
+                assert!(g.text.width() >= 130.0, "{width}: the title keeps {}", g.text.width());
+            }
+        }
     }
 
     #[test]
@@ -856,7 +902,7 @@ mod tests {
 
         fn frame(&mut self, events: Vec<egui::Event>) {
             self.time += 1.0 / 60.0;
-            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(380.0, 700.0))), time: Some(self.time), events, ..Default::default() };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(380.0, 700.0))), time: Some(self.time), events, ..Default::default() };
             let mut tapped = None;
             let out = self.ctx.run_ui(input, |ui| tapped = contents(ui, &self.showing));
             out.drop_without_applying_deltas();

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
-use egui::{Align2, Color32, Rect, RichText, Sense, Ui, Vec2, pos2, vec2};
+use egui::{Align2, Color32, Pos2, Rect, RichText, Sense, Ui, Vec2, pos2, vec2};
 
 use super::widgets::{self, RowOpts, card, chip, h_scroll, named, paint_cover, pill, shelf_header, track_row};
 use super::settings::Row;
@@ -2100,31 +2100,34 @@ fn downloads(app: &mut App, ui: &mut Ui, now: f64) {
     list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
 }
 
-/// A heading with a quiet line under it, as the phone's pages group things.
-fn phone_section(ui: &mut Ui, title: &str, note: &str) {
-    ui.label(RichText::new(title).font(theme::bold(22.0)).color(theme::text()));
+/// A group's heading on the phone's pages, with a quiet line under it when it has one.
+pub(super) fn phone_section(ui: &mut Ui, title: &str, note: &str) {
+    use crate::material::Type;
+    let m = crate::material::scheme();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+    m3::text(ui, pos2(rect.left(), rect.center().y - 12.0), title, Type::TitleMedium.spec().weight(crate::material::Weight::Bold), m.on_surface, rect.width());
     if !note.is_empty() {
-        ui.add_space(2.0);
-        ui.label(RichText::new(note).font(theme::regular(13.0)).color(theme::text_dim()));
+        let g = m3::galley_wrapped(ui, note, Type::BodyMedium, m.on_surface_variant, ui.available_width(), 4);
+        ui.label(g);
+        ui.add_space(8.0);
     }
-    ui.add_space(12.0);
+    ui.add_space(4.0);
 }
 
-/// The phone's Downloads: where songs are saved and how much room they take, the music
-/// folders as a grid of coloured tiles, then the downloaded songs in one rounded group.
+/// The phone's Downloads: how much room the downloads take and where they go, the
+/// Wi-Fi switch, what is on its way, the music folders, then what is downloaded.
 fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
-    root_title(ui, "Downloads");
     let songs = crate::downloads::list();
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     storage_card(app, ui, songs.len());
-    ui.add_space(10.0);
+    ui.add_space(8.0);
     super::downloading::wifi_row(app, ui);
     if super::downloading::any_on_their_way(app) {
-        ui.add_space(18.0);
+        ui.add_space(8.0);
         phone_section(ui, "Downloading", "");
         super::downloading::on_their_way(app, ui);
     }
-    ui.add_space(22.0);
+    ui.add_space(12.0);
     phone_section(ui, "Music on this phone", "Only the folders you add are read. Ringtones and other sounds stay out.");
     local_tabs(app, ui);
     match app.local_tab {
@@ -2132,7 +2135,7 @@ fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
         LocalTab::Albums => album_list(app, ui),
         LocalTab::Songs => song_preview(app, ui),
     }
-    ui.add_space(30.0);
+    ui.add_space(20.0);
     phone_section(ui, "Downloaded", "");
     if songs.is_empty() {
         nothing_saved(ui);
@@ -2140,72 +2143,103 @@ fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
     }
     // The albums and playlists downloaded whole, then every saved song.
     super::downloading::saved_collections(app, ui);
+    ui.add_space(4.0);
     play_shuffle(app, ui, &songs);
-    ui.add_space(16.0);
+    ui.add_space(8.0);
     let rows = Rows::new(app, now);
-    egui::Frame::new().fill(theme::glass(0.06)).corner_radius(20).inner_margin(egui::Margin::symmetric(4, 6)).show(ui, |ui| {
-        list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
+    list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
+}
+
+/// Play and Shuffle side by side: the main action filled, the other tonal.
+fn play_shuffle(app: &mut App, ui: &mut Ui, songs: &[Track]) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        for (label, glyph, primary) in [("Play", icon::PLAY, true), ("Shuffle", icon::SHUFFLE, false)] {
+            if pill(ui, label, Some(glyph), primary).clicked() {
+                let mut t = songs.to_vec();
+                if !primary {
+                    super::shuffle(&mut t);
+                }
+                app.actions.push(Action::Play(t, 0));
+            }
+        }
     });
 }
 
-/// Play and Shuffle side by side, tinted with the accent (as iOS Music's two buttons are).
-fn play_shuffle(app: &mut App, ui: &mut Ui, songs: &[Track]) {
-    let accent = app.accent_color();
-    let w = (ui.available_width() - 12.0) / 2.0;
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::hover());
-    for (i, (label, glyph)) in [("Play", icon::PLAY), ("Shuffle", icon::SHUFFLE)].into_iter().enumerate() {
-        let r = Rect::from_min_size(pos2(row.left() + i as f32 * (w + 12.0), row.top()), vec2(w, 48.0));
-        let resp = named(ui.interact(r, ui.scope_id().with(("dl-play", i)), Sense::click()), label);
-        ui.painter().rect_filled(r, 15.0, theme::with_alpha(accent, if resp.is_pointer_button_down_on() { 0.28 } else { 0.18 }));
-        // The glyph sits just left of the label, whatever its length.
-        let half = label.len() as f32 * 4.4;
-        widgets::icon_at(ui, pos2(r.center().x - half - 14.0, r.center().y), glyph, 17.0, accent);
-        ui.painter().text(pos2(r.center().x + 10.0, r.center().y), Align2::CENTER_CENTER, label, theme::bold(16.0), accent);
-        if resp.clicked() {
-            let mut t = songs.to_vec();
-            if i == 1 {
-                super::shuffle(&mut t);
-            }
-            app.actions.push(Action::Play(t, 0));
-        }
+/// Where the storage card's parts are: the size the downloads take, the count at its
+/// right, the line under them, the bar of the phone's room (when the phone tells it),
+/// and where downloads go, with the button that changes it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StorageGeom {
+    size: Pos2,
+    count_right: Pos2,
+    line: Pos2,
+    bar: Option<Rect>,
+    place: Rect,
+    change: Rect,
+}
+
+/// How tall the storage card is: with the bar when the phone tells its room (`disk`),
+/// and with a line tall enough for a finger when the folder can be changed.
+fn storage_height(disk: bool, change: bool) -> f32 {
+    20.0 + 44.0 + 4.0 + 20.0 + if disk { 20.0 } else { 0.0 } + 8.0 + if change { m3::TOUCH } else { 24.0 } + if change { 8.0 } else { 16.0 }
+}
+
+fn storage_geom(card: Rect, disk: bool, change: bool) -> StorageGeom {
+    const PAD: f32 = 24.0;
+    let (left, right) = (card.left() + PAD, card.right() - PAD);
+    let top = card.top() + 20.0;
+    let bar = disk.then(|| Rect::from_min_size(pos2(left, top + 44.0 + 4.0 + 20.0 + 12.0), vec2(right - left, 8.0)));
+    let foot = bar.map_or(top + 44.0 + 4.0 + 20.0, |b| b.bottom()) + 8.0;
+    let line = if change { m3::TOUCH } else { 24.0 };
+    let change = Rect::from_min_max(pos2(right - 72.0 + 12.0, foot), pos2(right + 12.0, foot + m3::TOUCH));
+    StorageGeom {
+        size: pos2(left, top),
+        count_right: pos2(right, top + 22.0),
+        line: pos2(left, top + 44.0 + 4.0),
+        bar,
+        place: Rect::from_min_max(pos2(left, foot), pos2(change.left() - 8.0, foot + line)),
+        change,
     }
 }
 
-/// Where downloads go and what they take up, with a way to change it, and the room
-/// left on the phone where the system tells it.
+/// What the downloads take up and the room left on the phone where the system tells
+/// it, and where downloads go, with a way to change it.
 fn storage_card(app: &mut App, ui: &mut Ui, count: usize) {
-    use super::downloading::{DISK_H, disk_usage};
+    use crate::material::{Type, shape};
+    let m = crate::material::scheme();
     let used = crate::downloads::total_bytes();
     let disk = crate::downloads::disk_space(&crate::downloads::folder());
-    let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), 84.0 + if disk.is_some() { DISK_H } else { 0.0 }), Sense::hover());
-    let rect = Rect::from_min_size(card.min, vec2(card.width(), 84.0));
-    let painter = ui.painter();
-    painter.rect_filled(card, 22.0, theme::glass(0.075));
-    painter.rect_stroke(card, 22.0, egui::Stroke::new(1.0, theme::glass(0.09)), egui::StrokeKind::Inside);
-    if let Some((free, total)) = disk {
-        let room = Rect::from_min_max(pos2(card.left() + 18.0, rect.bottom() - 4.0), pos2(card.right() - 18.0, card.bottom()));
-        disk_usage(ui, room, used, free, total, app.accent_color());
+    let change = crate::platform::HAS_SAF;
+    let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), storage_height(disk.is_some(), change)), Sense::hover());
+    let g = storage_geom(card, disk.is_some(), change);
+    ui.painter().rect_filled(card, shape::CARD, m.surface_container_high);
+    let songs = m3::galley(ui, &count_text(count, "song"), Type::LabelLarge, m.primary, 140.0);
+    let size_w = g.count_right.x - songs.size().x - 12.0 - g.size.x;
+    m3::text(ui, g.size, &crate::downloads::human_size(used), Type::DisplaySmall, m.on_surface, size_w);
+    ui.painter().galley(pos2(g.count_right.x - songs.size().x, g.count_right.y - songs.size().y / 2.0), songs, m.primary);
+    let line = match disk {
+        Some((free, _)) => format!("used by downloads \u{00b7} {} free on this phone", crate::downloads::human_size(free)),
+        None => "used by downloads".to_owned(),
+    };
+    m3::text(ui, g.line, &line, Type::BodyMedium, m.on_surface_variant, card.right() - 24.0 - g.line.x);
+    if let (Some(bar), Some((free, total))) = (g.bar, disk) {
+        super::downloading::disk_bar(ui, bar, used, free, total);
     }
-    let art = Rect::from_center_size(pos2(rect.left() + 18.0 + 25.0, rect.center().y), Vec2::splat(50.0));
-    let tex = widgets::folder_art(ui.ctx(), "downloads");
-    painter.image(tex.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-    widgets::icon_at(ui, art.center(), icon::DOWNLOAD, 22.0, Color32::WHITE);
     let place = match crate::downloads::tree() {
         Some((_, label)) => format!("Saved to {}", crate::local::folder_name(&label)),
         None if crate::platform::HAS_SAF => "Choose where to save".to_owned(),
         None => "Saved on this device".to_owned(),
     };
-    let summary = format!("{} \u{2022} {} song{}", crate::downloads::human_size(used), count, if count == 1 { "" } else { "s" });
-    let text_l = art.right() + 14.0;
-    let chip_w = 82.0;
-    let text_w = (rect.right() - chip_w - 22.0 - text_l).max(40.0);
-    widgets::text_at(ui, pos2(text_l, rect.center().y - 20.0), &place, theme::semibold(16.0), theme::text(), text_w);
-    widgets::text_at(ui, pos2(text_l, rect.center().y + 2.0), &summary, theme::regular(13.0), theme::text_dim(), text_w);
-    if crate::platform::HAS_SAF {
-        let chip = Rect::from_center_size(pos2(rect.right() - 14.0 - chip_w / 2.0, rect.center().y), vec2(chip_w, 34.0));
-        let resp = named(ui.interact(chip, ui.scope_id().with("dl-change"), Sense::click()), "Change download folder");
-        ui.painter().rect_filled(chip, 17.0, theme::glass(if resp.is_pointer_button_down_on() { 0.22 } else { 0.13 }));
-        ui.painter().text(chip.center(), Align2::CENTER_CENTER, "Change", theme::semibold(14.0), app.accent_color());
+    let place_g = m3::galley(ui, &place, Type::BodyMedium, m.on_surface, g.place.width());
+    ui.painter().galley(pos2(g.place.left(), g.place.center().y - place_g.size().y / 2.0), place_g, m.on_surface);
+    if change {
+        let resp = named(ui.interact(g.change, ui.scope_id().with("dl-change"), Sense::click()), "Change download folder");
+        if resp.is_pointer_button_down_on() {
+            ui.painter().rect_filled(g.change.shrink2(vec2(0.0, 4.0)), 20.0, m.primary.gamma_multiply(0.1));
+        }
+        let label = m3::galley(ui, "Change", Type::LabelLarge, m.primary, g.change.width());
+        ui.painter().galley(g.change.center() - label.size() / 2.0, label, m.primary);
         if resp.clicked() {
             app.ask_folder(super::storage::Purpose::Downloads);
         }
@@ -2220,43 +2254,20 @@ pub enum LocalTab {
     Songs,
 }
 
-/// Folder / Album / Song as a segmented control (the way iOS switches views).
+/// Folder / Album / Song as a row of connected buttons.
 fn local_tabs(app: &mut App, ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
-    ui.painter().rect_filled(rect, 12.0, theme::glass(0.09));
-    let w = (rect.width() - 6.0) / 3.0;
-    for (i, (tab, label)) in [(LocalTab::Folders, "Folder"), (LocalTab::Albums, "Album"), (LocalTab::Songs, "Song")].into_iter().enumerate() {
-        let r = Rect::from_min_size(pos2(rect.left() + 3.0 + i as f32 * w, rect.top() + 3.0), vec2(w, 32.0));
-        let resp = named(ui.interact(r, ui.scope_id().with(("local-tab", i)), Sense::click()), label);
-        let on = app.local_tab == tab;
-        let k = theme::anim_bool(ui.ctx(), resp.id.with("on"), on, 0.15);
-        if k > 0.0 {
-            ui.painter().rect_filled(r, 10.0, theme::with_alpha(Color32::WHITE, 0.2 * k));
-        }
-        ui.painter().text(r.center(), Align2::CENTER_CENTER, label, if on { theme::semibold(14.0) } else { theme::regular(14.0) }, if on { theme::text() } else { theme::text_dim() });
-        if resp.clicked() {
-            app.local_tab = tab;
-        }
+    const TABS: [(LocalTab, &str); 3] = [(LocalTab::Folders, "Folder"), (LocalTab::Albums, "Album"), (LocalTab::Songs, "Song")];
+    let chosen = TABS.iter().position(|(tab, _)| *tab == app.local_tab).unwrap_or(0);
+    if let Some(i) = m3::segmented(ui, &TABS.map(|(_, label)| label), chosen) {
+        app.local_tab = TABS[i].0;
     }
-    ui.add_space(14.0);
+    ui.add_space(8.0);
 }
 
-/// One long card: a coloured square on the left, a name and a line under it, a chevron.
-fn long_card(ui: &mut Ui, id: egui::Id, seed: &str, glyph: char, title: &str, sub: &str) -> egui::Response {
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
-    let resp = named(ui.interact(rect, id, Sense::click()), title);
-    ui.painter().rect_filled(rect, 18.0, theme::glass(if resp.is_pointer_button_down_on() { 0.13 } else { 0.075 }));
-    let art = Rect::from_center_size(pos2(rect.left() + 12.0 + 24.0, rect.center().y), Vec2::splat(48.0));
-    let tex = widgets::folder_art(ui.ctx(), seed);
-    ui.painter().image(tex.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-    widgets::icon_at(ui, art.center(), glyph, 21.0, Color32::from_white_alpha(240));
-    let text_l = art.right() + 14.0;
-    let text_w = (rect.right() - 36.0 - text_l).max(40.0);
-    widgets::text_at(ui, pos2(text_l, rect.center().y - 20.0), title, theme::semibold(16.0), theme::text(), text_w);
-    widgets::text_at(ui, pos2(text_l, rect.center().y + 2.0), sub, theme::regular(13.0), theme::text_dim(), text_w);
-    widgets::icon_at(ui, pos2(rect.right() - 20.0, rect.center().y), icon::CHEVRON_RIGHT, 16.0, theme::text_faint());
-    ui.add_space(8.0);
-    resp
+/// A row that opens a list of local music: an icon on a tonal tile, a name and a line
+/// under it, a chevron.
+fn long_card(ui: &mut Ui, glyph: char, title: &str, sub: &str) -> egui::Response {
+    m3::list_row(ui, &m3::ListRow { title, subtitle: sub, tile: Some(glyph.into()), chevron: true, ..Default::default() }).row
 }
 
 fn count_text(n: usize, one: &str) -> String {
@@ -2267,19 +2278,13 @@ fn count_text(n: usize, one: &str) -> String {
 fn folder_list(app: &mut App, ui: &mut Ui) {
     for (i, f) in crate::local::folders().iter().enumerate() {
         let sub = if app.scanning(&f.uri) { "Looking for music\u{2026}".to_owned() } else { count_text(f.songs, "song") };
-        if long_card(ui, ui.scope_id().with(("folder-card", i)), &f.name, icon::FOLDER_OPEN, &f.name, &sub).clicked() {
+        if ui.push_id(("folder-card", i), |ui| long_card(ui, icon::FOLDER_OPEN, &f.name, &sub)).inner.clicked() {
             app.actions.push(Action::Go(Page::LocalFolder(f.uri.clone())));
         }
     }
     if crate::platform::HAS_SAF {
-        let accent = app.accent_color();
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
-        let resp = named(ui.interact(rect, ui.scope_id().with("add-folder"), Sense::click()), "Add a music folder");
-        ui.painter().rect_filled(rect, 18.0, theme::glass(if resp.is_pointer_button_down_on() { 0.12 } else { 0.05 }));
-        ui.painter().rect_stroke(rect, 18.0, egui::Stroke::new(1.3, theme::with_alpha(accent, 0.55)), egui::StrokeKind::Inside);
-        ui.painter().text(pos2(rect.left() + 30.0, rect.center().y - 1.0), Align2::CENTER_CENTER, "+", theme::regular(28.0), accent);
-        ui.painter().text(pos2(rect.left() + 56.0, rect.center().y), Align2::LEFT_CENTER, "Add a music folder", theme::semibold(15.5), accent);
-        if resp.clicked() {
+        ui.add_space(4.0);
+        if pill(ui, "Add a music folder", None, false).clicked() {
             app.ask_folder(super::storage::Purpose::Music);
         }
     }
@@ -2289,12 +2294,12 @@ fn folder_list(app: &mut App, ui: &mut Ui) {
 fn album_list(app: &mut App, ui: &mut Ui) {
     let albums = crate::local::albums();
     if albums.is_empty() {
-        ui.label(RichText::new("No albums yet. Songs whose files name an album are grouped here.").font(theme::regular(14.0)).color(theme::text_dim()));
+        ui.label(RichText::new("No albums yet. Songs whose files name an album are grouped here.").font(crate::material::Type::BodyMedium.font()).color(theme::text_dim()));
         return;
     }
     for (i, a) in albums.iter().enumerate() {
         let sub = if a.artist.is_empty() { count_text(a.songs, "song") } else { format!("{} \u{2022} {}", a.artist, count_text(a.songs, "song")) };
-        if long_card(ui, ui.scope_id().with(("album-card", i)), &a.name, icon::MUSIC, &a.name, &sub).clicked() {
+        if ui.push_id(("album-card", i), |ui| long_card(ui, icon::MUSIC, &a.name, &sub)).inner.clicked() {
             app.actions.push(Action::Go(Page::LocalAlbum(a.key.clone())));
         }
     }
@@ -2304,30 +2309,29 @@ fn album_list(app: &mut App, ui: &mut Ui) {
 fn song_preview(app: &mut App, ui: &mut Ui) {
     let n = crate::local::all_tracks().len();
     if n == 0 {
-        ui.label(RichText::new("No songs yet. Add a folder first.").font(theme::regular(14.0)).color(theme::text_dim()));
+        ui.label(RichText::new("No songs yet. Add a folder first.").font(crate::material::Type::BodyMedium.font()).color(theme::text_dim()));
         return;
     }
-    if long_card(ui, ui.scope_id().with("all-songs"), "All songs", icon::MUSIC, "All songs", &format!("{} from every folder", count_text(n, "song"))).clicked() {
+    if long_card(ui, icon::MUSIC, "All songs", &format!("{} from every folder", count_text(n, "song"))).clicked() {
         app.actions.push(Action::Go(Page::LocalSongs));
     }
 }
 
-/// A list of local songs under a heading: Play / Shuffle and the rounded group.
+/// A list of local songs under a heading: Play and Shuffle, then the songs.
 pub(super) fn local_song_page(app: &mut App, ui: &mut Ui, title: &str, sub: &str, songs: Vec<Track>, now: f64) {
+    use crate::material::Type;
     page_title(ui, title);
     ui.add_space(2.0);
-    ui.label(RichText::new(sub).font(theme::regular(14.0)).color(theme::text_dim()));
-    ui.add_space(16.0);
+    ui.label(RichText::new(sub).font(Type::BodyMedium.font()).color(theme::text_dim()));
+    ui.add_space(12.0);
     if songs.is_empty() {
-        ui.label(RichText::new("No music here.").font(theme::semibold(15.0)).color(theme::text()));
+        ui.label(RichText::new("No music here.").font(Type::BodyLarge.font()).color(theme::text()));
         return;
     }
     play_shuffle(app, ui, &songs);
-    ui.add_space(16.0);
+    ui.add_space(8.0);
     let rows = Rows::new(app, now);
-    egui::Frame::new().fill(theme::glass(0.06)).corner_radius(20).inner_margin(egui::Margin::symmetric(4, 6)).show(ui, |ui| {
-        list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
-    });
+    list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
 }
 
 fn local_songs(app: &mut App, ui: &mut Ui, now: f64) {
@@ -2346,31 +2350,28 @@ fn local_album(app: &mut App, ui: &mut Ui, key: &str, now: f64) {
     local_song_page(app, ui, &name, &sub, songs, now);
 }
 
-/// No downloads yet: a coloured tile and a friendly line, instead of an empty list.
+/// No downloads yet: a mark and a friendly line, instead of an empty list.
 fn nothing_saved(ui: &mut Ui) {
-    ui.add_space(6.0);
+    use crate::material::Type;
+    let m = crate::material::scheme();
+    ui.add_space(12.0);
     ui.vertical_centered(|ui| {
-        let (art, _) = ui.allocate_exact_size(Vec2::splat(112.0), Sense::hover());
-        let tex = widgets::folder_art(ui.ctx(), "empty");
-        ui.painter().image(tex.id(), art, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
-        widgets::icon_at(ui, art.center(), icon::DOWNLOAD, 44.0, Color32::from_white_alpha(240));
-        ui.add_space(14.0);
-        ui.label(RichText::new("Nothing saved yet").font(theme::bold(20.0)).color(theme::text()));
+        let (art, _) = ui.allocate_exact_size(Vec2::splat(72.0), Sense::hover());
+        ui.painter().circle_filled(art.center(), 36.0, m.secondary_container);
+        widgets::icon_at(ui, art.center(), icon::DOWNLOAD, 30.0, m.on_secondary_container);
+        ui.add_space(12.0);
+        ui.label(RichText::new("Nothing saved yet").font(Type::TitleMedium.font()).color(m.on_surface));
         ui.add_space(4.0);
-        ui.label(
-            RichText::new("Open a song's menu (the three dots) and choose Download. Saved songs play without internet.")
-                .font(theme::regular(14.0))
-                .color(theme::text_dim()),
-        );
+        ui.label(RichText::new("Open a song's menu (the three dots) and choose Download. Saved songs play without internet.").font(Type::BodyMedium.font()).color(m.on_surface_variant));
     });
 }
 
-/// One folder of local music: its songs in the same rounded group as the downloads, and
-/// ways to keep it up to date.
+/// One folder of local music: its songs, and ways to keep it up to date.
 fn local_folder(app: &mut App, ui: &mut Ui, uri: &str, now: f64) {
+    use crate::material::Type;
     let Some(name) = crate::local::name_of(uri) else {
         page_title(ui, "Folder");
-        ui.label(RichText::new("This folder isn't added any more.").font(theme::regular(14.0)).color(theme::text_dim()));
+        ui.label(RichText::new("This folder isn't added any more.").font(Type::BodyMedium.font()).color(theme::text_dim()));
         return;
     };
     page_title(ui, &name);
@@ -2378,13 +2379,14 @@ fn local_folder(app: &mut App, ui: &mut Ui, uri: &str, now: f64) {
     let looking = app.scanning(uri);
     ui.add_space(2.0);
     let sub = if looking { "Looking for music\u{2026}".to_owned() } else { format!("{} song{}", songs.len(), if songs.len() == 1 { "" } else { "s" }) };
-    ui.label(RichText::new(sub).font(theme::regular(14.0)).color(theme::text_dim()));
-    ui.add_space(16.0);
+    ui.label(RichText::new(sub).font(Type::BodyMedium.font()).color(theme::text_dim()));
+    ui.add_space(12.0);
     if !songs.is_empty() {
         play_shuffle(app, ui, &songs);
-        ui.add_space(16.0);
+        ui.add_space(4.0);
     }
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
         if !looking && pill(ui, "Refresh", None, false).clicked() {
             app.scan_folder(uri);
         }
@@ -2394,17 +2396,15 @@ fn local_folder(app: &mut App, ui: &mut Ui, uri: &str, now: f64) {
             app.nav_back();
         }
     });
-    ui.add_space(16.0);
+    ui.add_space(8.0);
     if songs.is_empty() {
         if !looking {
-            ui.label(RichText::new("No music found in this folder.").font(theme::semibold(15.0)).color(theme::text()));
+            ui.label(RichText::new("No music found in this folder.").font(Type::BodyLarge.font()).color(theme::text()));
         }
         return;
     }
     let rows = Rows::new(app, now);
-    egui::Frame::new().fill(theme::glass(0.06)).corner_radius(20).inner_margin(egui::Margin::symmetric(4, 6)).show(ui, |ui| {
-        list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
-    });
+    list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
 }
 
 // ------------------------------------------------------------------ settings
@@ -4280,6 +4280,29 @@ mod tests {
         assert_eq!(cover_side(380.0), 212.8);
         assert!(cover_side(328.0) >= 160.0 && cover_side(328.0) < 328.0 * 0.6);
         assert_eq!(cover_side(900.0), 220.0);
+    }
+
+    #[test]
+    fn the_storage_cards_parts_stay_inside_it_and_apart() {
+        for width in [328.0, 344.0, 361.0, 380.0] {
+            for (disk, change) in [(true, true), (false, true), (true, false), (false, false)] {
+                let card = Rect::from_min_size(pos2(16.0, 92.0), vec2(width, storage_height(disk, change)));
+                let g = storage_geom(card, disk, change);
+                assert_eq!(g.bar.is_some(), disk);
+                assert!(card.contains(g.size) && card.contains(g.count_right) && card.contains(g.line));
+                assert!(g.line.y >= g.size.y + 44.0, "under the size's line");
+                assert!(card.contains_rect(g.place), "{width} {disk} {change}: {g:?}");
+                if change {
+                    assert!(card.contains_rect(g.change), "{width} {disk}: {g:?}");
+                }
+                assert!(g.change.height() >= m3::TOUCH && g.change.width() >= m3::TOUCH);
+                assert!(g.place.right() < g.change.left() && g.place.width() >= 150.0, "{width}: {}", g.place.width());
+                if let Some(bar) = g.bar {
+                    assert!(card.contains_rect(bar));
+                    assert!(bar.top() >= g.line.y + 20.0 && bar.bottom() <= g.place.top(), "between the line and the place");
+                }
+            }
+        }
     }
 
     #[test]
