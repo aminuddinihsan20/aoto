@@ -7,8 +7,9 @@ use std::time::Duration;
 use egui::{Color32, Pos2, Rect, Sense, Ui, pos2, vec2};
 
 use super::widgets::{self, named};
-use super::{App, Repeat, pages, sheet};
+use super::{App, Repeat, m3, pages, sheet};
 use crate::audio::AudioCmd;
+use crate::material::Type;
 use crate::sleep::{FADE_SECS, Stop};
 use crate::theme::{self, icon};
 
@@ -295,12 +296,17 @@ pub(super) fn moon(ui: &Ui, center: Pos2, size: f32, color: Color32) {
 }
 
 /// How tall the sheet's pills are.
-const PILL_H: f32 = 52.0;
+fn pill_h() -> f32 {
+    if m3::on() { m3::OPTION_H } else { 52.0 }
+}
 
 /// One of the sheet's pills, filled in the accent while `on`; `outlined`: a line
 /// round it instead of a fill until then. True when tapped.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn pill(ui: &mut Ui, rect: Rect, id: egui::Id, label: &str, glyph: Option<char>, on: bool, outlined: bool, accent: Color32) -> bool {
+    if m3::on() {
+        return m3::option_pill(ui, rect, id, label, glyph.map(m3::Icon::Font), on, outlined);
+    }
     let resp = named(ui.interact(rect, id, Sense::click()), label);
     let t = theme::anim_bool(ui.ctx(), id.with("on"), on, 0.15);
     let press = if resp.is_pointer_button_down_on() { 0.08 } else { 0.0 };
@@ -327,18 +333,23 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
     let w = ui.available_width();
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
-    let (head, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
-    widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), "Sleep timer", theme::regular(24.0), theme::text(), w - 16.0);
-    widgets::text_at(ui, pos2(head.left() + 8.0, head.top() + 36.0), &status_line(s.running, s.left), theme::regular(14.5), theme::text_dim(), w - 16.0);
+    let material = m3::on();
+    if material {
+        m3::sheet_header(ui, "Sleep timer", &status_line(s.running, s.left));
+    } else {
+        let (head, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
+        widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), "Sleep timer", theme::regular(24.0), theme::text(), w - 16.0);
+        widgets::text_at(ui, pos2(head.left() + 8.0, head.top() + 36.0), &status_line(s.running, s.left), theme::regular(14.5), theme::text_dim(), w - 16.0);
+    }
     ui.add_space(16.0);
 
     let gap = 10.0;
     let third = (w - 2.0 * gap) / 3.0;
     for row in MINUTES.chunks(3) {
-        let (r, _) = ui.allocate_exact_size(vec2(w, PILL_H), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(vec2(w, pill_h()), Sense::hover());
         for (i, &minutes) in row.iter().enumerate() {
             let stop = Stop::After(minutes);
-            let cell = Rect::from_min_size(pos2(r.left() + (third + gap) * i as f32, r.top()), vec2(third, PILL_H));
+            let cell = Rect::from_min_size(pos2(r.left() + (third + gap) * i as f32, r.top()), vec2(third, pill_h()));
             if pill(ui, cell, stop_id(stop), &minutes_label(minutes), None, pick.stop == stop, false, s.accent) {
                 pick.stop = stop;
             }
@@ -347,9 +358,9 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
     }
     if s.by_song {
         let half = (w - gap) / 2.0;
-        let (r, _) = ui.allocate_exact_size(vec2(w, PILL_H), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(vec2(w, pill_h()), Sense::hover());
         for (i, (stop, label, glyph)) in [(Stop::SongEnd, "End of this song", icon::MUSIC), (Stop::QueueEnd, "End of the queue", icon::LIST_MUSIC)].into_iter().enumerate() {
-            let cell = Rect::from_min_size(pos2(r.left() + (half + gap) * i as f32, r.top()), vec2(half, PILL_H));
+            let cell = Rect::from_min_size(pos2(r.left() + (half + gap) * i as f32, r.top()), vec2(half, pill_h()));
             if pill(ui, cell, stop_id(stop), label, Some(glyph), pick.stop == stop, true, s.accent) {
                 pick.stop = stop;
             }
@@ -365,9 +376,14 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
         pick.fade = !pick.fade;
     }
     let text_w = w - 16.0 - 60.0;
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Fade out", theme::regular(17.0), theme::text(), text_w);
     let note = format!("Turns the volume down over the last {FADE_SECS:.0} seconds");
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), &note, theme::regular(13.5), theme::text_dim(), text_w);
+    if material {
+        let m = crate::material::scheme();
+        m3::two_lines(ui, r.left() + 8.0, r.center().y, text_w, "Fade out", Type::BodyLarge, m.on_surface, &note, Type::BodyMedium, m.on_surface_variant);
+    } else {
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Fade out", theme::regular(17.0), theme::text(), text_w);
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), &note, theme::regular(13.5), theme::text_dim(), text_w);
+    }
     let switch = Rect::from_center_size(pos2(r.right() - 8.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut pick.fade, "Fade out");
@@ -375,21 +391,26 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
 
     let (r, _) = ui.allocate_exact_size(vec2(w, 56.0), Sense::hover());
     let label = if s.running.is_some() { "Change timer" } else { "Start timer" };
-    let start = named(ui.interact(r, start_id(), Sense::click()), label);
-    let ink = on_accent(s.accent);
-    let fill = if start.is_pointer_button_down_on() { theme::lerp_color(s.accent, ink, 0.12) } else { s.accent };
-    ui.painter().rect_filled(r, 28.0, fill);
-    let g = widgets::galley(ui, label, theme::semibold(15.5), ink, w - 80.0);
-    let left = r.center().x - (28.0 + g.size().x) / 2.0;
-    moon(ui, pos2(left + 9.0, r.center().y), 19.0, ink);
-    ui.painter().galley(pos2(left + 28.0, r.center().y - g.size().y / 2.0), g, ink);
+    let start = if material {
+        m3::big_button(ui, r, label, m3::Icon::Drawn(moon), start_id())
+    } else {
+        let start = named(ui.interact(r, start_id(), Sense::click()), label);
+        let ink = on_accent(s.accent);
+        let fill = if start.is_pointer_button_down_on() { theme::lerp_color(s.accent, ink, 0.12) } else { s.accent };
+        ui.painter().rect_filled(r, 28.0, fill);
+        let g = widgets::galley(ui, label, theme::semibold(15.5), ink, w - 80.0);
+        let left = r.center().x - (28.0 + g.size().x) / 2.0;
+        moon(ui, pos2(left + 9.0, r.center().y), 19.0, ink);
+        ui.painter().galley(pos2(left + 28.0, r.center().y - g.size().y / 2.0), g, ink);
+        start
+    };
     if start.clicked() {
         ask = Some(Ask::Start(pick.stop, pick.fade));
     }
 
     if s.running.is_some() {
         ui.add_space(gap);
-        let (r, _) = ui.allocate_exact_size(vec2(w, PILL_H), Sense::hover());
+        let (r, _) = ui.allocate_exact_size(vec2(w, pill_h()), Sense::hover());
         if pill(ui, r, cancel_id(), "Cancel timer", None, false, true, s.accent) {
             ask = Some(Ask::Cancel);
         }

@@ -5,9 +5,14 @@
 use egui::{Color32, Pos2, Rect, Sense, Ui, pos2, vec2};
 
 use super::widgets::{self, named};
-use super::{App, pages, sheet};
+use super::{App, m3, pages, sheet};
+use crate::material::Type;
 use crate::speed::{SPEEDS, label};
 use crate::theme;
+
+/// The group of Settings › Playback the speed and its pitch switch are in: its label
+/// names the buttons under it.
+pub(super) const SETTINGS_GROUP: &str = "Playback speed";
 
 /// Why the speeds can't be picked in a party.
 const PARTY_NOTE: &str = "In a listening party everyone plays at 1×, to hear the same moment.";
@@ -48,7 +53,7 @@ fn pitch_id() -> egui::Id {
 /// The speeds as a row of pills across `rect`, the one that plays filled in the accent.
 /// In a party they show 1× and can't be picked.
 fn pills(ui: &mut Ui, rect: Rect, s: &mut Showing) {
-    let gap = if rect.width() < 300.0 { 4.0 } else { 6.0 };
+    let gap = if rect.width() < 300.0 || m3::on() { 4.0 } else { 6.0 };
     let w = (rect.width() - gap * (SPEEDS.len() - 1) as f32) / SPEEDS.len() as f32;
     let font = theme::semibold(if w < 44.0 { 11.5 } else { 13.5 });
     let fade = if s.party { 0.45 } else { 1.0 };
@@ -57,6 +62,16 @@ fn pills(ui: &mut Ui, rect: Rect, s: &mut Showing) {
         let text = label(speed);
         let resp = named(ui.interact(cell, speed_id(speed), if s.party { Sense::hover() } else { Sense::click() }), &text);
         let on = speed == s.playing;
+        if m3::on() {
+            // Material: connected buttons, the speed that plays a filled pill.
+            let rest = crate::material::scheme().surface_container_highest;
+            m3::segment(ui, cell, &text, &m3::Segment { on, first: i == 0, last: i + 1 == SPEEDS.len(), pressed: resp.is_pointer_button_down_on(), rest, fade });
+            if resp.clicked() {
+                s.speed = speed;
+                s.playing = speed;
+            }
+            continue;
+        }
         let t = theme::anim_bool(ui.ctx(), resp.id.with("on"), on, 0.15);
         let press = if resp.is_pointer_button_down_on() { 0.08 } else { 0.0 };
         ui.painter().rect_filled(cell, cell.height() / 2.0, theme::with_alpha(theme::lerp_color(theme::glass(0.09 + press), s.accent, t), fade));
@@ -68,6 +83,39 @@ fn pills(ui: &mut Ui, rect: Rect, s: &mut Showing) {
             s.playing = speed;
         }
     }
+}
+
+/// The speed's group in the phone's Settings: the connected buttons (the group's label
+/// names them and says the speed that plays), and in a party why they are at 1×.
+pub(super) fn settings_buttons(app: &mut App, ui: &mut Ui) {
+    if !pages::settings_row_shown(ui, "Playback speed", settings_note(app)) {
+        return;
+    }
+    let mut s = Showing::of(app);
+    if pages::settings_section(ui) != SETTINGS_GROUP {
+        // Among other rows (what a search found): it names itself.
+        let m = crate::material::scheme();
+        let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+        let value = m3::galley(ui, &label(s.playing), Type::TitleMedium, m.primary, 80.0);
+        m3::text(ui, pos2(head.left(), head.center().y - 12.0), "Playback speed", Type::BodyLarge, m.on_surface, head.width() - value.size().x - 12.0);
+        ui.painter().galley(pos2(head.right() - value.size().x, head.center().y - value.size().y / 2.0), value, m.primary);
+    }
+    ui.add_space(8.0);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), m3::TOUCH), Sense::hover());
+    pills(ui, rect, &mut s);
+    ui.add_space(4.0);
+    if s.party {
+        let m = crate::material::scheme();
+        let g = m3::galley_wrapped(ui, PARTY_NOTE, Type::BodyMedium, m.on_surface_variant, ui.available_width(), 4);
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), g.size().y + 8.0), Sense::hover());
+        ui.painter().galley(r.min, g, m.on_surface_variant);
+    }
+    s.apply(app);
+}
+
+/// The speed that plays, as the group's label says it.
+pub(super) fn settings_value(app: &App) -> String {
+    label(app.speed_now())
 }
 
 /// The row of speeds as a settings row's control.
@@ -113,10 +161,18 @@ fn contents(ui: &mut Ui, s: &mut Showing) {
     let w = ui.available_width();
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
 
+    let material = m3::on();
     let (head, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
-    widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), "Playback speed", theme::regular(24.0), theme::text(), w - 110.0);
-    let value = widgets::galley(ui, &label(s.playing), theme::semibold(24.0), s.accent, 100.0);
-    ui.painter().galley(pos2(head.right() - 8.0 - value.size().x, head.top()), value, s.accent);
+    if material {
+        let m = crate::material::scheme();
+        m3::text(ui, pos2(head.left() + 8.0, head.top()), "Playback speed", Type::HeadlineSmall, m.on_surface, w - 110.0);
+        let value = m3::galley(ui, &label(s.playing), Type::HeadlineSmall.spec().weight(crate::material::Weight::Medium), m.primary, 100.0);
+        ui.painter().galley(pos2(head.right() - 8.0 - value.size().x, head.top()), value, m.primary);
+    } else {
+        widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), "Playback speed", theme::regular(24.0), theme::text(), w - 110.0);
+        let value = widgets::galley(ui, &label(s.playing), theme::semibold(24.0), s.accent, 100.0);
+        ui.painter().galley(pos2(head.right() - 8.0 - value.size().x, head.top()), value, s.accent);
+    }
     ui.add_space(12.0);
 
     let (row, _) = ui.allocate_exact_size(vec2(w, 48.0), Sense::hover());
@@ -130,16 +186,21 @@ fn contents(ui: &mut Ui, s: &mut Showing) {
         s.keep_pitch = !s.keep_pitch;
     }
     let text_w = w - 16.0 - 60.0;
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Keep the pitch", theme::regular(17.0), theme::text(), text_w);
     let note = if s.keep_pitch { "Voices and instruments stay in tune" } else { "The pitch rises and falls with the speed" };
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), note, theme::regular(13.5), theme::text_dim(), text_w);
-    let switch = Rect::from_center_size(pos2(r.right() - 8.0 - 22.0, r.center().y), vec2(44.0, 26.0));
+    if material {
+        let m = crate::material::scheme();
+        m3::two_lines(ui, r.left() + 8.0, r.center().y, text_w, "Keep the pitch", Type::BodyLarge, m.on_surface, note, Type::BodyMedium, m.on_surface_variant);
+    } else {
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Keep the pitch", theme::regular(17.0), theme::text(), text_w);
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), note, theme::regular(13.5), theme::text_dim(), text_w);
+    }
+    let switch = if material { Rect::from_center_size(pos2(r.right() - 8.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size()) } else { Rect::from_center_size(pos2(r.right() - 8.0 - 22.0, r.center().y), vec2(44.0, 26.0)) };
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut s.keep_pitch, "Keep the pitch");
 
     if s.party {
         ui.add_space(4.0);
-        let g = widgets::galley_wrapped(ui, PARTY_NOTE, theme::regular(13.5), theme::text_dim(), w - 16.0, 3);
+        let g = if material { m3::galley_wrapped(ui, PARTY_NOTE, Type::BodyMedium, theme::text_dim(), w - 16.0, 3) } else { widgets::galley_wrapped(ui, PARTY_NOTE, theme::regular(13.5), theme::text_dim(), w - 16.0, 3) };
         let (r, _) = ui.allocate_exact_size(vec2(w, g.size().y + 8.0), Sense::hover());
         ui.painter().galley(pos2(r.left() + 8.0, r.top()), g, theme::text_dim());
     }

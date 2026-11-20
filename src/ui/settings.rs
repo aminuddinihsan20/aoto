@@ -188,7 +188,8 @@ impl Row {
         match self {
             Row::Account | Row::Channel | Row::ListenTogether => (C::Account, "Account"),
             Row::ClearHistory => (C::Account, "Listening history"),
-            Row::PlaybackSpeed | Row::KeepPitch | Row::Autoplay | Row::Gapless | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, ""),
+            Row::PlaybackSpeed | Row::KeepPitch => (C::Playback, super::speed::SETTINGS_GROUP),
+            Row::Autoplay | Row::Gapless | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, "Between songs"),
             Row::Equalizer | Row::SpatialAudio | Row::Normalize | Row::LogVolume => (C::Sound, "Sound"),
             Row::HiRes | Row::PreferAtmos | Row::DisableDirect | Row::PlaySongs => (C::Sound, "Quality"),
             Row::DownloadFolder => (C::Downloads, ""),
@@ -345,7 +346,9 @@ pub fn category_page(app: &mut App, ui: &mut Ui, category: Category) {
     }
     for (label, rows) in groups(category) {
         if !label.is_empty() {
-            pages::section_label(ui, label, None);
+            // The speed's group says the speed that plays beside its name.
+            let value = (label == super::speed::SETTINGS_GROUP).then(|| super::speed::settings_value(app));
+            pages::section_label(ui, label, value.as_deref());
         }
         pages::settings_card(ui, |ui| {
             for row in rows {
@@ -403,7 +406,8 @@ mod tests {
     #[test]
     fn a_categorys_page_keeps_its_rows_in_their_groups() {
         assert_eq!(groups(Category::Sound), [("Sound", vec![Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::LogVolume]), ("Quality", vec![Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs])]);
-        assert_eq!(groups(Category::Playback).len(), 1, "a page of one group");
+        assert_eq!(groups(Category::Playback), [("Playback speed", vec![Row::PlaybackSpeed, Row::KeepPitch]), ("Between songs", vec![Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic])], "the speed and its pitch switch are a card of their own");
+        assert_eq!(groups(Category::Downloads).len(), 1, "a page of one group");
         assert_eq!(groups(Category::Appearance).iter().map(|g| g.0).collect::<Vec<_>>(), ["Theme", "Motion", "More", "Artist pages"]);
         for category in Category::ALL {
             let grouped: Vec<Row> = groups(category).into_iter().flat_map(|g| g.1).collect();

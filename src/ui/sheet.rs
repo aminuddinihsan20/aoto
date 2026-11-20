@@ -77,9 +77,14 @@ pub fn show(ctx: &egui::Context, key: &str, open: &mut bool, add: impl FnOnce(&m
         let body = ui.interact(rect, id.with("body"), Sense::click_and_drag());
         let corners = CornerRadius { nw: RADIUS, ne: RADIUS, sw: 0, se: 0 };
         ui.painter().rect_filled(rect, corners, theme::surface_fill());
-        ui.painter().rect_stroke(rect, corners, egui::Stroke::new(1.0, theme::glass(0.08)), egui::StrokeKind::Inside);
         let handle = Rect::from_center_size(pos2(rect.center().x, rect.top() + 14.0), vec2(32.0, 4.0));
-        ui.painter().rect_filled(handle, 2.0, theme::glass(0.32));
+        if crate::material::on() {
+            // Material's sheet is its surface alone, with the handle in the outline colour.
+            ui.painter().rect_filled(handle, 2.0, crate::material::scheme().outline);
+        } else {
+            ui.painter().rect_stroke(rect, corners, egui::Stroke::new(1.0, theme::glass(0.08)), egui::StrokeKind::Inside);
+            ui.painter().rect_filled(handle, 2.0, theme::glass(0.32));
+        }
 
         let held = body.dragged();
         if held {

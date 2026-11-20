@@ -2457,6 +2457,11 @@ fn search_of(ui: &Ui) -> SettingsSearch {
     ui.data(|d| d.get_temp::<SettingsSearch>(search_key())).unwrap_or_default()
 }
 
+/// The heading of the group whose rows are being drawn.
+pub(super) fn settings_section(ui: &Ui) -> String {
+    search_of(ui).section
+}
+
 fn put_search(ui: &Ui, s: &SettingsSearch) {
     ui.data_mut(|d| d.insert_temp(search_key(), s.clone()));
 }
@@ -2719,6 +2724,7 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
         }
         Row::ListeningStats => super::stats::stats_row(app, ui),
         Row::ClearHistory => super::stats::clear_row(app, ui),
+        Row::PlaybackSpeed if m3::on() => super::speed::settings_buttons(app, ui),
         Row::PlaybackSpeed => {
             setting_row(ui, "Playback speed", Some(super::speed::settings_note(app)), |ui| super::speed::settings_pills(app, ui));
         }

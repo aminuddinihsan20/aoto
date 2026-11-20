@@ -360,13 +360,21 @@ const BUTTON_H: f32 = 56.0;
 /// How far a job is, as a line filling up in the accent.
 fn progress_bar(ui: &Ui, rect: Rect, fraction: f32, accent: Color32) {
     let radius = rect.height() / 2.0;
-    ui.painter().rect_filled(rect, radius, theme::glass(0.16));
+    ui.painter().rect_filled(rect, radius, if super::m3::on() { crate::material::scheme().secondary_container } else { theme::glass(0.16) });
     let filled = rect.width() * fraction.clamp(0.0, 1.0);
     if filled > 0.0 {
         // Never thinner than its round ends.
         let fill = Rect::from_min_size(rect.min, vec2(filled.max(rect.height()), rect.height()));
         ui.painter().rect_filled(fill, radius, accent);
     }
+}
+
+/// The sheet's main button: Material's round filled one, or the app's filled pill.
+fn main_button(ui: &mut Ui, rect: Rect, label: &str, glyph: char, accent: Color32) -> bool {
+    if super::m3::on() {
+        return super::m3::big_button(ui, rect, label, glyph, main_id()).clicked();
+    }
+    pill(ui, rect, main_id(), label, Some(glyph), true, false, accent)
 }
 
 /// What the sheet holds: what it is about, the Wi-Fi switch, and its two buttons: Cancel
@@ -382,12 +390,22 @@ fn contents(ui: &mut Ui, s: &Showing) -> Option<Tap> {
         None if s.loading => (format!("Download {what}"), s.title.clone(), vec!["Its songs are still coming in\u{2026}".to_owned()]),
         None => (format!("Download {what}"), format!("{} \u{2022} {}", count(total, "song"), s.title), plan_note(&s.plan).into_iter().collect()),
     };
-    let (head, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
-    widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), &heading, theme::regular(24.0), theme::text(), w - 16.0);
-    widgets::text_at(ui, pos2(head.left() + 8.0, head.top() + 36.0), &line, theme::regular(14.5), theme::text_dim(), w - 16.0);
+    let material = super::m3::on();
+    let m = crate::material::scheme();
+    if material {
+        super::m3::sheet_header(ui, &heading, &line);
+    } else {
+        let (head, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
+        widgets::text_at(ui, pos2(head.left() + 8.0, head.top()), &heading, theme::regular(24.0), theme::text(), w - 16.0);
+        widgets::text_at(ui, pos2(head.left() + 8.0, head.top() + 36.0), &line, theme::regular(14.5), theme::text_dim(), w - 16.0);
+    }
     for note in &notes {
         let (r, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
-        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 2.0), note, theme::regular(14.5), theme::text_dim(), w - 16.0);
+        if material {
+            super::m3::text(ui, pos2(r.left() + 8.0, r.top() + 2.0), note, Type::BodyMedium, m.on_surface_variant, w - 16.0);
+        } else {
+            widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 2.0), note, theme::regular(14.5), theme::text_dim(), w - 16.0);
+        }
     }
     if let Some(job) = &s.job {
         ui.add_space(10.0);
@@ -404,8 +422,12 @@ fn contents(ui: &mut Ui, s: &Showing) -> Option<Tap> {
         on = !on;
     }
     let text_w = w - 16.0 - 60.0;
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Wi-Fi only", theme::regular(17.0), theme::text(), text_w);
-    widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), "Starts when this phone is on Wi-Fi", theme::regular(13.5), theme::text_dim(), text_w);
+    if material {
+        super::m3::two_lines(ui, r.left() + 8.0, r.center().y, text_w, "Wi-Fi only", Type::BodyLarge, m.on_surface, "Starts when this phone is on Wi-Fi", Type::BodyMedium, m.on_surface_variant);
+    } else {
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 8.0), "Wi-Fi only", theme::regular(17.0), theme::text(), text_w);
+        widgets::text_at(ui, pos2(r.left() + 8.0, r.top() + 32.0), "Starts when this phone is on Wi-Fi", theme::regular(13.5), theme::text_dim(), text_w);
+    }
     let switch = Rect::from_center_size(pos2(r.right() - 8.0 - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut on, "Wi-Fi only");
@@ -421,16 +443,16 @@ fn contents(ui: &mut Ui, s: &Showing) -> Option<Tap> {
     let main = Rect::from_min_max(pos2(left.right() + gap, r.top()), r.max);
     match &s.job {
         Some(job) => {
-            if pill(ui, left, left_id(), "Cancel download", None, false, true, s.accent) {
+            if pill(ui, left, left_id(), "Cancel download", None, false, !material, s.accent) {
                 tap = Some(Tap::Command(Command::Cancel(job.id)));
             }
             let (label, glyph, command) = if job.paused { ("Resume", icon::PLAY, Command::Resume(job.id)) } else { ("Pause", icon::PAUSE, Command::Pause(job.id)) };
-            if pill(ui, main, main_id(), label, Some(glyph), true, false, s.accent) {
+            if main_button(ui, main, label, glyph, s.accent) {
                 tap = Some(Tap::Command(command));
             }
         }
         None => {
-            if pill(ui, left, left_id(), "Cancel", None, false, true, s.accent) {
+            if pill(ui, left, left_id(), "Cancel", None, false, !material, s.accent) {
                 tap = Some(Tap::Close);
             }
             let label = download_label(&s.plan);
@@ -438,9 +460,9 @@ fn contents(ui: &mut Ui, s: &Showing) -> Option<Tap> {
                 // Nothing to fetch (yet): it is there, and takes no tap.
                 named(ui.interact(main, main_id(), Sense::hover()), &label);
                 ui.painter().rect_filled(main, BUTTON_H / 2.0, theme::glass(0.09));
-                let g = widgets::galley(ui, &label, theme::semibold(15.0), theme::text_faint(), main.width() - 20.0);
+                let g = if material { super::m3::galley(ui, &label, Type::TitleMedium, theme::text_faint(), main.width() - 20.0) } else { widgets::galley(ui, &label, theme::semibold(15.0), theme::text_faint(), main.width() - 20.0) };
                 ui.painter().galley(pos2(main.center().x - g.size().x / 2.0, main.center().y - g.size().y / 2.0), g, theme::text_faint());
-            } else if pill(ui, main, main_id(), &label, Some(icon::DOWNLOAD), true, false, s.accent) {
+            } else if main_button(ui, main, &label, icon::DOWNLOAD, s.accent) {
                 tap = Some(Tap::Download);
             }
         }

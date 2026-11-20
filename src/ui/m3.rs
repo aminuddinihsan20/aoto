@@ -796,34 +796,55 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize>
 /// too, so a second tap on it can let it go. `rest` fills the ones not chosen (a
 /// step above the surface the row stands on).
 pub fn segmented_any(ui: &mut Ui, labels: &[&str], selected: Option<usize>, rest: Color32) -> Option<usize> {
-    let m = material::scheme();
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TOUCH), Sense::hover());
     let mut tapped = None;
     let last = labels.len().saturating_sub(1);
     for (i, (label, rect)) in labels.iter().zip(segments(row, labels.len())).enumerate() {
         let resp = named(ui.interact(rect, ui.scope_id().with(("segment", *label, row.min.y as i32)), Sense::click()), label);
-        let on = Some(i) == selected;
         let body = Rect::from_center_size(rect.center(), vec2(rect.width(), 44.0));
-        // The chosen one is a pill; the others keep their round ends at the row's ends only.
-        let (round, flat) = (22_u8, 8_u8);
-        let corners = if on {
-            CornerRadius::same(round)
-        } else {
-            let (l, r) = (if i == 0 { round } else { flat }, if i == last { round } else { flat });
-            CornerRadius { nw: l, sw: l, ne: r, se: r }
-        };
-        let (fill, ink) = if on { (m.primary, m.on_primary) } else { (rest, m.on_surface) };
-        ui.painter().rect_filled(body, corners, fill);
-        if resp.is_pointer_button_down_on() {
-            ui.painter().rect_filled(body, corners, ink.gamma_multiply(PRESSED));
-        }
-        let g = galley(ui, label, Type::LabelLarge, ink, rect.width() - 8.0);
-        ui.painter().galley(body.center() - g.size() / 2.0, g, ink);
+        segment(ui, body, label, &Segment { on: Some(i) == selected, first: i == 0, last: i == last, pressed: resp.is_pointer_button_down_on(), rest, fade: 1.0 });
         if resp.clicked() {
             tapped = Some(i);
         }
     }
     tapped
+}
+
+/// How one of a row of connected buttons is drawn: chosen or not, at an end of its
+/// row, under a finger, the fill of one not chosen, and how present it is (a row that
+/// cannot be used is faded).
+pub struct Segment {
+    pub on: bool,
+    pub first: bool,
+    pub last: bool,
+    pub pressed: bool,
+    pub rest: Color32,
+    pub fade: f32,
+}
+
+/// Paint one of a row of connected buttons in `body`, for a row that takes its taps
+/// itself. The chosen one is a pill in the primary colour; the others keep their round
+/// ends at the row's ends only.
+pub fn segment(ui: &Ui, body: Rect, label: &str, s: &Segment) {
+    let m = material::scheme();
+    let round = (body.height() / 2.0).min(255.0) as u8;
+    let flat = shape::CHIP as u8;
+    let corners = if s.on {
+        CornerRadius::same(round)
+    } else {
+        let (l, r) = (if s.first { round } else { flat }, if s.last { round } else { flat });
+        CornerRadius { nw: l, sw: l, ne: r, se: r }
+    };
+    let (fill, ink) = if s.on { (m.primary, m.on_primary) } else { (s.rest, m.on_surface) };
+    ui.painter().rect_filled(body, corners, fill.gamma_multiply(s.fade));
+    if s.pressed {
+        ui.painter().rect_filled(body, corners, ink.gamma_multiply(PRESSED));
+    }
+    let ink = ink.gamma_multiply(s.fade);
+    // A narrow segment (six speeds on a small phone) takes the smaller label.
+    let role = if body.width() < 46.0 { Type::LabelMedium } else { Type::LabelLarge };
+    let g = galley(ui, label, role, ink, body.width() - 4.0);
+    ui.painter().galley(body.center() - g.size() / 2.0, g, ink);
 }
 
 // ------------------------------------------------------------------ dialog
