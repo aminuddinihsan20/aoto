@@ -47,7 +47,6 @@ final class AudioOutput {
     private static final AudioAttributes MUSIC =
             new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build();
 
-    private static Context app;
     private static AudioManager audio;
     private static int offer;
     private static String last = "";
@@ -57,15 +56,15 @@ final class AudioOutput {
 
     /** Report the output and the volume now, and from here on whenever they change. Called once, on the main thread. */
     static void watch(Context context) {
-        if (app != null) {
+        if (audio != null) {
             return;
         }
-        app = context.getApplicationContext();
+        Context app = context.getApplicationContext();
         audio = app.getSystemService(AudioManager.class);
         if (audio == null) {
             return;
         }
-        offer = offer();
+        offer = offer(app);
         Handler main = new Handler(Looper.getMainLooper());
         // A device plugged in, connected or gone.
         audio.registerAudioDeviceCallback(new AudioDeviceCallback() {
@@ -169,9 +168,9 @@ final class AudioOutput {
     }
 
     /** What the app's button will open on this phone: the first way that is there. */
-    private static int offer() {
+    private static int offer(Context context) {
         for (int way : OutputLogic.switchers(Build.VERSION.SDK_INT)) {
-            if (way == OutputLogic.ROUTER || intent(way) != null) {
+            if (way == OutputLogic.ROUTER || intent(context, way) != null) {
                 return OutputLogic.offer(way);
             }
         }
@@ -188,7 +187,7 @@ final class AudioOutput {
                     }
                     continue;
                 }
-                Intent intent = intent(way);
+                Intent intent = intent(activity, way);
                 if (intent == null) {
                     continue;
                 }
@@ -206,15 +205,15 @@ final class AudioOutput {
     }
 
     /** The intent that opens `way`, or null when no system app answers it on this phone. */
-    private static Intent intent(int way) {
-        PackageManager packages = app.getPackageManager();
+    private static Intent intent(Context context, int way) {
+        PackageManager packages = context.getPackageManager();
         Intent intent;
         List<ResolveInfo> answers;
         if (way == OutputLogic.SYSTEM_UI) {
-            intent = new Intent(SYSTEM_UI_SWITCHER).setPackage(SYSTEM_UI).putExtra(SYSTEM_UI_PACKAGE, app.getPackageName());
+            intent = new Intent(SYSTEM_UI_SWITCHER).setPackage(SYSTEM_UI).putExtra(SYSTEM_UI_PACKAGE, context.getPackageName());
             answers = packages.queryBroadcastReceivers(intent, 0);
         } else if (way == OutputLogic.SETTINGS_PANEL) {
-            intent = new Intent(SETTINGS_PANEL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(SETTINGS_PANEL_PACKAGE, app.getPackageName());
+            intent = new Intent(SETTINGS_PANEL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK).putExtra(SETTINGS_PANEL_PACKAGE, context.getPackageName());
             answers = packages.queryIntentActivities(intent, 0);
         } else if (way == OutputLogic.BLUETOOTH_SETTINGS) {
             intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
