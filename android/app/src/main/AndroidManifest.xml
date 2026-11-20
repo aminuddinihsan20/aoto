@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Also what tells Wi-Fi from mobile data, for downloads set to "Wi-Fi only". -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Music keeps playing with the app away: a media notification (service) and the
          CPU awake for it. Notifications need asking for on Android 13+. -->

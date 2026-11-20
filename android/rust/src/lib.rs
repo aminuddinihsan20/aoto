@@ -130,6 +130,13 @@ extern "system" fn Java_io_github_aminuddinihsan20_bitchord_PlaybackService_nati
     bitchord::platform::push_media_command(code, arg);
 }
 
+/// What the phone is connected through: 0 nothing, 1 a connection that counts the data,
+/// 2 one that doesn't (Connectivity.java).
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_Connectivity_nativeNetwork(_env: Jni, _class: Jni, state: i32) {
+    bitchord::platform::set_network(state);
+}
+
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_aminuddinihsan20_bitchord_MainActivity_nativeTakeCall(env: jni::JNIEnv, _class: Jni) -> jni::sys::jstring {
     let line = bitchord::platform::take_call().map(|c| c.to_line()).unwrap_or_default();

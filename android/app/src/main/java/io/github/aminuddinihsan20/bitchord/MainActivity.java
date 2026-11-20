@@ -70,6 +70,8 @@ public class MainActivity extends GameActivity {
 
         // The app asks for a sign-in by setting a request; open the sign-in page for it.
         Handler main = new Handler(Looper.getMainLooper());
+        // Downloads wait for Wi-Fi when asked to: the app hears what the phone is on.
+        main.post(() -> Connectivity.watch(getApplicationContext()));
         main.post(new Runnable() {
             @Override
             public void run() {

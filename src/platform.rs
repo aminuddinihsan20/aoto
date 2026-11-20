@@ -372,6 +372,52 @@ pub fn take_media_commands() -> Vec<MediaCommand> {
     std::mem::take(&mut *MEDIA_COMMANDS.lock().unwrap_or_else(|e| e.into_inner()))
 }
 
+/// What the phone reaches the internet through, as far as a download cares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Network {
+    Offline,
+    /// A connection that counts the data: mobile data, a hotspot marked as such.
+    Metered,
+    /// Wi-Fi, or anything else that doesn't.
+    Unmetered,
+}
+
+impl Network {
+    /// The number the activity (Java) knows it by.
+    pub fn code(self) -> i32 {
+        match self {
+            Network::Offline => 0,
+            Network::Metered => 1,
+            Network::Unmetered => 2,
+        }
+    }
+
+    pub fn from_code(code: i32) -> Option<Network> {
+        match code {
+            0 => Some(Network::Offline),
+            1 => Some(Network::Metered),
+            2 => Some(Network::Unmetered),
+            _ => None,
+        }
+    }
+}
+
+/// Until the activity reports, Android has no connection (nothing is fetched over mobile
+/// data unasked). A desktop can't tell, and its network doesn't count the data.
+static NETWORK: AtomicI32 = AtomicI32::new(if cfg!(target_os = "android") { 0 } else { 2 });
+
+/// The activity: the phone's connection changed.
+pub fn set_network(code: i32) {
+    if let Some(network) = Network::from_code(code) {
+        NETWORK.store(network.code(), Ordering::SeqCst);
+        wake();
+    }
+}
+
+pub fn network() -> Network {
+    Network::from_code(NETWORK.load(Ordering::SeqCst)).unwrap_or(Network::Offline)
+}
+
 /// A job the app asks the activity (Java) to do, and waits for: choosing a folder,
 /// copying a file into it, listing music, fetching a file. `kind` names it, `arg` is its
 /// one argument; the activity answers with [`answer_call`].
@@ -641,6 +687,24 @@ mod tests {
             "an unknown code is dropped"
         );
         assert!(take_media_commands().is_empty());
+    }
+
+    #[test]
+    fn a_connection_has_a_code_for_the_activity_and_back() {
+        for network in [Network::Offline, Network::Metered, Network::Unmetered] {
+            assert_eq!(Network::from_code(network.code()), Some(network));
+        }
+        assert_eq!(Network::from_code(7), None);
+    }
+
+    #[test]
+    fn the_activity_reports_the_connection_and_a_desktop_counts_no_data() {
+        assert_eq!(network(), Network::Unmetered, "nothing reports on a desktop");
+        set_network(Network::Metered.code());
+        assert_eq!(network(), Network::Metered);
+        set_network(9);
+        assert_eq!(network(), Network::Metered, "an unknown code changes nothing");
+        set_network(Network::Unmetered.code());
     }
 
     #[test]
