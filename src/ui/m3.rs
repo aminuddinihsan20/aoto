@@ -14,6 +14,12 @@ use crate::material::{self, Spec, Type, Weight, shape};
 use crate::model::{Card, Target, Thumb, Track};
 use crate::theme::{self, icon};
 
+/// Is this the phone, drawn in Material You? Then pages shared with the desktop draw
+/// their Material layout.
+pub fn on() -> bool {
+    crate::platform::phone() && material::on()
+}
+
 /// The least a finger needs: every control can be hit in a square this size.
 pub const TOUCH: f32 = 48.0;
 /// How strongly a pressed control is washed with its content colour.
@@ -62,6 +68,8 @@ pub fn two_lines(ui: &Ui, left: f32, cy: f32, width: f32, title: &str, title_rol
 pub enum Icon {
     Font(char),
     Glyph(&'static [u8]),
+    /// One of `drawn`'s marks, which neither set has.
+    Drawn(fn(&Ui, Pos2, f32, Color32)),
 }
 
 impl From<char> for Icon {
@@ -82,6 +90,90 @@ pub fn paint_icon(ui: &Ui, center: Pos2, size: f32, icon: Icon, color: Color32) 
         // The font's glyphs fill less of their box than the drawn ones.
         Icon::Font(c) => widgets::icon_at(ui, center, c, size * 0.85, color),
         Icon::Glyph(g) => glyphs::draw(ui, center, size, g, color),
+        Icon::Drawn(draw) => draw(ui, center, size, color),
+    }
+}
+
+/// Marks the icon font lacks, drawn in its line on its 24-unit grid: `center` is the
+/// middle of the grid and `size` its side.
+pub mod drawn {
+    use egui::{Color32, Pos2, Stroke, Ui, vec2};
+
+    /// The point (`x`, `y`) of the 24-unit grid.
+    fn at(center: Pos2, size: f32, x: f32, y: f32) -> Pos2 {
+        center + (vec2(x, y) - vec2(12.0, 12.0)) * (size / 24.0)
+    }
+
+    /// A line through the grid's `points`, two units thick with round ends.
+    fn line(ui: &Ui, center: Pos2, size: f32, color: Color32, points: &[(f32, f32)]) {
+        let width = 2.0 * size / 24.0;
+        let points: Vec<Pos2> = points.iter().map(|&(x, y)| at(center, size, x, y)).collect();
+        for end in [points.first(), points.last()].into_iter().flatten() {
+            ui.painter().circle_filled(*end, width / 2.0, color);
+        }
+        ui.painter().add(egui::Shape::line(points, Stroke::new(width, color)));
+    }
+
+    pub fn plus(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        line(ui, center, size, color, &[(5.0, 12.0), (19.0, 12.0)]);
+        line(ui, center, size, color, &[(12.0, 5.0), (12.0, 19.0)]);
+    }
+
+    pub fn minus(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        line(ui, center, size, color, &[(5.0, 12.0), (19.0, 12.0)]);
+    }
+
+    /// Three sliders: sound, and the settings of a page.
+    pub fn tune(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        for (y, knob) in [(6.0, 15.0), (12.0, 8.0), (18.0, 13.0)] {
+            line(ui, center, size, color, &[(4.0, y), (knob - 3.0, y)]);
+            line(ui, center, size, color, &[(knob + 3.0, y), (20.0, y)]);
+            line(ui, center, size, color, &[(knob, y - 2.5), (knob, y + 2.5)]);
+        }
+    }
+
+    /// Three bars of a chart: listening stats.
+    pub fn bars(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        for (x, top) in [(6.0, 11.0), (12.0, 5.0), (18.0, 14.0)] {
+            line(ui, center, size, color, &[(x, 19.0), (x, top)]);
+        }
+    }
+
+    /// An "i" in a ring.
+    pub fn info(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        let k = size / 24.0;
+        ui.painter().circle_stroke(center, 9.0 * k, Stroke::new(2.0 * k, color));
+        ui.painter().circle_filled(at(center, size, 12.0, 8.0), 1.3 * k, color);
+        line(ui, center, size, color, &[(12.0, 11.5), (12.0, 16.5)]);
+    }
+
+    /// Two arrows passing each other: music brought over from elsewhere.
+    pub fn swap(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        line(ui, center, size, color, &[(4.0, 8.0), (20.0, 8.0)]);
+        line(ui, center, size, color, &[(16.0, 4.0), (20.0, 8.0), (16.0, 12.0)]);
+        line(ui, center, size, color, &[(20.0, 16.0), (4.0, 16.0)]);
+        line(ui, center, size, color, &[(8.0, 12.0), (4.0, 16.0), (8.0, 20.0)]);
+    }
+
+    /// A check over a line: this is downloaded.
+    pub fn saved(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        line(ui, center, size, color, &[(6.0, 10.0), (10.0, 14.0), (18.0, 5.0)]);
+        line(ui, center, size, color, &[(5.0, 19.0), (19.0, 19.0)]);
+    }
+
+    /// Wi-Fi: three arcs over the dot they share as their centre.
+    pub fn wifi(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        let k = size / 24.0;
+        let dot = center + vec2(0.0, 7.5) * k;
+        let stroke = Stroke::new(2.0 * k, color);
+        for (radius, half) in [(5.0, 44.4_f32), (10.0, 44.4), (15.0, 41.8)] {
+            let arc = (0..=12).map(|i| {
+                let a = (-90.0 - half + 2.0 * half * i as f32 / 12.0).to_radians();
+                dot + vec2(a.cos(), a.sin()) * radius * k
+            });
+            ui.painter().add(egui::Shape::line(arc.collect(), stroke));
+        }
+        ui.painter().circle_filled(dot, 1.3 * k, color);
     }
 }
 
@@ -247,9 +339,10 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum IconStyle {
     Standard,
-    /// The next stages' round actions (a collection's header, the transport).
-    #[allow(dead_code)]
+    /// A round action beside the main one (a collection's header, the transport).
     Tonal,
+    /// A quieter container, the colour of a card: an action among several.
+    Surface,
     Filled,
 }
 
@@ -290,8 +383,7 @@ impl<'a> IconButton<'a> {
         self.size.max(TOUCH)
     }
 
-    /// Draw it in the layout. The next stages' rows of actions are laid out with it.
-    #[allow(dead_code)]
+    /// Draw it in the layout.
     pub fn show(self, ui: &mut Ui) -> Response {
         let (rect, _) = ui.allocate_exact_size(Vec2::splat(self.target()), Sense::hover());
         let id = ui.scope_id().with(("icon-button", self.name, rect.min.x as i32, rect.min.y as i32));
@@ -307,6 +399,7 @@ impl<'a> IconButton<'a> {
         let (fill, ink) = match self.style {
             IconStyle::Standard => (None, m.on_surface_variant),
             IconStyle::Tonal => (Some(m.secondary_container), m.on_secondary_container),
+            IconStyle::Surface => (Some(m.surface_container_high), m.on_surface_variant),
             IconStyle::Filled => (Some(m.primary), m.on_primary),
         };
         if let Some(fill) = fill {
@@ -334,10 +427,14 @@ pub fn switch_handle(track: Rect, t: f32, pressed: bool) -> (Pos2, f32) {
     (pos2(egui::lerp(track.left() + half..=track.right() - half, t), track.center().y), radius)
 }
 
-/// An on/off switch, centred in a row tall enough for a finger. Flips `on` when tapped.
+/// The room a switch takes: its track, in a target a finger's height.
+pub const SWITCH_TARGET: Vec2 = vec2(SWITCH.x, TOUCH);
+
+/// An on/off switch, its track centred in `SWITCH_TARGET`. Flips `on` when tapped.
 pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     let m = material::scheme();
-    let (rect, mut resp) = ui.allocate_exact_size(SWITCH, Sense::click());
+    let (target, mut resp) = ui.allocate_exact_size(SWITCH_TARGET, Sense::click());
+    let rect = Rect::from_center_size(target.center(), SWITCH);
     if resp.clicked() {
         *on = !*on;
         resp.mark_changed();
@@ -389,6 +486,7 @@ pub fn row_geom(rect: Rect, cover: f32, trailing_w: f32, more: bool) -> RowGeom 
 
 /// A list row: a cover, a title over a supporting line, and at its right an optional
 /// short text and an optional "more" button.
+#[derive(Default)]
 pub struct ListRow<'a> {
     pub title: &'a str,
     pub subtitle: &'a str,
@@ -402,37 +500,376 @@ pub struct ListRow<'a> {
     pub trailing: Option<&'a str>,
     /// The accessible name of its "more" button, when it has one.
     pub more: Option<&'a str>,
+    /// In place of a cover: an icon on a tonal tile (Liked songs, a folder).
+    pub tile: Option<Icon>,
+    /// A small mark before the supporting line: downloaded, pinned.
+    pub mark: Option<Icon>,
+    /// A chevron at the right: the row opens a page of its own.
+    pub chevron: bool,
 }
 
 /// What was done to a list row.
-#[allow(dead_code)]
 pub struct ListRowOut {
     pub row: Response,
     pub more: Option<Response>,
 }
 
-/// Draw a list row across the layout's width. The next stages' pages are built from it.
-#[allow(dead_code)]
+/// Draw a list row across the layout's width.
 pub fn list_row(ui: &mut Ui, r: &ListRow) -> ListRowOut {
     let m = material::scheme();
     let (height, cover) = row_size(r.dense);
     let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
     let row = named(row, r.title);
+    if !ui.is_rect_visible(rect) {
+        return ListRowOut { row, more: None };
+    }
     let trailing = r.trailing.map(|t| galley(ui, t, Type::BodyMedium, m.on_surface_variant, 120.0));
-    let g = row_geom(rect, cover, trailing.as_ref().map_or(0.0, |t| t.size().x), r.more.is_some());
+    let trailing_w = trailing.as_ref().map_or(if r.chevron { 20.0 } else { 0.0 }, |t| t.size().x);
+    let g = row_geom(rect, cover, trailing_w, r.more.is_some());
     if r.active || row.is_pointer_button_down_on() {
         let wash = if r.active { m.surface_container } else { m.on_surface.gamma_multiply(PRESSED) };
         ui.painter().rect_filled(rect.expand2(vec2(8.0, 0.0)), shape::CARD_SMALL, wash);
     }
     let radius = if r.round { cover / 2.0 } else { shape::TILE_SMALL };
-    widgets::paint_cover(ui, g.cover, r.thumbs, radius, 1.0);
-    let title = if r.active { m.primary } else { m.on_surface };
-    two_lines(ui, g.text.left(), rect.center().y, g.text.width(), r.title, Type::BodyLarge, title, r.subtitle, Type::BodyMedium, m.on_surface_variant);
+    match r.tile {
+        Some(icon) => {
+            ui.painter().rect_filled(g.cover, radius, m.primary_container);
+            paint_icon(ui, g.cover.center(), cover * 0.43, icon, m.primary);
+        }
+        None => widgets::paint_cover(ui, g.cover, r.thumbs, radius, 1.0),
+    }
+    let title_color = if r.active { m.primary } else { m.on_surface };
+    let title = galley(ui, r.title, Type::BodyLarge, title_color, g.text.width());
+    let lead = if r.mark.is_some() { 22.0 } else { 0.0 };
+    let sub = galley(ui, r.subtitle, Type::BodyMedium, m.on_surface_variant, g.text.width() - lead);
+    let top = rect.center().y - (title.size().y + sub.size().y) / 2.0;
+    let sub_top = top + title.size().y;
+    if let Some(mark) = r.mark {
+        paint_icon(ui, pos2(g.text.left() + 8.0, sub_top + sub.size().y / 2.0), 16.0, mark, m.primary);
+    }
+    ui.painter().galley(pos2(g.text.left(), top), title, title_color);
+    ui.painter().galley(pos2(g.text.left() + lead, sub_top), sub, m.on_surface_variant);
     if let Some(t) = trailing {
         ui.painter().galley(pos2(g.trailing_right - t.size().x, rect.center().y - t.size().y / 2.0), t, m.on_surface_variant);
+    } else if r.chevron {
+        widgets::icon_at(ui, pos2(g.trailing_right - 10.0, rect.center().y), icon::CHEVRON_RIGHT, 20.0, m.on_surface_variant);
     }
     let more = r.more.zip(g.more).map(|(name, at)| IconButton::new(icon::ELLIPSIS_VERTICAL, name).show_at(ui, at.center(), row.id.with("more")));
     ListRowOut { row, more }
+}
+
+// ------------------------------------------------------------------ search bar
+
+/// A search bar's height.
+pub const SEARCH_BAR_H: f32 = 48.0;
+
+/// Where a search bar's parts are: the magnifier, the text, and the clear button's
+/// touch target once there is something to clear.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SearchBarGeom {
+    pub icon: Pos2,
+    pub text: Rect,
+    pub clear: Option<Rect>,
+}
+
+/// Lay a search bar out in `rect`; `trailing` is room kept free at its right end, for
+/// what the caller stands there (the account's picture).
+pub fn search_bar_geom(rect: Rect, clearable: bool, trailing: f32) -> SearchBarGeom {
+    let cy = rect.center().y;
+    let right = rect.right() - trailing;
+    let clear = clearable.then(|| Rect::from_center_size(pos2(right - TOUCH / 2.0, cy), Vec2::splat(TOUCH)));
+    let text_right = clear.map_or(right - 16.0, |c| c.left());
+    let left = rect.left() + 52.0;
+    SearchBarGeom { icon: pos2(rect.left() + 26.0, cy), text: Rect::from_min_max(pos2(left, rect.top() + 4.0), pos2(text_right.max(left), rect.bottom() - 4.0)), clear }
+}
+
+/// What was done to a search bar.
+pub struct SearchBarOut {
+    pub edit: Response,
+    /// Its clear button was tapped (the text is empty now).
+    pub cleared: bool,
+}
+
+/// A search bar in `rect`: a pill of a tonal surface with the magnifier, the text being
+/// typed (or `hint`) and, once there is text, a button that clears it.
+pub fn search_bar(ui: &mut Ui, rect: Rect, text: &mut String, hint: &str, trailing: f32) -> SearchBarOut {
+    let m = material::scheme();
+    let g = search_bar_geom(rect, !text.is_empty(), trailing);
+    ui.painter().rect_filled(rect, rect.height() / 2.0, m.surface_container_high);
+    widgets::icon_at(ui, g.icon, icon::SEARCH, 20.0, m.on_surface);
+    let edit = ui.put(
+        g.text,
+        egui::TextEdit::singleline(text)
+            .hint_text(egui::RichText::new(hint).color(m.on_surface_variant))
+            .font(Type::BodyLarge.font())
+            .text_color(m.on_surface)
+            .align(egui::Align2::LEFT_CENTER)
+            .frame(egui::Frame::NONE)
+            .desired_width(g.text.width()),
+    );
+    let mut cleared = false;
+    if let Some(c) = g.clear
+        && IconButton::new(icon::X, "Clear search").show_at(ui, c.center(), edit.id.with("clear")).clicked()
+    {
+        text.clear();
+        cleared = true;
+    }
+    SearchBarOut { edit, cleared }
+}
+
+// ------------------------------------------------------------------ assist chip, FAB
+
+/// An assist chip: an outline round a label, led by an icon. A tap does what it says.
+pub fn assist_chip(ui: &mut Ui, label: &str, glyph: Option<char>) -> Response {
+    let m = material::scheme();
+    let label_g = galley(ui, label, Type::LabelLarge, m.on_surface, 200.0);
+    let lead = if glyph.is_some() { 8.0 + 18.0 + 8.0 } else { 16.0 };
+    let (rect, resp) = ui.allocate_exact_size(vec2(lead + label_g.size().x + 16.0, TOUCH), Sense::click());
+    let resp = named(resp, label);
+    let chip = Rect::from_center_size(rect.center(), vec2(rect.width(), CHIP_H));
+    ui.painter().rect_stroke(chip, shape::CHIP, Stroke::new(1.0, m.outline_variant), StrokeKind::Inside);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(chip, shape::CHIP, m.on_surface.gamma_multiply(PRESSED));
+    }
+    if let Some(glyph) = glyph {
+        widgets::icon_at(ui, pos2(chip.left() + 8.0 + 9.0, chip.center().y), glyph, 16.0, m.on_surface_variant);
+    }
+    ui.painter().galley(pos2(chip.left() + lead, chip.center().y - label_g.size().y / 2.0), label_g, m.on_surface);
+    resp
+}
+
+/// A floating action button's side.
+pub const FAB: f32 = 56.0;
+
+/// Where a floating action button stands over a page whose viewport is `view`: in its
+/// bottom right corner, above the mini player when a song is loaded (`lifted` by that much).
+pub fn fab_rect(view: Rect, lifted: f32) -> Rect {
+    Rect::from_min_size(pos2(view.right() - FAB, view.bottom() - 16.0 - lifted - FAB), Vec2::splat(FAB))
+}
+
+/// A floating action button in `rect`: the page's one main action, over its content.
+pub fn fab(ui: &Ui, rect: Rect, icon: impl Into<Icon>, name: &str, id: egui::Id) -> Response {
+    let m = material::scheme();
+    let resp = named(ui.interact(rect, id, Sense::click()), name);
+    widgets::soft_shadow(ui, rect, shape::TILE, 12.0, 0.35);
+    ui.painter().rect_filled(rect, shape::TILE, m.primary_container);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, shape::TILE, m.on_primary_container.gamma_multiply(PRESSED));
+    }
+    paint_icon(ui, rect.center(), 24.0, icon.into(), m.on_primary_container);
+    resp
+}
+
+// ------------------------------------------------------------------ cards and their rows
+
+/// A card's padding at its sides, and above and below what it holds.
+pub const CARD_PAD: Vec2 = vec2(20.0, 4.0);
+
+/// A group's label and what stands at its right, above the group's card.
+pub struct GroupLabel<'a> {
+    pub title: &'a str,
+    pub value: Option<&'a str>,
+}
+
+/// A group of rows on a card of `fill`, under an optional label in the primary colour.
+/// A group that put nothing on its card draws nothing and takes no room: a filtered
+/// page shows only the groups that kept a row.
+pub fn card<R>(ui: &mut Ui, label: Option<GroupLabel>, fill: Color32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let m = material::scheme();
+    let (bg, text, value) = (ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop), ui.painter().add(egui::Shape::Noop));
+    let min = ui.cursor().min;
+    let width = ui.available_width();
+    let label_h = if label.is_some() { 36.0 } else { 0.0 };
+    let top = min.y + label_h;
+    let inner = Rect::from_min_max(pos2(min.x + CARD_PAD.x, top + CARD_PAD.y), pos2(min.x + width - CARD_PAD.x, ui.max_rect().bottom().max(top + CARD_PAD.y)));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::top_down(egui::Align::Min)));
+    let out = add(&mut child);
+    let used = child.min_rect();
+    if used.height() <= 0.0 {
+        return out;
+    }
+    let body = Rect::from_min_max(pos2(min.x, top), pos2(min.x + width, used.bottom() + CARD_PAD.y));
+    ui.painter().set(bg, egui::epaint::RectShape::filled(body, shape::CARD, fill));
+    if let Some(l) = label {
+        let g = galley(ui, l.title, Type::LabelLarge, m.primary, width - 16.0);
+        ui.painter().set(text, egui::epaint::TextShape::new(pos2(min.x + 8.0, min.y + 8.0), g, m.primary));
+        if let Some(v) = l.value {
+            let g = galley(ui, v, Type::LabelLarge, m.on_surface_variant, width / 2.0);
+            ui.painter().set(value, egui::epaint::TextShape::new(pos2(min.x + width - 8.0 - g.size().x, min.y + 8.0), g, m.on_surface_variant));
+        }
+    }
+    ui.allocate_rect(Rect::from_min_max(min, body.max), Sense::hover());
+    out
+}
+
+/// A navigation row's height: a category of Settings.
+pub const NAV_ROW_H: f32 = 60.0;
+
+/// A row that opens a page: an icon on a tonal disc, a title over a one-line summary,
+/// and a chevron.
+pub fn nav_row(ui: &mut Ui, icon: Icon, title: &str, summary: &str) -> Response {
+    let m = material::scheme();
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), NAV_ROW_H), Sense::click());
+    let resp = named(resp, title);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect.expand2(vec2(12.0, 0.0)), shape::CARD_SMALL, m.on_surface.gamma_multiply(PRESSED));
+    }
+    let disc = pos2(rect.left() + 16.0, rect.center().y);
+    ui.painter().circle_filled(disc, 20.0, m.secondary_container);
+    paint_icon(ui, disc, 20.0, icon, m.on_secondary_container);
+    let left = disc.x + 20.0 + 16.0;
+    two_lines(ui, left, rect.center().y, rect.right() - 28.0 - left, title, Type::BodyLarge, m.on_surface, summary, Type::BodySmall, m.on_surface_variant);
+    widgets::icon_at(ui, pos2(rect.right() - 6.0, rect.center().y), icon::CHEVRON_RIGHT, 20.0, m.on_surface_variant);
+    resp
+}
+
+/// A settings row's text: its title over a description of up to `rows` lines, in a
+/// column `width` wide. Returns the two, laid out.
+pub fn row_text(ui: &Ui, title: &str, desc: Option<&str>, width: f32, rows: usize) -> (Arc<egui::Galley>, Option<Arc<egui::Galley>>) {
+    let m = material::scheme();
+    (galley(ui, title, Type::BodyLarge, m.on_surface, width), desc.map(|d| galley_wrapped(ui, d, Type::BodyMedium, m.on_surface_variant, width, rows)))
+}
+
+// ------------------------------------------------------------------ segmented buttons
+
+/// The segments of a row of connected buttons across `rect`: equal widths, a small gap.
+pub fn segments(rect: Rect, count: usize) -> Vec<Rect> {
+    const GAP: f32 = 4.0;
+    let w = (rect.width() - GAP * count.saturating_sub(1) as f32) / count.max(1) as f32;
+    (0..count).map(|i| Rect::from_min_size(pos2(rect.left() + i as f32 * (w + GAP), rect.top()), vec2(w, rect.height()))).collect()
+}
+
+/// A row of connected buttons, one of them chosen: a choice among a few (Light, Dark).
+/// Returns the one tapped.
+pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize> {
+    let m = material::scheme();
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TOUCH), Sense::hover());
+    let mut tapped = None;
+    let last = labels.len().saturating_sub(1);
+    for (i, (label, rect)) in labels.iter().zip(segments(row, labels.len())).enumerate() {
+        let resp = named(ui.interact(rect, ui.scope_id().with(("segment", *label, row.min.y as i32)), Sense::click()), label);
+        let on = i == selected;
+        let body = Rect::from_center_size(rect.center(), vec2(rect.width(), 44.0));
+        // The chosen one is a pill; the others keep their round ends at the row's ends only.
+        let (round, flat) = (22_u8, 8_u8);
+        let corners = if on {
+            CornerRadius::same(round)
+        } else {
+            let (l, r) = (if i == 0 { round } else { flat }, if i == last { round } else { flat });
+            CornerRadius { nw: l, sw: l, ne: r, se: r }
+        };
+        let (fill, ink) = if on { (m.primary, m.on_primary) } else { (m.surface_container_high, m.on_surface) };
+        ui.painter().rect_filled(body, corners, fill);
+        if resp.is_pointer_button_down_on() {
+            ui.painter().rect_filled(body, corners, ink.gamma_multiply(PRESSED));
+        }
+        let g = galley(ui, label, Type::LabelLarge, ink, rect.width() - 8.0);
+        ui.painter().galley(body.center() - g.size() / 2.0, g, ink);
+        if resp.clicked() && !on {
+            tapped = Some(i);
+        }
+    }
+    tapped
+}
+
+// ------------------------------------------------------------------ slider, stepper, dropdown
+
+/// Where a slider's parts are: the filled part of its track, its upright handle, and
+/// the rest of the track.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SliderGeom {
+    pub active: Rect,
+    pub handle: Rect,
+    pub rest: Rect,
+}
+
+/// Lay a slider out in `rect`, `t` (0..1) of the way along.
+pub fn slider_geom(rect: Rect, t: f32) -> SliderGeom {
+    const TRACK: f32 = 16.0;
+    const HANDLE: f32 = 4.0;
+    const GAP: f32 = 6.0;
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+    let x = egui::lerp(rect.left() + HANDLE / 2.0 + GAP..=rect.right() - HANDLE / 2.0 - GAP, t);
+    let (top, bottom) = (rect.center().y - TRACK / 2.0, rect.center().y + TRACK / 2.0);
+    SliderGeom {
+        active: Rect::from_min_max(pos2(rect.left(), top), pos2(x - HANDLE / 2.0 - GAP, bottom)),
+        handle: Rect::from_center_size(pos2(x, rect.center().y), vec2(HANDLE, rect.height().min(44.0))),
+        rest: Rect::from_min_max(pos2(x + HANDLE / 2.0 + GAP, top), pos2(rect.right(), bottom)),
+    }
+}
+
+/// The whole number between `lo` and `hi` a finger at `x` on a slider in `rect` sets.
+pub fn slider_value(rect: Rect, x: f32, lo: u32, hi: u32) -> u32 {
+    let t = ((x - rect.left() - 8.0) / (rect.width() - 16.0).max(1.0)).clamp(0.0, 1.0);
+    (lo as f32 + t * hi.saturating_sub(lo) as f32).round() as u32
+}
+
+/// A slider across the layout's width for a whole number in `range`: tap or drag to set.
+pub fn slider(ui: &mut Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>, name: &str) -> Response {
+    let m = material::scheme();
+    let (lo, hi) = (*range.start(), *range.end());
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(ui.available_width(), TOUCH), Sense::click_and_drag());
+    let old = *value;
+    if let Some(p) = resp.interact_pointer_pos()
+        && (resp.dragged() || resp.clicked() || resp.is_pointer_button_down_on())
+    {
+        *value = slider_value(rect, p.x, lo, hi);
+    }
+    if *value != old {
+        resp.mark_changed();
+    }
+    let shown = *value;
+    resp.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), shown as f64, name));
+    let g = slider_geom(rect, (shown.saturating_sub(lo)) as f32 / hi.saturating_sub(lo).max(1) as f32);
+    let p = ui.painter();
+    if g.active.width() > 0.0 {
+        p.rect_filled(g.active, CornerRadius { nw: 8, sw: 8, ne: 2, se: 2 }, m.primary);
+    }
+    if g.rest.width() > 0.0 {
+        p.rect_filled(g.rest, CornerRadius { nw: 2, sw: 2, ne: 8, se: 8 }, m.secondary_container);
+        p.circle_filled(pos2(g.rest.right() - 8.0, g.rest.center().y), 2.0, m.primary);
+    }
+    p.rect_filled(g.handle, 2.0, m.primary);
+    resp
+}
+
+/// A value between a "less" and a "more" button (named `names`), each there to tap
+/// while the value can still go that way. Returns -1 or 1 when one was tapped.
+pub fn stepper(ui: &mut Ui, text: &str, less: bool, more: bool, names: (&str, &str)) -> i32 {
+    let m = material::scheme();
+    let (rect, _) = ui.allocate_exact_size(vec2(TOUCH + 76.0 + TOUCH, TOUCH), Sense::hover());
+    let mut step = 0;
+    let id = ui.scope_id().with(("stepper", names.0, rect.min.y as i32));
+    for (enabled, name, x, draw, by) in [(less, names.0, rect.left() + TOUCH / 2.0, drawn::minus as fn(&Ui, Pos2, f32, Color32), -1), (more, names.1, rect.right() - TOUCH / 2.0, drawn::plus, 1)] {
+        let center = pos2(x, rect.center().y);
+        if enabled {
+            if IconButton::new(Icon::Drawn(draw), name).style(IconStyle::Surface).show_at(ui, center, id.with(by)).clicked() {
+                step = by;
+            }
+        } else {
+            ui.painter().circle_filled(center, 20.0, m.surface_container_high.gamma_multiply(0.5));
+            draw(ui, center, 24.0, m.on_surface_variant.gamma_multiply(0.38));
+        }
+    }
+    let g = galley(ui, text, Type::TitleSmall, m.on_surface, 76.0);
+    ui.painter().galley(rect.center() - g.size() / 2.0, g, m.on_surface);
+    step
+}
+
+/// A dropdown's closed state: the chosen value and a chevron, on a tonal field.
+pub fn dropdown(ui: &mut Ui, value: &str, width: f32, name: &str) -> Response {
+    let m = material::scheme();
+    let (rect, resp) = ui.allocate_exact_size(vec2(width.min(ui.available_width()), TOUCH), Sense::click());
+    let resp = named(resp, name);
+    let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
+    ui.painter().rect_filled(rect, shape::TILE_SMALL, m.surface_container_highest);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, shape::TILE_SMALL, m.on_surface.gamma_multiply(PRESSED));
+    }
+    let g = galley(ui, value, Type::BodyLarge, m.on_surface, rect.width() - 16.0 - 40.0);
+    ui.painter().galley(pos2(rect.left() + 16.0, rect.center().y - g.size().y / 2.0), g, m.on_surface);
+    widgets::icon_at(ui, pos2(rect.right() - 20.0, rect.center().y), if open { icon::CHEVRON_UP } else { icon::CHEVRON_DOWN }, 18.0, m.on_surface_variant);
+    resp
 }
 
 // ------------------------------------------------------------------ wavy progress
@@ -487,7 +924,6 @@ pub fn wave_points(from: f32, to: f32, y: f32, amp: f32, phase: f32) -> Vec<Pos2
 /// The wavy progress indicator in `rect`: `fraction` played, the wave slid along by
 /// `phase` and flattened to a line as `wave` goes from 1 to 0 (a paused song lies
 /// still). Now Playing, the widgets and the downloads list draw theirs with it.
-#[allow(dead_code)]
 pub fn wavy_progress(ui: &Ui, rect: Rect, fraction: f32, phase: f32, wave: f32) {
     let m = material::scheme();
     let g = wave_geom(rect, fraction);
@@ -1165,6 +1601,176 @@ mod tests {
         );
         assert_eq!(clicks.get(), 1);
         assert!(acts.is_empty(), "what a tap does is the page's to say (Home starts the song's radio)");
+    }
+
+    // -------------------------------------------------------------- stage 2's components
+
+    #[test]
+    fn a_search_bars_parts_follow_each_other_and_its_clear_button_fits_a_finger() {
+        for width in WIDTHS {
+            let rect = Rect::from_min_size(pos2(16.0, 40.0), vec2(width, SEARCH_BAR_H));
+            for trailing in [0.0, TOUCH, TOUCH + 28.0] {
+                let empty = search_bar_geom(rect, false, trailing);
+                let typed = search_bar_geom(rect, true, trailing);
+                assert!(empty.clear.is_none());
+                let clear = typed.clear.unwrap();
+                assert!(clear.width() >= TOUCH && clear.height() >= TOUCH);
+                assert!(rect.contains(typed.icon) && typed.icon.x < typed.text.left());
+                assert!(typed.text.right() <= clear.left(), "the text stops at the button");
+                assert!(clear.right() <= rect.right() - trailing + 0.01, "{width} {trailing}: the end is left free");
+                assert!(empty.text.right() <= rect.right() - trailing);
+                assert!(empty.text.width() > typed.text.width());
+                assert!(typed.text.width() >= 120.0, "{width} {trailing}: room to type: {}", typed.text.width());
+            }
+        }
+    }
+
+    #[test]
+    fn a_floating_button_stands_in_the_pages_corner_above_the_mini_player() {
+        for width in WIDTHS {
+            let view = Rect::from_min_size(pos2(16.0, 88.0), vec2(width, 700.0));
+            let (free, lifted) = (fab_rect(view, 0.0), fab_rect(view, 72.0));
+            for r in [free, lifted] {
+                assert!(view.contains_rect(r));
+                assert!(r.width() >= TOUCH && r.height() >= TOUCH);
+                assert_eq!(r.right(), view.right());
+            }
+            assert_eq!(free.bottom(), view.bottom() - 16.0);
+            assert_eq!(lifted.bottom(), free.bottom() - 72.0, "a mini player lifts it clear");
+        }
+    }
+
+    #[test]
+    fn segments_share_the_row_and_each_fits_a_finger() {
+        for width in WIDTHS {
+            let row = Rect::from_min_size(pos2(36.0, 200.0), vec2(width - 40.0, TOUCH));
+            for count in [2, 3] {
+                let parts = segments(row, count);
+                assert_eq!(parts.len(), count);
+                assert_eq!(parts[0].left(), row.left());
+                assert!((parts[count - 1].right() - row.right()).abs() < 0.01);
+                for pair in parts.windows(2) {
+                    assert!(pair[0].right() < pair[1].left(), "a gap between them");
+                    assert!((pair[0].width() - pair[1].width()).abs() < 0.01);
+                }
+                assert!(parts.iter().all(|p| p.width() >= TOUCH && p.height() >= TOUCH));
+            }
+        }
+    }
+
+    #[test]
+    fn a_sliders_handle_stays_on_its_track_between_the_two_parts() {
+        let rect = Rect::from_min_size(pos2(36.0, 300.0), vec2(288.0, TOUCH));
+        for t in [0.0, 0.25, 0.5, 1.0] {
+            let g = slider_geom(rect, t);
+            assert!(rect.contains_rect(g.handle), "{t}: {g:?}");
+            assert!(g.active.right() < g.handle.left() && g.handle.right() < g.rest.left(), "{t}: a gap either side of the handle");
+            assert_eq!((g.active.left(), g.rest.right()), (rect.left(), rect.right()));
+            assert!(g.handle.height() > g.active.height(), "the handle stands taller than the track");
+        }
+        assert!(slider_geom(rect, 0.75).handle.center().x > slider_geom(rect, 0.25).handle.center().x);
+        assert_eq!(slider_geom(rect, f32::NAN), slider_geom(rect, 0.0));
+        assert_eq!(slider_geom(rect, 4.0), slider_geom(rect, 1.0));
+    }
+
+    #[test]
+    fn a_finger_on_a_slider_sets_a_whole_number_in_its_range() {
+        let rect = Rect::from_min_size(pos2(36.0, 300.0), vec2(288.0, TOUCH));
+        assert_eq!(slider_value(rect, rect.left() - 40.0, 1, 12), 1);
+        assert_eq!(slider_value(rect, rect.left(), 1, 12), 1);
+        assert_eq!(slider_value(rect, rect.right(), 1, 12), 12);
+        assert_eq!(slider_value(rect, rect.right() + 99.0, 1, 12), 12);
+        let mid = slider_value(rect, rect.center().x, 1, 12);
+        assert!(mid == 6 || mid == 7, "{mid}");
+        assert_eq!(slider_value(rect, rect.center().x, 5, 5), 5, "a range of one value");
+    }
+
+    #[test]
+    fn a_switch_is_hit_in_a_fingers_height_with_its_track_inside() {
+        let target = drawn(360.0, |ui| switch(ui, &mut true, "Autoplay").rect);
+        assert_eq!(target.size(), SWITCH_TARGET);
+        assert!(target.width() >= TOUCH && target.height() >= TOUCH);
+        assert!(SWITCH.y < SWITCH_TARGET.y && SWITCH.x == SWITCH_TARGET.x);
+    }
+
+    #[test]
+    fn a_card_takes_no_room_when_nothing_was_put_on_it() {
+        let (empty, full, labelled) = drawn(360.0, |ui| {
+            let m = material::scheme();
+            let top = ui.cursor().top();
+            card(ui, Some(GroupLabel { title: "Sound", value: None }), m.surface_container, |_| {});
+            let empty = ui.cursor().top() - top;
+            card(ui, None, m.surface_container, |ui| {
+                ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+            });
+            let full = ui.cursor().top() - top - empty;
+            let before = ui.cursor().top();
+            card(ui, Some(GroupLabel { title: "Sound", value: Some("3 of 5") }), m.surface_container, |ui| {
+                ui.allocate_exact_size(vec2(ui.available_width(), 72.0), Sense::hover());
+            });
+            (empty, full, ui.cursor().top() - before)
+        });
+        assert_eq!(empty, 0.0, "a group the search box emptied is not there at all");
+        assert!(full >= 72.0 + 2.0 * CARD_PAD.y);
+        assert!(labelled > full + 20.0, "its label stands above it: {labelled} and {full}");
+    }
+
+    #[test]
+    fn a_cards_rows_are_as_wide_as_the_card_less_its_padding() {
+        let (page, row) = drawn(360.0, |ui| {
+            let page = ui.available_width();
+            let row = card(ui, None, material::scheme().surface_container, |ui| ui.allocate_exact_size(vec2(ui.available_width(), 60.0), Sense::hover()).0);
+            (page, row)
+        });
+        assert!((row.width() - (page - 2.0 * CARD_PAD.x)).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_navigation_row_a_chip_and_a_dropdown_fit_a_finger() {
+        let (nav, chip, drop, step) = drawn(360.0, |ui| {
+            let nav = nav_row(ui, icon::PLAY.into(), "Playback", "Autoplay, crossfade").rect;
+            let chip = assist_chip(ui, "senja kala", Some(icon::HISTORY)).rect;
+            let drop = dropdown(ui, "English", 200.0, "Translate into").rect;
+            let top = ui.cursor().top();
+            stepper(ui, "100%", true, true, ("Smaller", "Larger"));
+            (nav, chip, drop, ui.cursor().top() - top)
+        });
+        assert_eq!(nav.height(), NAV_ROW_H);
+        assert!(nav.height() >= TOUCH && chip.height() >= TOUCH && drop.height() >= TOUCH && step >= TOUCH);
+        assert!(chip.width() > TOUCH && drop.width() == 200.0);
+    }
+
+    #[test]
+    fn a_dropdown_is_never_wider_than_its_row() {
+        let drop = drawn(200.0, |ui| dropdown(ui, "English", 320.0, "Translate into").rect);
+        assert!(drop.width() <= 200.0);
+    }
+
+    #[test]
+    fn a_tap_on_a_segment_chooses_it_and_the_chosen_one_takes_no_tap() {
+        let tap = |at: f32, chosen: usize| {
+            let picked = std::cell::Cell::new(None);
+            tapped(
+                |min, width| min + vec2(width * at, TOUCH / 2.0),
+                |ui, _| {
+                    if let Some(i) = segmented(ui, &["System", "Light", "Dark"], chosen) {
+                        picked.set(Some(i));
+                    }
+                },
+            );
+            picked.get()
+        };
+        assert_eq!(tap(0.5, 0), Some(1));
+        assert_eq!(tap(0.9, 0), Some(2));
+        assert_eq!(tap(0.1, 0), None, "it is the one chosen already");
+    }
+
+    #[test]
+    fn a_list_row_with_a_chevron_keeps_its_text_clear_of_it() {
+        let rect = Rect::from_min_size(pos2(16.0, 0.0), vec2(328.0, 72.0));
+        let g = row_geom(rect, 56.0, 20.0, false);
+        assert!(g.text.right() + 20.0 <= rect.right());
+        assert!(g.text.width() > 150.0);
     }
 
     #[test]
