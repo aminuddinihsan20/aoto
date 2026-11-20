@@ -1105,13 +1105,17 @@
     },
     "lyrics": {
       "font": "Roboto",
-      "size": 1.45,
-      "inactive_alpha": 0.2,
-      "falloff": 0.01,
-      "past_alpha": 0.0,
-      "blur": 2.0,
-      "lift": 3,
-      "blur_scope": "upcoming"
+      "size": 0.6,
+      "anchor": 0.36,
+      "active_alpha": 0.5,
+      "inactive_alpha": 0.36,
+      "falloff": 0.05,
+      "min_alpha": 0.14,
+      "past_alpha": 0.36,
+      "sung_color": "accent",
+      "blur": 0.0,
+      "active_scale": 1.18,
+      "lift": 3
     },
     "cover": {
       "radius": 36,

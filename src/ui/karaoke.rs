@@ -141,6 +141,9 @@ struct Cfg {
     weight: Weight,
     size: f32,
     active: Color32,
+    /// The colour of text not sung yet, before its line's dimming: white, or under
+    /// Material You the colour of text on a surface.
+    ink: Color32,
     /// Alpha of dim text on the line being sung.
     inactive_alpha: f32,
     glow: Color32,
@@ -235,6 +238,7 @@ impl Cfg {
             weight,
             size,
             active: crate::preset::paint(&s.sung_color, accent),
+            ink: if crate::material::on() { crate::material::scheme().on_surface } else { Color32::WHITE },
             inactive_alpha: s.active_alpha,
             glow: crate::preset::paint(&s.glow_color, accent),
             glow_rem: if css.is_some() { 0.8 } else { 0.8 * (1.0 + glow) },
@@ -1061,7 +1065,7 @@ impl View {
                 let o = transform_origin(block_rect, b.align, content.x);
                 let g = ctx.fonts_mut(|fv| fv.layout(text.clone(), font.clone(), Color32::WHITE, line_w - cfg.size * 0.5));
                 let xf = Xf { origin: o, scale: cfg.scale, content };
-                paint_galley(&painter, &g, pos2(0.0, cfg.padding), &xf, theme::with_alpha(Color32::WHITE, a), atlas);
+                paint_galley(&painter, &g, pos2(0.0, cfg.padding), &xf, theme::with_alpha(cfg.ink, a), atlas);
                 continue;
             }
             let li = b.line.unwrap();
@@ -1182,7 +1186,7 @@ impl View {
                     // Rendered at the line's scale; snapped so it lands 1:1 on screen pixels.
                     let to = xf.rect(rr);
                     let snapped = (to.min.to_vec2() * ppp).round() / ppp;
-                    painter.image(tex, to.translate(snapped - to.min.to_vec2()), uv, theme::with_alpha(Color32::WHITE, opacity));
+                    painter.image(tex, to.translate(snapped - to.min.to_vec2()), uv, theme::with_alpha(cfg.ink, opacity));
                 }
                 animating |= st.exit.is_some();
             } else {
@@ -1194,7 +1198,7 @@ impl View {
                     if d.pill {
                         let r = dxf.rect(d.rect);
                         let radius = (cfg.rem() * scale).min(255.0) as u8;
-                        painter.rect(r, radius, theme::with_alpha(Color32::WHITE, 0.05 * a * fade), egui::Stroke::new(1.0, theme::with_alpha(Color32::WHITE, 0.1 * a * fade)), egui::StrokeKind::Inside);
+                        painter.rect(r, radius, theme::with_alpha(cfg.ink, 0.05 * a * fade), egui::Stroke::new(1.0, theme::with_alpha(cfg.ink, 0.1 * a * fade)), egui::StrokeKind::Inside);
                     }
                     match &d.body {
                         DecoBody::Timed { words, groups } => {
@@ -1204,7 +1208,7 @@ impl View {
                             let wrap = d.rect.width() + 1.0;
                             let g = ctx.fonts_mut(|fv| fv.layout(text.clone(), font.clone(), Color32::WHITE, wrap));
                             let pad = if d.pill { vec2(cfg.rem() * 0.75 + 1.0, cfg.rem() * 0.25 + 1.0) } else { Vec2::ZERO };
-                            paint_galley(&painter, &g, d.rect.min + pad, &dxf, theme::with_alpha(Color32::WHITE, text_alpha * a), atlas);
+                            paint_galley(&painter, &g, d.rect.min + pad, &dxf, theme::with_alpha(cfg.ink, text_alpha * a), atlas);
                         }
                     }
                 }
@@ -1786,7 +1790,7 @@ fn paint_words(
         let quads = word_glyphs(ctx, w, lit, cfg, wob, atlas);
         let dim_c = if w.bg { dim * 0.78 } else { dim } * opacity;
         for q in &quads {
-            push_quad(&mut base, xf.rect(q.rect), q.uv, theme::with_alpha(Color32::WHITE, dim_c), &|_| 1.0, &no_cut);
+            push_quad(&mut base, xf.rect(q.rect), q.uv, theme::with_alpha(cfg.ink, dim_c), &|_| 1.0, &no_cut);
         }
         per_word.push((quads, wob));
     }
@@ -2346,7 +2350,7 @@ fn paint_instrumental(painter: &egui::Painter, cfg: &Cfg, b: &Block, xf: &Xf, t:
         // only one of them can be happening at a time.
         let k = ((t - b.start - i as f64 * step) / step).clamp(0.0, 1.0) as f32;
         let lit = k * k * (3.0 - 2.0 * k);
-        painter.circle_filled(c, r, theme::with_alpha(Color32::WHITE, GAP_DOT_REST * alpha));
+        painter.circle_filled(c, r, theme::with_alpha(cfg.ink, GAP_DOT_REST * alpha));
         if lit > 0.0 {
             painter.circle_filled(c, r, theme::with_alpha(cfg.active, lit * alpha));
         }
