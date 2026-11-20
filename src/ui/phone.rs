@@ -79,6 +79,9 @@ pub const TOP_H: f32 = 52.0;
 pub const SIDE: f32 = 16.0;
 /// The room round the mini player: to the screen's sides and to the navigation bar.
 const MINI_GAP: f32 = 8.0;
+/// How far the mini player reaches up over a page: what floats over the page's foot
+/// (a floating button) stands this much higher while a song is loaded.
+pub const MINI_LIFT: f32 = MINI_H + MINI_GAP;
 
 /// Draw the whole phone frame and the current page in it.
 pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
@@ -244,7 +247,9 @@ fn top_row(app: &mut App, ui: &mut Ui) {
         super::pages::sync_search(app, q);
         let field = Rect::from_center_size(bar.center(), vec2(bar.width(), m3::SEARCH_BAR_H));
         let trailing = bar.right() - g.title.right() - 8.0;
-        ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| super::shell::search_field(app, ui, field.width(), trailing));
+        // (A child of its own: the bar's height is added once, below.)
+        let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(field));
+        super::shell::search_field(app, &mut bar_ui, field.width(), trailing);
     } else if let Some(title) = super::settings::bar_title(app.jam_open, &page) {
         let galley = m3::galley(ui, title, Type::TitleLarge, m.on_surface, g.title.width() - 4.0);
         ui.painter().galley(pos2(g.title.left() + 4.0, g.title.center().y - galley.size().y / 2.0), galley, m.on_surface);

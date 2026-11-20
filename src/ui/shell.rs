@@ -1128,7 +1128,7 @@ pub fn queue_list(app: &mut App, ui: &mut Ui, salt: &str) {
         ui.checkbox(&mut app.autoplay, egui::RichText::new("Autoplay similar songs").color(theme::text_dim())).on_hover_cursor(egui::CursorIcon::PointingHand);
         ui.add_space(6.0);
         let (queue, liked, acts, has_current) = (&app.queue.tracks, &app.liked, &mut app.actions, app.queue.index.is_some());
-        widgets::visible_rows(ui, queue.len() - start, |ui, k| {
+        widgets::visible_rows_of(ui, queue.len() - start, widgets::track_row_height(), |ui, k| {
             let i = start + k;
             let t = &queue[i];
             // The first row is the current song.

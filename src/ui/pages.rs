@@ -296,7 +296,7 @@ fn list(ui: &mut Ui, rows: &Rows, liked: &HashSet<String>, tracks: &[Track], sho
     let ListCtx { sel, page, own } = cx;
     let selecting = sel.on(page);
     let mods = ui.input(|i| i.modifiers);
-    widgets::visible_rows(ui, tracks.len(), |ui, i| {
+    widgets::visible_rows_of(ui, tracks.len(), widgets::track_row_height(), |ui, i| {
         let t = &tracks[i];
         let o = RowOpts {
             selected: selecting.then(|| sel.rows.contains(&i)),
@@ -673,7 +673,276 @@ pub(super) fn sync_search(app: &mut App, q: &str) {
     }
 }
 
+/// The kinds of thing a search finds: the filter chips over its results.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchKind {
+    /// Everything, in sections: the page as it opens.
+    #[default]
+    All,
+    Songs,
+    Artists,
+    Albums,
+    Playlists,
+}
+
+impl SearchKind {
+    fn label(self) -> &'static str {
+        match self {
+            SearchKind::All => "All",
+            SearchKind::Songs => "Songs",
+            SearchKind::Artists => "Artists",
+            SearchKind::Albums => "Albums",
+            SearchKind::Playlists => "Playlists",
+        }
+    }
+}
+
+/// The chips a search's results get: "All", then each kind that found something.
+fn search_kinds(r: &crate::backend::SearchResults) -> Vec<SearchKind> {
+    let mut kinds = vec![SearchKind::All];
+    for (kind, found) in [(SearchKind::Songs, !r.tracks.is_empty()), (SearchKind::Artists, !r.artists.is_empty()), (SearchKind::Albums, !r.albums.is_empty()), (SearchKind::Playlists, !r.playlists.is_empty())] {
+        if found {
+            kinds.push(kind);
+        }
+    }
+    kinds
+}
+
+/// The chip that is on for the search `query`: the one chosen for this search, as long
+/// as it still has results; otherwise "All".
+fn search_kind_shown(chosen: &(String, SearchKind), query: &str, kinds: &[SearchKind]) -> SearchKind {
+    if chosen.0 == query && kinds.contains(&chosen.1) { chosen.1 } else { SearchKind::All }
+}
+
+/// How many artists, albums or playlists "All" lists before "See all" takes over.
+const SEARCH_PREVIEW: usize = 3;
+
+/// An album, playlist or artist as a list row: a tap opens it, its button (or a long
+/// press) brings its menu. `mark`: a small mark before its supporting line.
+fn card_list_row(ui: &mut Ui, c: &Card, mark: Option<m3::Icon>, tile: Option<m3::Icon>, acts: &mut Vec<Action>) {
+    let out = m3::list_row(ui, &m3::ListRow { title: &c.title, subtitle: &c.subtitle, thumbs: &c.thumbs, round: c.round, more: Some("Options"), mark, tile, ..Default::default() });
+    if let Some(more) = &out.more {
+        egui::Popup::menu(more).show(|ui| widgets::card_menu_contents(ui, c, false, acts));
+    }
+    egui::Popup::context_menu(&out.row).show(|ui| widgets::card_menu_contents(ui, c, false, acts));
+    if out.row.clicked() {
+        acts.push(Action::Open(c.target.clone()));
+    }
+}
+
+/// Where the top result's parts are in its card: the cover, the text beside it, and
+/// the play button in its bottom right corner.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TopResultGeom {
+    cover: Rect,
+    text: Rect,
+    play: Rect,
+}
+
+const TOP_RESULT_H: f32 = 128.0;
+
+fn top_result_geom(rect: Rect) -> TopResultGeom {
+    let cover = Rect::from_min_size(rect.min + vec2(16.0, 16.0), Vec2::splat(rect.height() - 32.0));
+    let play = Rect::from_min_size(pos2(rect.right() - 16.0 - m3::TOUCH, rect.bottom() - 16.0 - m3::TOUCH), Vec2::splat(m3::TOUCH));
+    let left = cover.right() + 16.0;
+    TopResultGeom { cover, text: Rect::from_min_max(pos2(left, cover.top()), pos2((play.left() - 8.0).max(left), cover.bottom())), play }
+}
+
+/// The top result as a card: its cover, what it is, and a button that plays it. A tap
+/// elsewhere opens it (or, choosing a transfer match, picks it).
+fn top_result_material(ui: &mut Ui, c: &Card, pick: bool, liked: bool, acts: &mut Vec<Action>) {
+    use crate::material::{Type, shape};
+    let m = crate::material::scheme();
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), TOP_RESULT_H), Sense::click());
+    let resp = named(resp, &c.title);
+    let g = top_result_geom(rect);
+    ui.painter().rect_filled(rect, shape::CARD, m.surface_container_high);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, shape::CARD, m.on_surface.gamma_multiply(0.08));
+    }
+    paint_cover(ui, g.cover, &c.thumbs, if c.round { g.cover.width() / 2.0 } else { shape::TILE }, 1.0);
+    let over = m3::text(ui, g.text.min, "TOP RESULT", Type::LabelMedium, m.on_surface_variant, g.text.width());
+    let title = m3::galley_wrapped(ui, &c.title, Type::TitleLarge, m.on_surface, g.text.width(), 2);
+    let title_h = title.size().y;
+    ui.painter().galley(pos2(g.text.left(), over.bottom() + 2.0), title, m.on_surface);
+    // Beside the button when the title took two lines; under the title otherwise.
+    let sub_w = rect.right() - 16.0 - g.text.left() - if title_h > 30.0 { m3::TOUCH + 8.0 } else { 0.0 };
+    widgets::linked_text(ui, pos2(g.text.left(), over.bottom() + 4.0 + title_h), &c.subtitle, &c.links, Type::BodyMedium.font(), m.on_surface_variant, sub_w, acts);
+    let active = widgets::active_state(ui, &c.target);
+    let playing = active == Some(true);
+    let name = format!("{} {}", if playing { "Pause" } else { "Play" }, c.title);
+    let glyph = if playing { super::glyphs::PAUSE } else { super::glyphs::PLAY };
+    let play = m3::IconButton::new(glyph, &name).style(m3::IconStyle::Filled).size(m3::TOUCH).radius(shape::TILE).show_at(ui, g.play.center(), resp.id.with("play"));
+    if play.clicked() {
+        acts.push(match &c.target {
+            _ if active.is_some() => Action::TogglePlay,
+            Target::Song(t) => Action::Radio(t.clone()),
+            t => Action::PlayCollection(t.clone(), false),
+        });
+    } else if resp.clicked() {
+        acts.push(match &c.target {
+            Target::Song(t) if pick => Action::TransferPick(t.clone()),
+            t => Action::Open(t.clone()),
+        });
+    }
+    egui::Popup::context_menu(&resp).show(|ui| widgets::card_menu_contents(ui, c, liked, acts));
+}
+
+/// What was opened from the last few searches, as chips: a tap opens it again, a long
+/// press offers to forget it.
+fn recent_chips(ui: &mut Ui, app: &mut App) {
+    use crate::material::Type;
+    let m = crate::material::scheme();
+    if app.recent_searches.is_empty() {
+        ui.add_space(12.0);
+        ui.label(RichText::new("Search for artists, songs, albums and playlists.").font(Type::BodyLarge.font()).color(m.on_surface_variant));
+        return;
+    }
+    ui.add_space(8.0);
+    let (head, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+    m3::text(ui, pos2(head.left(), head.top() + 4.0), "Recent searches", Type::TitleMedium, m.on_surface, head.width());
+    // The chips are cloned so a removal can be applied after they are drawn.
+    let recents = app.recent_searches.clone();
+    let mut remove = None;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(m3::CHIP_GAP, 0.0);
+        for (i, r) in recents.iter().enumerate() {
+            let resp = m3::assist_chip(ui, &r.title, Some(icon::HISTORY));
+            egui::Popup::context_menu(&resp).show(|ui| {
+                ui.set_min_width(200.0);
+                if ui.button("Remove from Recently Searched").clicked() {
+                    remove = Some(i);
+                    ui.close();
+                }
+            });
+            if resp.clicked() {
+                app.actions.push(match &r.target {
+                    Some(t) => Action::Open(t.clone()),
+                    // An entry from an earlier version kept only the search.
+                    None => Action::Go(Page::Search(r.query.clone())),
+                });
+            }
+        }
+    });
+    if let Some(i) = remove {
+        app.recent_searches.remove(i);
+    }
+}
+
+/// A section of the results under "All": its heading, with "See all" when the section
+/// holds more than is listed. True when that was tapped.
+fn results_header(ui: &mut Ui, title: &str, more: bool) -> bool {
+    let trailing = if more { m3::Trailing::Text("See all") } else { m3::Trailing::None };
+    m3::section_header(ui, &m3::SectionHeader { title, overline: None, avatar: None, trailing })
+}
+
+/// Search on the Material phone. The search bar is the frame's top bar; under it, the
+/// recent searches, or the results: filter chips, then list rows.
+fn search_material(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+    use crate::material::Type;
+    let pick = super::transfer::pick_banner(app, ui);
+    if q.trim().is_empty() {
+        recent_chips(ui, app);
+        return;
+    }
+    if app.search.as_ref().is_none_or(|r| r.query != q) {
+        ui.add_space(8.0);
+        placeholder(app, ui, now, 2, CARD);
+        return;
+    }
+    let rows = Rows::new(app, now);
+    let Some(r) = &app.search else { return };
+    let acts = &mut app.actions;
+    let liked = &app.liked;
+    let kinds = search_kinds(r);
+    if kinds.len() == 1 {
+        ui.add_space(16.0);
+        ui.label(RichText::new("No results").font(Type::TitleLarge.font()).color(theme::text()));
+        return;
+    }
+    let shown = search_kind_shown(&app.search_kind, q, &kinds);
+    let mut choose = None;
+    m3::chip_row(ui, "search-kinds", super::phone::SIDE, |ui| {
+        for kind in &kinds {
+            if m3::filter_chip(ui, kind.label(), *kind == shown).clicked() {
+                choose = Some(*kind);
+            }
+        }
+    });
+    let song = |ui: &mut Ui, acts: &mut Vec<Action>, i: usize, t: &Track| {
+        // The album beside the artist, as every other song row shows it.
+        let o = RowOpts { pick, ..rows.opts(liked, t, None, true) };
+        if track_row(ui, t, &o, acts).clicked() {
+            acts.push(if pick { Action::TransferPick(t.clone()) } else { Action::Play(r.tracks.clone(), i) });
+        }
+    };
+    let cards = |ui: &mut Ui, acts: &mut Vec<Action>, cards: &[Card]| {
+        for c in cards {
+            card_list_row(ui, c, None, None, acts);
+        }
+    };
+    match shown {
+        SearchKind::All => {
+            ui.add_space(4.0);
+            // Top result: the first artist when the query names one, otherwise the first song.
+            if let Some(top) = r.artists.first().filter(|a| a.title.eq_ignore_ascii_case(q.trim())) {
+                top_result_material(ui, top, false, false, acts);
+            } else if let Some(t) = r.tracks.first() {
+                let c = Card {
+                    title: t.title.clone(),
+                    subtitle: format!("{} • {}", if t.music_video { "Video" } else { "Song" }, t.artist_line()),
+                    thumbs: t.thumbs.clone(),
+                    target: Target::Song(t.clone()),
+                    round: false,
+                    links: t.artists.clone(),
+                };
+                top_result_material(ui, &c, pick, liked.contains(&t.id), acts);
+            }
+            if !r.tracks.is_empty() {
+                results_header(ui, "Songs", false);
+                for (i, t) in r.tracks.iter().take(4).enumerate() {
+                    song(ui, acts, i, t);
+                }
+            }
+            for (kind, title, list) in [(SearchKind::Artists, "Artists", &r.artists), (SearchKind::Albums, "Albums", &r.albums)] {
+                if !list.is_empty() {
+                    if results_header(ui, title, list.len() > SEARCH_PREVIEW) {
+                        choose = Some(kind);
+                    }
+                    cards(ui, acts, &list[..list.len().min(SEARCH_PREVIEW)]);
+                }
+            }
+            if r.tracks.len() > 4 {
+                results_header(ui, "More songs", false);
+                for (i, t) in r.tracks.iter().enumerate().skip(4) {
+                    song(ui, acts, i, t);
+                }
+            }
+            if !r.playlists.is_empty() {
+                if results_header(ui, "Playlists", r.playlists.len() > SEARCH_PREVIEW) {
+                    choose = Some(SearchKind::Playlists);
+                }
+                cards(ui, acts, &r.playlists[..r.playlists.len().min(SEARCH_PREVIEW)]);
+            }
+        }
+        SearchKind::Songs => {
+            for (i, t) in r.tracks.iter().enumerate() {
+                song(ui, acts, i, t);
+            }
+        }
+        SearchKind::Artists => cards(ui, acts, &r.artists),
+        SearchKind::Albums => cards(ui, acts, &r.albums),
+        SearchKind::Playlists => cards(ui, acts, &r.playlists),
+    }
+    if let Some(kind) = choose {
+        app.search_kind = (q.to_owned(), kind);
+    }
+}
+
 fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+    if m3::on() {
+        return search_material(app, ui, q, now);
+    }
     let pick = super::transfer::pick_banner(app, ui);
     root_title(ui, "Search");
     ui.add_space(10.0);
@@ -1218,7 +1487,189 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
 
 // ------------------------------------------------------------------ library
 
+/// Dev hook: YTM_FAKE_LIBRARY shows a library made of the home feed's cards, for a
+/// screenshot of the page without an account.
+fn demo_library(app: &App) -> crate::backend::Library {
+    let cards: Vec<&Card> = app.home.iter().flat_map(|h| &h.shelves).filter_map(|s| if let ShelfKind::Cards(cards) = &s.kind { Some(cards) } else { None }).flatten().collect();
+    let pick = |want: fn(&Target) -> bool| cards.iter().filter(|c| want(&c.target)).take(8).map(|c| (*c).clone()).collect::<Vec<_>>();
+    let liked = Card { title: "Liked Music".into(), subtitle: "Auto playlist".into(), thumbs: vec![], target: Target::Playlist(super::LIKED_MUSIC.into()), round: false, links: vec![] };
+    let mut playlists = vec![liked];
+    playlists.extend(pick(|t| matches!(t, Target::Playlist(_) | Target::Artist(_))));
+    crate::backend::Library { playlists, albums: pick(|t| matches!(t, Target::Album(_))), playlists_failed: false, albums_failed: false }
+}
+
+/// How a library row leads and what marks it: Liked Music is the account's own list,
+/// shown as a heart on a tonal tile and pinned; what was downloaded whole says so.
+fn library_row_marks(c: &Card, downloaded: &HashSet<String>) -> (Option<m3::Icon>, Option<m3::Icon>) {
+    let id = match &c.target {
+        Target::Playlist(id) | Target::Album(id) => id.as_str(),
+        _ => "",
+    };
+    if id == super::LIKED_MUSIC {
+        (Some(icon::HEART.into()), Some(icon::PIN.into()))
+    } else if downloaded.contains(id) {
+        (None, Some(m3::Icon::Drawn(m3::drawn::saved)))
+    } else {
+        (None, None)
+    }
+}
+
+/// The line between the library's chips and its list: how many there are.
+fn library_count(ui: &mut Ui, text: &str) {
+    let m = crate::material::scheme();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    let g = m3::galley(ui, text, crate::material::Type::TitleSmall, m.on_surface, rect.width());
+    ui.painter().galley(pos2(rect.left(), rect.center().y - g.size().y / 2.0), g, m.on_surface);
+}
+
+/// The library on the Material phone: filter chips (History is the top bar's action),
+/// then the playlists or albums as list rows, or the songs of the chosen list. A
+/// floating button makes a new playlist.
+fn library_material(app: &mut App, ui: &mut Ui, tab: LibTab, now: f64) {
+    use crate::material::Type;
+    let m = crate::material::scheme();
+    let demo = super::dev_var("YTM_FAKE_LIBRARY").is_some();
+    if !app.logged_in && !demo {
+        ui.add_space(8.0);
+        ui.label(RichText::new("Sign in to see your playlists, liked songs and history.").font(Type::BodyLarge.font()).color(m.on_surface_variant));
+        ui.add_space(12.0);
+        if pill(ui, "Sign in with Google", Some(icon::CIRCLE_USER), true).clicked() {
+            app.start_sign_in(ui.ctx());
+        }
+        return;
+    }
+    if demo && app.library.is_none() && app.home.is_some() {
+        app.library = Some(demo_library(app));
+    }
+    let mut go = None;
+    m3::chip_row(ui, "library-tabs", super::phone::SIDE, |ui| {
+        for (t, label) in [(LibTab::Playlists, "Playlists"), (LibTab::Songs, "Liked songs"), (LibTab::Albums, "Albums"), (LibTab::Uploads, "Uploads")] {
+            if m3::filter_chip(ui, label, tab == t).clicked() {
+                go = Some(t);
+            }
+        }
+    });
+    if let Some(t) = go {
+        // Tabs swap in place (no history entry); the current one refreshes.
+        if tab == t {
+            app.refresh();
+        } else {
+            app.page = Page::Library(t);
+            app.page_loaded();
+        }
+    }
+    let rows = Rows::new(app, now);
+    let plain = |_: usize, _: &Track| None;
+    // Play and, as round buttons beside it, shuffle and (for a list that can be picked from) select.
+    let play_row = |ui: &mut Ui, songs: &[Track], acts: &mut Vec<Action>, select: Option<(&mut Selection, &Page)>| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if pill(ui, "Play", Some(icon::PLAY), true).clicked() {
+                acts.push(Action::Play(songs.to_vec(), 0));
+            }
+            if m3::IconButton::new(icon::SHUFFLE, "Shuffle").style(m3::IconStyle::Tonal).show(ui).clicked() {
+                let mut t = songs.to_vec();
+                super::shuffle(&mut t);
+                acts.push(Action::Play(t, 0));
+            }
+            if let Some((sel, page)) = select {
+                let on = sel.on(page);
+                let style = if on { m3::IconStyle::Tonal } else { m3::IconStyle::Surface };
+                if m3::IconButton::new(icon::LIST_CHECKS, if on { "Done" } else { "Select" }).style(style).show(ui).clicked() {
+                    if on { sel.clear() } else { sel.start(page) }
+                }
+            }
+        });
+        ui.add_space(4.0);
+    };
+    match tab {
+        LibTab::History => {
+            library_count(ui, "History");
+            if app.history.is_none() {
+                placeholder(app, ui, now, 1, 48.0);
+                return;
+            }
+            let Some(h) = &app.history else { return };
+            list(ui, &rows, &app.liked, h, true, plain, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
+        }
+        LibTab::Uploads => {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                if pill(ui, "Upload music", Some(icon::UPLOAD), true).clicked() {
+                    app.pick_uploads(ui.ctx());
+                }
+                if app.uploads.as_ref().is_some_and(|u| !u.is_empty()) && m3::IconButton::new(icon::SHUFFLE, "Shuffle").style(m3::IconStyle::Tonal).show(ui).clicked() {
+                    let mut t = app.uploads.clone().unwrap_or_default();
+                    super::shuffle(&mut t);
+                    app.actions.push(Action::Play(t, 0));
+                }
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("MP3, M4A, FLAC, OGG and WMA.").font(Type::BodyMedium.font()).color(m.on_surface_variant));
+            ui.add_space(8.0);
+            if app.uploads.is_none() {
+                placeholder(app, ui, now, 1, 48.0);
+                return;
+            }
+            let Some(up) = &app.uploads else { return };
+            if up.is_empty() {
+                ui.add_space(12.0);
+                ui.label(RichText::new("No uploads yet").font(Type::BodyLarge.font()).color(m.on_surface_variant));
+            }
+            list(ui, &rows, &app.liked, up, true, plain, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
+        }
+        // Liked Music, kept like any playlist.
+        LibTab::Songs => {
+            if app.opened(super::LIKED_MUSIC).is_none() {
+                placeholder(app, ui, now, 1, 48.0);
+                return;
+            }
+            let more = app.receiving(super::LIKED_MUSIC);
+            let Some(o) = app.lists.get(super::LIKED_MUSIC) else { return };
+            let liked = &o.c.tracks;
+            if !liked.is_empty() {
+                ui.add_space(4.0);
+                play_row(ui, liked, &mut app.actions, Some((&mut app.selection, &app.page)));
+            }
+            list(ui, &rows, &app.liked, liked, true, plain, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
+            if more {
+                widgets::skeleton_rows(ui, now, 3);
+            }
+        }
+        LibTab::Playlists | LibTab::Albums => {
+            if app.library.is_none() {
+                placeholder(app, ui, now, 2, CARD);
+                return;
+            }
+            let Some(lib) = &app.library else { return };
+            let (cards, one) = if tab == LibTab::Playlists { (&lib.playlists, "playlist") } else { (&lib.albums, "album") };
+            library_count(ui, &count_text(cards.len(), one));
+            let downloaded: HashSet<String> = crate::downloads::collections().into_iter().map(|c| c.id).collect();
+            for c in cards {
+                let (tile, mark) = library_row_marks(c, &downloaded);
+                card_list_row(ui, c, mark, tile, &mut app.actions);
+            }
+            if tab == LibTab::Playlists {
+                // Over the page's bottom right corner, clear of the mini player.
+                let view = Rect::from_x_y_ranges(ui.max_rect().x_range(), ui.clip_rect().y_range());
+                let at = m3::fab_rect(view, if app.current().is_some() { super::phone::MINI_LIFT } else { 0.0 });
+                let made = egui::Area::new(egui::Id::unique("library-new-playlist")).order(egui::Order::Middle).fixed_pos(at.min).show(ui.ctx(), |ui| {
+                    ui.allocate_exact_size(at.size(), Sense::hover());
+                    m3::fab(ui, at, m3::Icon::Drawn(m3::drawn::plus), "New playlist", ui.scope_id().with("fab")).clicked()
+                });
+                if made.inner {
+                    app.actions.push(Action::NewPlaylist(Vec::new()));
+                }
+            }
+        }
+    }
+}
+
 fn library(app: &mut App, ui: &mut Ui, tab: LibTab, now: f64) {
+    if m3::on() {
+        return library_material(app, ui, tab, now);
+    }
     root_title(ui, "Library");
     if !app.logged_in {
         ui.add_space(10.0);
@@ -3463,6 +3914,59 @@ mod tests {
             shelf("Empty", ShelfKind::Cards(vec![])),
         ];
         assert_eq!(hero_pick(&feed), None);
+    }
+
+    fn results(tracks: usize, artists: usize, albums: usize, playlists: usize) -> crate::backend::SearchResults {
+        let track = |i: usize| Track { id: format!("v{i}"), title: format!("Song {i}"), artists: vec![], album: None, duration: None, thumbs: vec![], track_nr: None, plays: None, music_video: false };
+        let cards = |n: usize, target: fn(String) -> Target| (0..n).map(|i| card(target(format!("id{i}")))).collect::<Vec<_>>();
+        crate::backend::SearchResults { query: "senja".into(), tracks: (0..tracks).map(track).collect(), artists: cards(artists, Target::Artist), albums: cards(albums, Target::Album), playlists: cards(playlists, Target::Playlist) }
+    }
+
+    #[test]
+    fn a_searchs_chips_are_all_and_the_kinds_that_found_something() {
+        use SearchKind::*;
+        assert_eq!(search_kinds(&results(9, 2, 3, 4)), [All, Songs, Artists, Albums, Playlists]);
+        assert_eq!(search_kinds(&results(9, 0, 3, 0)), [All, Songs, Albums]);
+        assert_eq!(search_kinds(&results(0, 0, 0, 0)), [All], "nothing found: no chips, the page says so");
+    }
+
+    #[test]
+    fn a_chosen_chip_lasts_for_its_search_and_while_it_has_results() {
+        use SearchKind::*;
+        let kinds = search_kinds(&results(9, 0, 3, 0));
+        assert_eq!(search_kind_shown(&("senja".into(), Albums), "senja", &kinds), Albums);
+        assert_eq!(search_kind_shown(&("senja".into(), Albums), "hujan", &kinds), All, "another search starts with everything");
+        assert_eq!(search_kind_shown(&("senja".into(), Artists), "senja", &kinds), All, "no artists were found");
+        assert_eq!(search_kind_shown(&(String::new(), All), "senja", &kinds), All);
+    }
+
+    #[test]
+    fn the_top_results_parts_stay_in_its_card_and_apart() {
+        for width in [328.0, 344.0, 361.0, 380.0] {
+            let rect = Rect::from_min_size(pos2(16.0, 120.0), vec2(width, TOP_RESULT_H));
+            let g = top_result_geom(rect);
+            for part in [g.cover, g.text, g.play] {
+                assert!(rect.contains_rect(part), "{width}: {part:?}");
+            }
+            assert!(g.cover.right() < g.text.left() && g.text.right() < g.play.left());
+            assert!(g.play.width() >= m3::TOUCH && g.play.height() >= m3::TOUCH);
+            assert!(g.text.width() >= 110.0, "{width}: {}", g.text.width());
+        }
+    }
+
+    #[test]
+    fn liked_music_leads_with_a_heart_and_a_downloaded_list_is_marked() {
+        let downloaded: HashSet<String> = ["PLsaved".to_owned()].into();
+        let (tile, mark) = library_row_marks(&card(Target::Playlist("LM".into())), &downloaded);
+        assert!(tile.is_some() && mark.is_some(), "the heart on its tile, and the pin");
+        let (tile, mark) = library_row_marks(&card(Target::Playlist("PLsaved".into())), &downloaded);
+        assert!(tile.is_none() && mark.is_some(), "its own cover, and the downloaded mark");
+        let (tile, mark) = library_row_marks(&card(Target::Album("PLsaved".into())), &downloaded);
+        assert!(tile.is_none() && mark.is_some());
+        for plain in [Target::Playlist("PLother".into()), Target::Artist("UC1".into())] {
+            let (tile, mark) = library_row_marks(&card(plain), &downloaded);
+            assert!(tile.is_none() && mark.is_none());
+        }
     }
 
     #[test]

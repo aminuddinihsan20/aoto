@@ -856,8 +856,18 @@ const ROW_H: f32 = 56.0;
 /// A long list of song rows: only the ones on screen are built; the rest is empty space
 /// of the same height. `row(ui, i)` draws row `i`, under an id of its own so its hover
 /// and menu state don't jump to another song as the list scrolls.
-pub fn visible_rows(ui: &mut Ui, n: usize, mut row: impl FnMut(&mut Ui, usize)) {
-    let h = ROW_H + ui.spacing().item_spacing.y;
+pub fn visible_rows(ui: &mut Ui, n: usize, row: impl FnMut(&mut Ui, usize)) {
+    visible_rows_of(ui, n, ROW_H, row);
+}
+
+/// How tall `track_row` draws a song: the Material phone's rows are roomier.
+pub fn track_row_height() -> f32 {
+    if super::m3::on() { super::m3::row_size(true).0 } else { ROW_H }
+}
+
+/// [`visible_rows`] for rows `height` tall.
+pub fn visible_rows_of(ui: &mut Ui, n: usize, height: f32, mut row: impl FnMut(&mut Ui, usize)) {
+    let h = height + ui.spacing().item_spacing.y;
     let top = ui.cursor().top();
     let clip = ui.clip_rect();
     let first = (((clip.top() - top) / h).floor().max(0.0) as usize).min(n);
@@ -871,6 +881,9 @@ pub fn visible_rows(ui: &mut Ui, n: usize, mut row: impl FnMut(&mut Ui, usize)) 
 
 /// Song row: cover (or index), title, artists, album, duration. Click plays.
 pub fn track_row(ui: &mut Ui, t: &Track, o: &RowOpts, acts: &mut Vec<Action>) -> Response {
+    if super::m3::on() {
+        return track_row_material(ui, t, o, acts);
+    }
     let (rect, base) = ui.allocate_exact_size(vec2(ui.available_width(), ROW_H), Sense::hover());
     if !ui.is_rect_visible(rect) {
         return base;
@@ -1000,6 +1013,115 @@ pub fn track_row(ui: &mut Ui, t: &Track, o: &RowOpts, acts: &mut Vec<Action>) ->
     }
     egui::Popup::menu(&more).show(|ui| song_menu(ui, t, o.liked, o.remove, o.queue_move, acts));
     // Right-click anywhere on the row opens the same menu.
+    egui::Popup::context_menu(&resp).show(|ui| song_menu(ui, t, o.liked, o.remove, o.queue_move, acts));
+    resp
+}
+
+/// What a song row says under its title: its artists, its plays where they have no
+/// column of their own, and in a jam who added it. An album's rows name no artist.
+fn track_row_sub(t: &Track, o: &RowOpts) -> Option<String> {
+    let plays = t.plays.map(|n| format!("{} plays", crate::backend::compact(n)));
+    let sub = match (o.number.is_some(), plays) {
+        (true, plays) => plays,
+        (false, Some(p)) => Some(format!("{} \u{2022} {p}", t.artist_line())),
+        (false, None) => Some(t.artist_line()),
+    };
+    match (sub, &o.added_by) {
+        (Some(s), Some(by)) if !s.is_empty() => Some(format!("{s} \u{2022} Added by {by}")),
+        (_, Some(by)) => Some(format!("Added by {by}")),
+        (sub, _) => sub,
+    }
+}
+
+/// The song row of the Material phone: a list row with the song's cover (an album's
+/// rows are numbered instead), its duration and its menu. The song playing stands on a
+/// tonal container, its title in the primary colour and the bars over its cover.
+fn track_row_material(ui: &mut Ui, t: &Track, o: &RowOpts, acts: &mut Vec<Action>) -> Response {
+    use super::m3;
+    use crate::material::{self, Type, shape};
+    let m = material::scheme();
+    let (rect, base) = ui.allocate_exact_size(vec2(ui.available_width(), track_row_height()), Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return base;
+    }
+    let cy = rect.center().y;
+    // While selecting, a tick box leads the row.
+    let left = rect.left() + if o.selected.is_some() { 32.0 } else { 0.0 };
+    let lead = if o.number.is_some() { 28.0 } else { m3::row_size(true).1 };
+    let duration = t.duration.map(|d| m3::galley(ui, &super::fmt_time(d), Type::BodyMedium, m.on_surface_variant, 80.0));
+    let g = m3::row_geom(Rect::from_min_max(pos2(left, rect.top()), rect.max), lead, duration.as_ref().map_or(0.0, |d| d.size().x), true);
+    let more_at = g.more.map_or(rect.right_center(), |r| r.center());
+    // Picking: the cover plays, the rest of the row picks.
+    let hit_left = if o.pick && o.number.is_none() { g.cover.right() + 6.0 } else { rect.left() };
+    let hit = Rect::from_min_max(pos2(hit_left, rect.top()), pos2(more_at.x - m3::TOUCH / 2.0, rect.bottom()));
+    let resp = named(ui.interact(hit, base.id.with("play"), Sense::click()), &t.title);
+    let wash = rect.expand2(vec2(8.0, 0.0));
+    if o.current {
+        ui.painter().rect_filled(wash, shape::CARD_SMALL, m.surface_container);
+    }
+    if o.selected == Some(true) {
+        ui.painter().rect_filled(wash, shape::CARD_SMALL, m.secondary_container.gamma_multiply(0.7));
+    }
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(wash, shape::CARD_SMALL, m.on_surface.gamma_multiply(0.1));
+    }
+    if let Some(on) = o.selected {
+        let r = Rect::from_center_size(pos2(rect.left() + 12.0, cy), Vec2::splat(18.0));
+        if on {
+            ui.painter().rect_filled(r, 4.0, m.primary);
+            icon_at(ui, r.center(), icon::CHECK, 13.0, m.on_primary);
+        } else {
+            ui.painter().rect_stroke(r, 4.0, egui::Stroke::new(2.0, m.on_surface_variant), egui::StrokeKind::Inside);
+        }
+    }
+    if let Some(n) = o.number {
+        if o.current {
+            equalizer(ui, Rect::from_center_size(g.cover.center(), Vec2::splat(18.0)), o.time, o.playing, m.primary);
+        } else {
+            let number = m3::galley(ui, &n.to_string(), Type::BodyMedium, m.on_surface_variant, 40.0);
+            ui.painter().galley(g.cover.center() - number.size() / 2.0, number, m.on_surface_variant);
+        }
+    } else {
+        paint_cover(ui, g.cover, &t.thumbs, shape::TILE_SMALL, 1.0);
+        if o.pick && named(ui.interact(g.cover, base.id.with("cover"), Sense::click()), "Play").clicked() {
+            acts.push(Action::Play(vec![t.clone()], 0));
+        }
+        if o.current {
+            ui.painter().rect_filled(g.cover, shape::TILE_SMALL, theme::shade(0.5));
+            equalizer(ui, g.cover.shrink(15.0), o.time, o.playing, m.primary);
+        }
+    }
+    let title_color = if o.current { m.primary } else { m.on_surface };
+    let title = m3::galley(ui, &t.title, Type::BodyLarge, title_color, g.text.width());
+    match track_row_sub(t, o) {
+        Some(sub) => {
+            let sub_role = Type::BodyMedium.spec();
+            let top = cy - (title.size().y + sub_role.line_height) / 2.0;
+            let sub_top = top + title.size().y;
+            ui.painter().galley(pos2(g.text.left(), top), title, title_color);
+            linked_text(ui, pos2(g.text.left(), sub_top), &sub, &t.artists, sub_role.font(), m.on_surface_variant, g.text.width(), acts);
+        }
+        None => {
+            ui.painter().galley(pos2(g.text.left(), cy - title.size().y / 2.0), title, title_color);
+        }
+    }
+    // A queue row gives the duration's slot to a remove button while a finger is on it.
+    let queue = o.queue_remove.filter(|_| ui.rect_contains_pointer(hit));
+    match (queue, duration) {
+        (Some(i), _) => {
+            let at = pos2(g.trailing_right - m3::TOUCH / 2.0 + 8.0, cy);
+            if m3::IconButton::new(icon::X, "Remove from queue").show_at(ui, at, base.id.with("rm")).clicked() {
+                acts.push(Action::QueueRemove(i));
+            }
+        }
+        (None, Some(d)) => {
+            ui.painter().galley(pos2(g.trailing_right - d.size().x, cy - d.size().y / 2.0), d, m.on_surface_variant);
+        }
+        (None, None) => {}
+    }
+    let more = m3::IconButton::new(icon::ELLIPSIS_VERTICAL, "Song options").show_at(ui, more_at, base.id.with("more"));
+    egui::Popup::menu(&more).show(|ui| song_menu(ui, t, o.liked, o.remove, o.queue_move, acts));
+    // A long press anywhere on the row opens the same menu.
     egui::Popup::context_menu(&resp).show(|ui| song_menu(ui, t, o.liked, o.remove, o.queue_move, acts));
     resp
 }

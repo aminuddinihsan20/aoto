@@ -334,6 +334,8 @@ pub struct App {
     /// The current page's request failed with nothing cached: show a retry, not a skeleton.
     load_failed: bool,
     search_text: String,
+    /// The filter chip chosen over a search's results, and the search it was chosen for.
+    search_kind: (String, pages::SearchKind),
     /// The route query the box was last filled from, so clearing it isn't undone.
     search_synced: String,
     /// Past searches, newest first, for the search landing.
@@ -722,6 +724,7 @@ impl App {
             loading: false,
             load_failed: false,
             search_text: String::new(),
+            search_kind: Default::default(),
             search_synced: String::new(),
             recent_searches: get("recent_searches").and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
             search_pending: false,
@@ -921,6 +924,7 @@ impl App {
         match std::env::var("YTM_PAGE").as_deref() {
             Ok("home") => app.go(Page::Home),
             Ok("new") | Ok("explore") => app.go(Page::New),
+            Ok("search") => app.go(Page::Search(String::new())),
             Ok("library") => app.go(Page::Library(LibTab::Playlists)),
             Ok("uploads") => app.go(Page::Library(LibTab::Uploads)),
             Ok("liked") => app.go(Page::Library(LibTab::Songs)),

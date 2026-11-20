@@ -43,6 +43,15 @@ pub fn galley_wrapped(ui: &Ui, text: &str, role: impl Into<Spec>, color: Color32
     widgets::galley_wrapped_fmt(ui, text, role.into().format(color), width, rows)
 }
 
+/// Wrapped text in a type role with every line centred, at most `rows` lines. Painted
+/// at a point, its lines are centred on that point's x.
+pub fn galley_centered(ui: &Ui, text: &str, role: impl Into<Spec>, color: Color32, width: f32, rows: usize) -> Arc<egui::Galley> {
+    let wrapped = galley_wrapped(ui, text, role, color, width, rows);
+    let mut job = (*wrapped.job).clone();
+    job.halign = egui::Align::Center;
+    ui.fonts_mut(|f| f.layout_job(job))
+}
+
 /// Paint one line in a type role with its top left at `pos`; returns where it is.
 pub fn text(ui: &Ui, pos: Pos2, text: &str, role: impl Into<Spec>, color: Color32, width: f32) -> Rect {
     let g = galley(ui, text, role, color, width);
@@ -332,6 +341,23 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
         widgets::icon_at(ui, pos2(body.left() + 16.0 + 9.0, body.center().y), glyph, 17.0, ink);
     }
     ui.painter().galley(pos2(body.left() + lead, body.center().y - g.size().y / 2.0), g, ink);
+    resp
+}
+
+/// A page's one large button, filling `rect`: the Play of an album. Its label follows
+/// its icon, the pair centred.
+pub fn big_button(ui: &Ui, rect: Rect, label: &str, icon: impl Into<Icon>, id: egui::Id) -> Response {
+    let m = material::scheme();
+    let resp = named(ui.interact(rect, id, Sense::click()), label);
+    let radius = rect.height() / 2.0;
+    ui.painter().rect_filled(rect, radius, m.primary);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, radius, m.on_primary.gamma_multiply(PRESSED));
+    }
+    let g = galley(ui, label, Type::TitleMedium, m.on_primary, rect.width() - 52.0);
+    let left = rect.center().x - (22.0 + 8.0 + g.size().x) / 2.0;
+    paint_icon(ui, pos2(left + 11.0, rect.center().y), 22.0, icon.into(), m.on_primary);
+    ui.painter().galley(pos2(left + 30.0, rect.center().y - g.size().y / 2.0), g, m.on_primary);
     resp
 }
 
