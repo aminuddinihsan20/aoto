@@ -831,8 +831,8 @@ impl App {
             disable_direct_stream,
             art_changed: -10.0,
             accent: theme::RED,
-            // A phone starts in Apple Music's look; the desktop keeps the app's own.
-            theme_id: if crate::platform::phone() { "apple-music-ios" } else { crate::preset::DEFAULT_ID }.to_owned(),
+            // A phone is drawn in Material You; the desktop keeps the app's own look.
+            theme_id: if crate::platform::phone() { crate::preset::MATERIAL_ID } else { crate::preset::DEFAULT_ID }.to_owned(),
             chrome_applied: None,
             // Dev hook: YTM_APPEARANCE=light|dark|system tries a mode without saving it.
             appearance: theme::Appearance::from_key(&dev_var("YTM_APPEARANCE").map(str::to_owned).or_else(|| get("appearance")).unwrap_or_default()),

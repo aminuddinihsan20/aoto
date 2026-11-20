@@ -11,6 +11,8 @@ use serde::Deserialize;
 
 /// Id of the built-in look (the app's own design, not a Better Lyrics theme).
 pub const DEFAULT_ID: &str = "ytm-rs";
+/// Id of Material You, the look a phone starts in.
+pub const MATERIAL_ID: &str = "material-you";
 
 #[derive(Clone, Copy, PartialEq, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -360,6 +362,9 @@ pub struct Preset {
     pub cover: CoverStyle,
     pub chrome: Chrome,
     pub app: AppStyle,
+    /// Material You: the colours are the roles of `crate::material::scheme()`, not
+    /// this preset's own, and the pages draw their Material layouts.
+    pub material: bool,
 }
 
 impl Preset {
@@ -375,6 +380,9 @@ impl Preset {
 
     /// The accent to use given the one sampled from the current cover.
     pub fn accent(&self, from_cover: Color32) -> Color32 {
+        if self.material {
+            return crate::material::scheme().primary;
+        }
         if self.accent == "system" {
             return crate::theme::system_accent().unwrap_or(from_cover);
         }
@@ -382,6 +390,9 @@ impl Preset {
     }
 
     pub fn solid(&self) -> Color32 {
+        if self.material {
+            return crate::material::scheme().surface;
+        }
         hex(&self.background.solid).unwrap_or(crate::theme::bg())
     }
 }
@@ -448,7 +459,7 @@ mod tests {
     #[test]
     fn presets_are_complete() {
         let list: Vec<Preset> = serde_json::from_str(include_str!("../assets/themes/presets.json")).expect("presets.json parses");
-        assert_eq!(list.len(), 28);
+        assert_eq!(list.len(), 29);
         let mut ids = std::collections::HashSet::new();
         for p in &list {
             assert!(ids.insert(p.id.clone()), "duplicate id {}", p.id);
@@ -458,5 +469,16 @@ mod tests {
         }
         assert_eq!(all().len(), list.len() + 1);
         assert_eq!(get("nope").id, DEFAULT_ID);
+    }
+
+    #[test]
+    fn material_you_is_a_look_of_its_own_and_takes_its_colours_from_the_scheme() {
+        let m = get(MATERIAL_ID);
+        assert_eq!(m.id, MATERIAL_ID);
+        assert!(m.material);
+        let scheme = crate::material::scheme();
+        assert_eq!(m.accent(Color32::from_rgb(1, 2, 3)), scheme.primary, "whatever the cover's colour is");
+        assert_eq!(m.solid(), scheme.surface);
+        assert_eq!(all().iter().filter(|p| p.material).count(), 1, "the other looks keep their own colours");
     }
 }

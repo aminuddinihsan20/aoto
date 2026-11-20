@@ -1090,5 +1090,44 @@
       "panel_radius": 16,
       "font": "SF Pro Display"
     }
+  },
+  {
+    "id": "material-you",
+    "name": "Material You",
+    "creators": [
+      "BitChord"
+    ],
+    "blurb": "Google's Material 3 on a phone: tonal surfaces from one seed colour, Roboto type, large rounded shapes.",
+    "material": true,
+    "background": {
+      "mode": "accent_gradient",
+      "scrim": 0.3
+    },
+    "lyrics": {
+      "font": "Roboto",
+      "size": 1.45,
+      "inactive_alpha": 0.2,
+      "falloff": 0.01,
+      "past_alpha": 0.0,
+      "blur": 2.0,
+      "lift": 3,
+      "blur_scope": "upcoming"
+    },
+    "cover": {
+      "radius": 36,
+      "size": 1.1,
+      "shadow": 0.3
+    },
+    "chrome": {
+      "radius": 20,
+      "player_bar": "floating"
+    },
+    "app": {
+      "page_bg": "solid",
+      "card_radius": 16,
+      "thumb_radius": 8,
+      "panel_radius": 20,
+      "font": "Roboto"
+    }
   }
 ]

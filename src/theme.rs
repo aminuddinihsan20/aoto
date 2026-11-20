@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use egui::{Color32, FontData, FontDefinitions, FontFamily, FontId};
 
+use crate::material::Tone;
+
 // ------------------------------------------------------------------ colours
 
 /// Base surface under the animated background (seen while it fades in).
@@ -37,33 +39,57 @@ pub fn set_mode(ctx: &egui::Context, light: bool) -> bool {
     was
 }
 
+/// The Material scheme, while Material You is the look being drawn: the colour helpers
+/// below then answer with its roles (see `Scheme::tone`).
+fn material() -> Option<&'static crate::material::Scheme> {
+    crate::material::on().then(crate::material::scheme)
+}
+
 /// Main text.
 pub fn text() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::Text);
+    }
     if light() { TEXT_LIGHT } else { TEXT }
 }
 
 /// Text and icons on a fill of the main text colour (a primary button, a selected chip).
 pub fn on_text() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::OnText);
+    }
     if light() { Color32::WHITE } else { Color32::from_gray(15) }
 }
 
 /// Least important text: counts, hints, placeholders.
 pub fn text_faint() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::TextFaint);
+    }
     if light() { TEXT_FAINT_LIGHT } else { TEXT_FAINT }
 }
 
 /// The window's base colour, under the background.
 pub fn bg() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::Background);
+    }
     if light() { BG_LIGHT } else { BG }
 }
 
 /// Menus and popups.
 pub fn menu_fill() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::Menu);
+    }
     if light() { Color32::WHITE } else { Color32::from_rgb(38, 34, 42) }
 }
 
 /// Dialogs and cards that float over the page.
 pub fn surface_fill() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::Floating);
+    }
     if light() { Color32::from_rgb(252, 251, 253) } else { Color32::from_rgb(28, 24, 32) }
 }
 
@@ -73,6 +99,9 @@ static GLASS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0
 /// White at `a` opacity, for glassy surfaces over the background (black in light mode).
 pub fn glass(a: f32) -> Color32 {
     let k = f32::from_bits(GLASS.load(std::sync::atomic::Ordering::Relaxed));
+    if let Some(m) = material() {
+        return m.glass(a * k);
+    }
     let a = ((a * k).min(1.0) * 255.0) as u8;
     if light() { Color32::from_black_alpha(a) } else { Color32::from_white_alpha(a) }
 }
@@ -80,6 +109,9 @@ pub fn glass(a: f32) -> Color32 {
 /// A panel over the background (sidebar, player bar, queue): darker than the page at
 /// `a`, or in light mode lighter.
 pub fn panel(a: f32) -> Color32 {
+    if let Some(m) = material() {
+        return m.panel(a);
+    }
     if light() { Color32::from_white_alpha((a.clamp(0.0, 1.0) * 255.0) as u8) } else { shade(a) }
 }
 
@@ -88,6 +120,9 @@ static DIM: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32
 
 /// Secondary text colour (themes may tint it).
 pub fn text_dim() -> Color32 {
+    if let Some(m) = material() {
+        return m.tone(Tone::TextDim);
+    }
     if light() {
         return TEXT_DIM_LIGHT;
     }
@@ -625,11 +660,17 @@ fn scan_fonts() -> Vec<SysFamily> {
     families.into_values().collect()
 }
 
-/// The closest face to each of the three weights the app draws: regular, semibold, and
-/// bold, leaning to 700 over 900 where a family has both.
-fn choose_faces(family: &SysFamily) -> Option<[Face; 3]> {
+/// The three weights a font is drawn at: regular, semibold, and bold, leaning to 700
+/// over 900 where a family has both. Roboto is drawn at the weights Material's type
+/// scale is made of: regular, medium and bold.
+fn weights_for(name: &str) -> [f32; 3] {
+    if name.eq_ignore_ascii_case(ANDROID_FONT) { [400.0, 500.0, 700.0] } else { [400.0, 600.0, 750.0] }
+}
+
+/// The closest face to each of `weights`.
+fn choose_faces(family: &SysFamily, weights: [f32; 3]) -> Option<[Face; 3]> {
     let mut faces = Vec::new();
-    for target in [400.0, 600.0, 750.0] {
+    for target in weights {
         let best = family.faces.iter().min_by_key(|f| match f.wght {
             Some((lo, hi)) if (lo..=hi).contains(&target) => 0,
             Some((lo, hi)) => (target - target.clamp(lo, hi)).abs() as i32,
@@ -644,7 +685,7 @@ fn choose_faces(family: &SysFamily) -> Option<[Face; 3]> {
 /// The three weights from the first face of each of these font files that exists: a
 /// variable font serves all three itself, static files the weight each was drawn at.
 #[cfg_attr(not(any(target_os = "android", test)), allow(dead_code))]
-fn faces_of_files(paths: &[&str]) -> Option<[Face; 3]> {
+fn faces_of_files(paths: &[&str], weights: [f32; 3]) -> Option<[Face; 3]> {
     use skrifa::MetadataProvider;
     let faces = paths
         .iter()
@@ -655,7 +696,7 @@ fn faces_of_files(paths: &[&str]) -> Option<[Face; 3]> {
             Some(SysFace { path: path.into(), index: 0, weight: font.attributes().weight.value(), wght })
         })
         .collect();
-    choose_faces(&SysFamily { name: String::new(), faces })
+    choose_faces(&SysFamily { name: String::new(), faces }, weights)
 }
 
 /// Load the faces of the installed font in use, if that's what it is: the listener's
@@ -673,12 +714,12 @@ fn load_choice(ui_font: &str) {
     // Android: the system font's own file (and its heavier siblings on older versions),
     // without scanning the two hundred fonts beside it.
     #[cfg(target_os = "android")]
-    let faces = faces_of_files(&["/system/fonts/Roboto-Regular.ttf", "/system/fonts/Roboto-Medium.ttf", "/system/fonts/Roboto-Bold.ttf"]);
+    let faces = faces_of_files(&["/system/fonts/Roboto-Regular.ttf", "/system/fonts/Roboto-Medium.ttf", "/system/fonts/Roboto-Bold.ttf"], weights_for(&name));
     // Only when an installed font is set: a one-off scan, the first time.
     #[cfg(not(target_os = "android"))]
     let faces = {
         let all = INSTALLED_FONTS.get_or_init(scan_fonts);
-        name.split(',').map(str::trim).find_map(|n| all.iter().find(|f| f.name.eq_ignore_ascii_case(n)).and_then(choose_faces))
+        name.split(',').map(str::trim).find_map(|n| all.iter().find(|f| f.name.eq_ignore_ascii_case(n)).and_then(|f| choose_faces(f, weights_for(n))))
     };
     if faces.is_none() {
         log::warn!("font {name:?} isn't installed; using Inter");
@@ -947,7 +988,7 @@ fn visuals() -> egui::Visuals {
     v.window_fill = surface_fill();
     v.extreme_bg_color = glass(0.08);
     v.override_text_color = Some(text());
-    v.selection.bg_fill = with_alpha(RED, if light() { 0.3 } else { 0.5 });
+    v.selection.bg_fill = with_alpha(material().map_or(RED, |m| m.primary), if light() { 0.3 } else { 0.5 });
     v.hyperlink_color = text();
     v.interact_cursor = Some(egui::CursorIcon::PointingHand);
     let pr = egui::CornerRadius::same(p.app.panel_radius.clamp(0.0, 32.0) as u8);
@@ -991,6 +1032,35 @@ mod tests {
 
     #[test]
     fn font_files_that_are_not_there_give_no_faces() {
-        assert!(faces_of_files(&["/nowhere/Roboto-Regular.ttf", "/nowhere/Roboto-Bold.ttf"]).is_none());
+        assert!(faces_of_files(&["/nowhere/Roboto-Regular.ttf", "/nowhere/Roboto-Bold.ttf"], weights_for(ANDROID_FONT)).is_none());
+    }
+
+    #[test]
+    fn roboto_is_drawn_at_materials_weights_and_other_fonts_at_the_apps() {
+        assert_eq!(weights_for("Roboto"), [400.0, 500.0, 700.0]);
+        assert_eq!(weights_for("roboto"), [400.0, 500.0, 700.0]);
+        assert_eq!(weights_for("Segoe UI Variable"), [400.0, 600.0, 750.0]);
+    }
+
+    /// The look is one setting for the whole process: tests that change it take turns.
+    static LOOK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn under_material_you_the_older_colour_helpers_answer_with_roles() {
+        let _turn = LOOK.lock().unwrap();
+        let m = crate::material::scheme();
+        crate::preset::set_active(crate::preset::MATERIAL_ID);
+        let got = [text(), text_dim(), text_faint(), on_text(), bg(), menu_fill(), surface_fill(), glass(0.08), panel(1.0)];
+        crate::preset::set_active(crate::preset::DEFAULT_ID);
+        assert_eq!(got, [m.on_surface, m.on_surface_variant, m.outline, m.surface, m.surface, m.surface_container, m.surface_container_low, m.glass(0.08), m.surface_container]);
+    }
+
+    #[test]
+    fn the_other_looks_keep_their_own_colours() {
+        let _turn = LOOK.lock().unwrap();
+        crate::preset::set_active(crate::preset::DEFAULT_ID);
+        assert_eq!(text(), TEXT);
+        assert_eq!(bg(), BG);
+        assert_eq!(glass(0.5), Color32::from_white_alpha(127));
     }
 }

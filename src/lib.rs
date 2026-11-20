@@ -32,6 +32,7 @@ mod model;
 mod motion;
 pub mod platform;
 mod opus;
+mod material;
 mod preset;
 mod shader;
 mod sleep;
