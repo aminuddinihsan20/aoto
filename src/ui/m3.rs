@@ -1742,6 +1742,37 @@ mod tests {
     }
 
     #[test]
+    fn a_tap_on_a_row_of_a_card_is_the_rows() {
+        let opened = std::cell::Cell::new(0);
+        let flipped = std::cell::Cell::new(false);
+        tapped(
+            |min, _| min + vec2(120.0, 36.0 + CARD_PAD.y + NAV_ROW_H / 2.0),
+            |ui, _| {
+                card(ui, Some(GroupLabel { title: "Sound", value: None }), material::scheme().surface_container, |ui| {
+                    if nav_row(ui, icon::PLAY.into(), "Playback", "Autoplay, crossfade").clicked() {
+                        opened.set(opened.get() + 1);
+                    }
+                });
+            },
+        );
+        assert_eq!(opened.get(), 1, "the card itself takes no taps from what is on it");
+        // Also inside a page that scrolls, as every page does.
+        tapped(
+            |min, _| min + vec2(CARD_PAD.x + SWITCH.x / 2.0, CARD_PAD.y + TOUCH / 2.0),
+            |ui, _| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    card(ui, None, material::scheme().surface_container, |ui| {
+                        let mut on = flipped.get();
+                        switch(ui, &mut on, "Autoplay");
+                        flipped.set(on);
+                    });
+                });
+            },
+        );
+        assert!(flipped.get(), "nor from a switch");
+    }
+
+    #[test]
     fn a_cards_rows_are_as_wide_as_the_card_less_its_padding() {
         let (page, row) = drawn(360.0, |ui| {
             let page = ui.available_width();

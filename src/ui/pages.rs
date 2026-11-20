@@ -3217,8 +3217,10 @@ fn hires_sources_editor(app: &mut App, ui: &mut Ui) {
         let verdict = if link.is_empty() { None } else { app.hires_check(&link).cloned() };
         // Fixed-height row so the × sits at the same height on every line, whatever
         // verdict text appears; the verdict goes below the row, not inside it.
-        ui.allocate_ui_with_layout(vec2(ui.available_width(), 42.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if widgets::icon_button(ui, icon::X, 14.0, "Remove source", false).clicked() {
+        ui.allocate_ui_with_layout(vec2(ui.available_width(), if m3::on() { m3::TOUCH } else { 42.0 }), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // A finger needs a larger button than a pointer.
+            let removed = if m3::on() { m3::IconButton::new(icon::X, "Remove source").show(ui).clicked() } else { widgets::icon_button(ui, icon::X, 14.0, "Remove source", false).clicked() };
+            if removed {
                 remove = Some(i);
             }
             ui.add_space(8.0);

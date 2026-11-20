@@ -55,6 +55,11 @@ impl App {
 /// (in memory, so saving doesn't slow them) and then writes `<stem>_<i>_<ms>.png`,
 /// `ms` being each frame's time: a filmstrip of an animation and its frame pacing.
 pub(super) fn dev_screenshot(ctx: &egui::Context, now: f64) {
+    // YTM_FAKE_TAP's taps are fed in before a frame starts, where a repaint can't be
+    // asked for: the frames are kept coming from here.
+    if dev_var("YTM_FAKE_TAP").is_some() {
+        ctx.request_repaint();
+    }
     let Some(path) = dev_var("YTM_SCREENSHOT") else { return };
     let at: f64 = dev_var("YTM_SCREENSHOT_AT").and_then(|v| v.parse().ok()).unwrap_or(8.0);
     if let Some(n) = dev_var("YTM_SCREENSHOT_BURST").and_then(|v| v.parse::<usize>().ok()) {

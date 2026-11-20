@@ -1640,6 +1640,27 @@ impl eframe::App for App {
                 crate::platform::reset_keyboard();
             }
         }
+        // Dev hook: YTM_FAKE_TAP="secs,x,y[;secs,x,y…]" taps there at those app times, for
+        // screenshots of what a tap opens.
+        for (i, (at, x, y)) in dev_var("YTM_FAKE_TAP").into_iter().flat_map(|v| v.split(';')).filter_map(|tap| {
+            let mut n = tap.split(',').map(|n| n.trim().parse::<f64>().ok());
+            Some((n.next()??, n.next()?? as f32, n.next()?? as f32))
+        }).enumerate() {
+            let step_id = egui::Id::unique(("dev-tap", i));
+            let step: u8 = ctx.data(|d| d.get_temp(step_id)).unwrap_or(0);
+            let (t, pos) = (raw.time.unwrap_or(0.0), egui::pos2(x, y));
+            let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+            match step {
+                0 if t >= at => raw.events.extend([egui::Event::PointerMoved(pos), button(true)]),
+                1 => raw.events.push(button(false)),
+                2 => raw.events.push(egui::Event::PointerGone),
+                _ => {}
+            }
+            // (`dev_screenshot` keeps the frames coming while taps are due.)
+            if step < 3 && t >= at {
+                ctx.data_mut(|d| d.insert_temp(step_id, step + 1));
+            }
+        }
         if let Some((x, y)) = dev_var("YTM_FAKE_POINTER").and_then(|v| {
             let (x, y) = v.split_once(',')?;
             Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
