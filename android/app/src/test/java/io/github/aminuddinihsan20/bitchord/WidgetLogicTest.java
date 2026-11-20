@@ -36,6 +36,11 @@ public final class WidgetLogicTest {
             WidgetLogicTest::a_cover_is_cropped_to_the_shape_of_the_widget_it_fills,
             WidgetLogicTest::a_widget_of_unknown_size_gets_a_square,
             WidgetLogicTest::a_cropped_cover_keeps_the_widgets_shape_at_its_longest_side,
+            WidgetLogicTest::the_wide_widgets_cover_is_as_tall_as_the_widget_has_room_for,
+            WidgetLogicTest::the_wide_widgets_cover_leaves_room_for_three_full_buttons,
+            WidgetLogicTest::the_wide_widgets_cover_is_neither_tiny_nor_larger_than_designed,
+            WidgetLogicTest::a_wide_widget_of_unknown_size_gets_a_middling_cover,
+            WidgetLogicTest::the_artist_is_left_out_of_a_wide_widget_too_low_for_two_lines,
         };
         int failedTests = 0;
         for (Runnable test : tests) {
@@ -140,6 +145,37 @@ public final class WidgetLogicTest {
         same("wider than tall", new int[] {300, 150}, WidgetLogic.fit(300, 150, 300));
         same("square", new int[] {300, 300}, WidgetLogic.fit(180, 180, 300));
         same("a sliver still has a pixel", new int[] {300, 1}, WidgetLogic.fit(4000, 1, 300));
+    }
+
+    private static void the_wide_widgets_cover_is_as_tall_as_the_widget_has_room_for() {
+        // 12dp of padding above and below.
+        same("a low widget", 86, WidgetLogic.wideCoverDp(380, 110));
+        same("the designed size", 148, WidgetLogic.wideCoverDp(380, 180));
+    }
+
+    private static void the_wide_widgets_cover_leaves_room_for_three_full_buttons() {
+        // Beside it: 24dp of padding, a 12dp gap, three 48dp buttons 6dp apart.
+        same("a 360dp phone's four cells", 136, WidgetLogic.wideCoverDp(328, 190));
+        same("four cells of five", 104, WidgetLogic.wideCoverDp(296, 190));
+    }
+
+    private static void the_wide_widgets_cover_is_neither_tiny_nor_larger_than_designed() {
+        same("a huge cell", 148, WidgetLogic.wideCoverDp(600, 400));
+        same("narrower than the buttons need", 48, WidgetLogic.wideCoverDp(200, 190));
+        same("lower than a button", 48, WidgetLogic.wideCoverDp(380, 60));
+    }
+
+    private static void a_wide_widget_of_unknown_size_gets_a_middling_cover() {
+        same("no size", 96, WidgetLogic.wideCoverDp(0, 0));
+        same("no height", 96, WidgetLogic.wideCoverDp(380, 0));
+    }
+
+    private static void the_artist_is_left_out_of_a_wide_widget_too_low_for_two_lines() {
+        same("two cells by the old rule", false, WidgetLogic.roomForArtist(110));
+        same("just too low", false, WidgetLogic.roomForArtist(127));
+        same("just enough", true, WidgetLogic.roomForArtist(128));
+        same("the designed size", true, WidgetLogic.roomForArtist(180));
+        same("unknown", true, WidgetLogic.roomForArtist(0));
     }
 
     private static void same(String what, Object expected, Object actual) {

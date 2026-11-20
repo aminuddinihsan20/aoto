@@ -100,4 +100,25 @@ final class WidgetLogic {
         }
         return new int[] {Math.max(1, (int) ((long) side * boxW / boxH)), side};
     }
+
+    /**
+     * The side of the 4×2 widget's cover, in dp, for the size the launcher gave it (0:
+     * not told). The layout (widget_wide.xml) has 12dp of padding all round, 12dp between
+     * the cover and the rest, and three 48dp buttons 6dp apart that must stay whole.
+     */
+    static int wideCoverDp(int widthDp, int heightDp) {
+        if (widthDp <= 0 || heightDp <= 0) {
+            return 96;
+        }
+        int beside = 24 + 12 + 3 * 48 + 2 * 6;
+        return Math.max(48, Math.min(148, Math.min(heightDp - 24, widthDp - beside)));
+    }
+
+    /**
+     * Whether the 4×2 widget is high enough (dp; 0: not told) for the artist under the
+     * title: 24dp of padding, a 21dp title, a 20dp artist, the bar's 14dp, 48dp buttons.
+     */
+    static boolean roomForArtist(int heightDp) {
+        return heightDp <= 0 || heightDp > 24 + 21 + 20 + 14 + 48;
+    }
 }

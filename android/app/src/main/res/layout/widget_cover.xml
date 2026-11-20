@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 2×2 widget: the cover filling it, the title over its foot, play / pause. As
+     written here it is the widget with no song (and the widget picker's preview): the
+     cover is hidden, and the background shows in its place. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_cover_background"
+    android:clipToOutline="true">
+
+    <ImageView
+        android:id="@+id/widget_art"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:importantForAccessibility="no"
+        android:scaleType="centerCrop"
+        android:visibility="invisible" />
+
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="96dp"
+        android:layout_gravity="bottom"
+        android:importantForAccessibility="no"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_scrim" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:baselineAligned="false"
+        android:gravity="bottom"
+        android:orientation="horizontal"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="2"
+            android:shadowColor="#99000000"
+            android:shadowDy="1"
+            android:shadowRadius="4"
+            android:text="@string/widget_empty_title"
+            android:textColor="#FFFFFFFF"
+            android:textSize="15sp" />
+
+        <ImageButton
+            android:id="@+id/widget_toggle"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/widget_button_square"
+            android:contentDescription="@string/widget_play"
+            android:src="@drawable/ic_widget_play"
+            android:tint="@color/widget_on_primary" />
+    </LinearLayout>
+</FrameLayout>

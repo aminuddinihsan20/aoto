@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 4×2 widget as the widget picker shows it below Android 12 (from 12 on it draws the layout). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="380dp"
+    android:height="180dp"
+    android:viewportWidth="380"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="@color/widget_surface"
+        android:pathData="M28,0h324a28,28 0 0 1 28,28v124a28,28 0 0 1 -28,28h-324a28,28 0 0 1 -28,-28v-124a28,28 0 0 1 28,-28z" />
+    <path
+        android:fillColor="@color/widget_primary_container"
+        android:pathData="M36,16h108a20,20 0 0 1 20,20v108a20,20 0 0 1 -20,20h-108a20,20 0 0 1 -20,-20v-108a20,20 0 0 1 20,-20z" />
+    <group
+        android:scaleX="2.5"
+        android:scaleY="2.5"
+        android:translateX="60"
+        android:translateY="60">
+        <path
+            android:fillColor="@color/widget_primary"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+    <path
+        android:fillColor="@color/widget_on_surface"
+        android:pathData="M187,26h118a7,7 0 0 1 7,7a7,7 0 0 1 -7,7h-118a7,7 0 0 1 -7,-7a7,7 0 0 1 7,-7z" />
+    <path
+        android:fillColor="@color/widget_on_surface_variant"
+        android:pathData="M185.5,50h73a5.5,5.5 0 0 1 5.5,5.5a5.5,5.5 0 0 1 -5.5,5.5h-73a5.5,5.5 0 0 1 -5.5,-5.5a5.5,5.5 0 0 1 5.5,-5.5z" />
+    <path
+        android:fillColor="@color/widget_control"
+        android:pathData="M182,82h180a2,2 0 0 1 2,2a2,2 0 0 1 -2,2h-180a2,2 0 0 1 -2,-2a2,2 0 0 1 2,-2z" />
+    <path
+        android:fillColor="@color/widget_primary"
+        android:pathData="M182,82h66a2,2 0 0 1 2,2a2,2 0 0 1 -2,2h-66a2,2 0 0 1 -2,-2a2,2 0 0 1 2,-2z" />
+    <path
+        android:fillColor="@color/widget_control"
+        android:pathData="M206,112h0a26,26 0 0 1 26,26a26,26 0 0 1 -26,26h-0a26,26 0 0 1 -26,-26a26,26 0 0 1 26,-26z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="194"
+        android:translateY="126">
+        <path
+            android:fillColor="@color/widget_on_surface"
+            android:pathData="M6,6h2v12H6zm3.5,6l8.5,6V6z" />
+    </group>
+    <path
+        android:fillColor="@color/widget_primary"
+        android:pathData="M264,112h16a26,26 0 0 1 26,26a26,26 0 0 1 -26,26h-16a26,26 0 0 1 -26,-26a26,26 0 0 1 26,-26z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="260"
+        android:translateY="126">
+        <path
+            android:fillColor="@color/widget_on_primary"
+            android:pathData="M8,5v14l11,-7z" />
+    </group>
+    <path
+        android:fillColor="@color/widget_control"
+        android:pathData="M338,112h0a26,26 0 0 1 26,26a26,26 0 0 1 -26,26h-0a26,26 0 0 1 -26,-26a26,26 0 0 1 26,-26z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="326"
+        android:translateY="126">
+        <path
+            android:fillColor="@color/widget_on_surface"
+            android:pathData="M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z" />
+    </group>
+</vector>

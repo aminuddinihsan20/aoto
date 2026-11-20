@@ -41,6 +41,42 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- The home-screen widgets (4×2, 2×2, 4×1): one receiver each, since each has its
+             own sizes; the label is the widget's name in the widget picker. -->
+        <receiver
+            android:name=".NowPlayingWidget$Wide"
+            android:exported="false"
+            android:label="@string/widget_wide_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_wide_info" />
+        </receiver>
+        <receiver
+            android:name=".NowPlayingWidget$Cover"
+            android:exported="false"
+            android:label="@string/widget_cover_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_cover_info" />
+        </receiver>
+        <receiver
+            android:name=".NowPlayingWidget$Pill"
+            android:exported="false"
+            android:label="@string/widget_pill_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_pill_info" />
+        </receiver>
+
         <!-- The sign-in page (a WebView), opened by MainActivity when the app asks. -->
         <activity
             android:name=".LoginActivity"

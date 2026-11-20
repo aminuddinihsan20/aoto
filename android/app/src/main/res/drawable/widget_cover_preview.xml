@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 2×2 widget as the widget picker shows it below Android 12. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="180dp"
+    android:viewportWidth="180"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="@color/widget_primary_container"
+        android:pathData="M28,0h124a28,28 0 0 1 28,28v124a28,28 0 0 1 -28,28h-124a28,28 0 0 1 -28,-28v-124a28,28 0 0 1 28,-28z" />
+    <group
+        android:scaleX="3"
+        android:scaleY="3"
+        android:translateX="54"
+        android:translateY="38">
+        <path
+            android:fillColor="@color/widget_primary"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M23,146h62a7,7 0 0 1 7,7a7,7 0 0 1 -7,7h-62a7,7 0 0 1 -7,-7a7,7 0 0 1 7,-7z" />
+    <path
+        android:fillColor="@color/widget_primary"
+        android:pathData="M132,116h16a16,16 0 0 1 16,16v16a16,16 0 0 1 -16,16h-16a16,16 0 0 1 -16,-16v-16a16,16 0 0 1 16,-16z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="128"
+        android:translateY="128">
+        <path
+            android:fillColor="@color/widget_on_primary"
+            android:pathData="M8,5v14l11,-7z" />
+    </group>
+</vector>

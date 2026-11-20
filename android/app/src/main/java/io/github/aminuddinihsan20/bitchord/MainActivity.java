@@ -44,6 +44,17 @@ public class MainActivity extends GameActivity {
 
     private boolean hadMedia;
 
+    private static volatile boolean appRunning;
+
+    /**
+     * Whether the Rust app runs in this process. It starts with this activity and the
+     * process ends with it, so a process without it (started for a widget alone) has no
+     * player, and not even the native library loaded.
+     */
+    static boolean appRunning() {
+        return appRunning;
+    }
+
     /** The next job the app asks of Java ("id kind arg" joined by U+001F), or empty. */
     private static native String nativeTakeCall();
 
@@ -56,6 +67,12 @@ public class MainActivity extends GameActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        appRunning = true;
+        // Whatever an earlier run left on the home screen: nothing plays yet.
+        NowPlayingWidget.refresh(this);
+        if (savedInstanceState == null) {
+            playIfAsked(getIntent());
+        }
 
         // Edge to edge: the app draws under the status and gesture bars and keeps its
         // content clear of them (and above the keyboard) by these insets.
@@ -108,6 +125,24 @@ public class MainActivity extends GameActivity {
                 }
             }
         });
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        playIfAsked(intent);
+    }
+
+    /**
+     * A widget's Play with no player to tell opens the app to play: as Play in the app,
+     * which starts last time's song. (Not when Android reopens the app from the recent
+     * apps with the intent it was first started with.)
+     */
+    private static void playIfAsked(Intent intent) {
+        if (intent != null && NowPlayingWidget.ACTION_PLAY.equals(intent.getAction())
+                && (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+            PlaybackService.play();
+        }
     }
 
     /** A job the app asked for: choosing a folder, listing music, copying files. */
@@ -217,6 +252,9 @@ public class MainActivity extends GameActivity {
 
     /** Stop the music service and end the process. Never returns. */
     static void endProcess(android.content.Context context) {
+        // The widgets outlive the process: they must not be left showing a song and
+        // buttons for a player that is gone.
+        NowPlayingWidget.clearNow(context);
         try {
             context.stopService(new Intent(context, PlaybackService.class));
         } catch (RuntimeException ignored) {
