@@ -1216,59 +1216,6 @@ fn shelf_rest(starts: &[usize], step: f32, offset: f32) -> Option<f32> {
     ((page - offset).abs() > 0.5).then_some(page)
 }
 
-/// A colour for `seed` (0..1 around the colour wheel): the same every time, and spread out
-/// so folders named alike still look different.
-pub fn hue_of(seed: &str) -> f32 {
-    // FNV-1a, whose top bits are spread evenly over 0..1.
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in seed.bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(0x0100_0000_01b3);
-    }
-    ((h >> 11) as f64 / (1u64 << 53) as f64) as f32
-}
-
-/// A rounded square of soft colour for a folder: a diagonal blend from one hue to a deeper
-/// neighbour, a glow in the top-left corner and a shade along the bottom. Transparent
-/// outside its rounded corners.
-pub fn folder_art_image(seed: &str, size: usize) -> egui::ColorImage {
-    use egui::ecolor::Hsva;
-    let hue = hue_of(seed);
-    let top = Color32::from(Hsva::new(hue, 0.50, 0.98, 1.0));
-    let bottom = Color32::from(Hsva::new((hue + 0.09).fract(), 0.78, 0.52, 1.0));
-    let n = size as f32;
-    let radius = n * 0.21;
-    let mut pixels = Vec::with_capacity(size * size);
-    for y in 0..size {
-        for x in 0..size {
-            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-            // Distance outside the rounded square (negative inside): the edge's softness.
-            let (dx, dy) = ((px - n / 2.0).abs() - (n / 2.0 - radius), (py - n / 2.0).abs() - (n / 2.0 - radius));
-            let outside = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - radius;
-            let alpha = (0.5 - outside).clamp(0.0, 1.0);
-            let t = ((px + py) / (2.0 * n)).clamp(0.0, 1.0);
-            let base = theme::lerp_color(top, bottom, t);
-            // The glow near the top-left, the shade along the bottom.
-            let glow = (1.0 - ((px / n - 0.18).hypot(py / n - 0.12)) * 1.7).clamp(0.0, 1.0).powi(2) * 0.28;
-            let shade = ((py / n - 0.62) / 0.38).clamp(0.0, 1.0) * 0.22;
-            let lit = theme::lerp_color(theme::lerp_color(base, Color32::WHITE, glow), Color32::BLACK, shade);
-            pixels.push(Color32::from_rgba_unmultiplied(lit.r(), lit.g(), lit.b(), (alpha * 255.0).round() as u8));
-        }
-    }
-    egui::ColorImage { size: [size, size], pixels, source_size: egui::vec2(n, n) }
-}
-
-/// The art for a folder as a texture, made once per folder name.
-pub fn folder_art(ctx: &egui::Context, seed: &str) -> egui::TextureHandle {
-    let id = egui::Id::NULL.with(("folder-art", seed));
-    if let Some(t) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
-        return t;
-    }
-    let t = ctx.load_texture(format!("folder-art-{seed}"), folder_art_image(seed, 192), egui::TextureOptions::LINEAR);
-    ctx.data_mut(|d| d.insert_temp(id, t.clone()));
-    t
-}
-
 /// Which way a touch drag is going once it has moved far enough to tell: `Some(true)`
 /// horizontal, `Some(false)` vertical, `None` while it is still within the slop.
 pub fn drag_axis(delta: Vec2) -> Option<bool> {
@@ -1608,34 +1555,6 @@ pub fn skeleton(ui: &mut Ui, time: f64, rows: usize, card: f32) {
     // The shimmer needs frames only while it's on screen, and 15 fps is plenty.
     if ui.is_rect_visible(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top())) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
-    }
-}
-
-#[cfg(test)]
-mod folder_art_tests {
-    use super::{folder_art_image, hue_of};
-
-    #[test]
-    fn a_folder_always_gets_the_same_colour_and_others_get_other_ones() {
-        assert_eq!(hue_of("Japanese"), hue_of("Japanese"));
-        assert_ne!(hue_of("Japanese"), hue_of("English"));
-        assert!((0.0..1.0).contains(&hue_of("anything")));
-    }
-
-    #[test]
-    fn the_art_is_a_rounded_tile_with_clear_corners_and_a_solid_middle() {
-        let img = folder_art_image("Japanese", 96);
-        assert_eq!(img.size, [96, 96]);
-        assert_eq!(img.pixels[0].a(), 0, "the corner is cut away");
-        assert_eq!(img.pixels[48 * 96 + 48].a(), 255, "the middle is solid");
-        assert_eq!(img.pixels[48 * 96].a(), 255, "the straight edges are kept");
-    }
-
-    #[test]
-    fn two_folders_do_not_look_alike() {
-        let a = folder_art_image("Japanese", 64);
-        let b = folder_art_image("English", 64);
-        assert_ne!(a.pixels[32 * 64 + 32], b.pixels[32 * 64 + 32]);
     }
 }
 
