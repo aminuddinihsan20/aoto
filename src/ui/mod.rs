@@ -1491,6 +1491,7 @@ impl eframe::App for App {
         shell::background(self, ui, screen, now, covered.then_some(bar_strip));
         let phone = crate::platform::phone();
         if phone {
+            crate::fling::on_release(&ctx);
             // Android's back button: the activity asks whether there is anything to go
             // back to, and sends the press this way.
             crate::platform::set_wake(&ctx);

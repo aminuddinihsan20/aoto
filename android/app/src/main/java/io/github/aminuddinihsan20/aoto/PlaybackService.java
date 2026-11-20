@@ -59,8 +59,8 @@ public class PlaybackService extends Service {
     private AudioFocusRequest focus;
     private PowerManager power;
     private PowerManager.WakeLock wakeLock;
-    private boolean pausedForFocus;
-    private boolean focusHeld;
+    /** Who has the sound, and whether the music is only waiting for it to come back. */
+    private final FocusLogic focusLogic = new FocusLogic();
     private boolean noisyRegistered;
 
     private String lastLine = "";
@@ -95,7 +95,8 @@ public class PlaybackService extends Service {
     private final BroadcastReceiver noisy = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            // Headphones unplugged: stop, as every music app does.
+            // Headphones unplugged: stop, as every music app does, and stay stopped.
+            focusLogic.pausedByHand();
             nativeMediaCommand(PAUSE, 0);
         }
     };
@@ -135,6 +136,7 @@ public class PlaybackService extends Service {
         if (ACTION_PREVIOUS.equals(action)) {
             nativeMediaCommand(PREVIOUS, 0);
         } else if (ACTION_TOGGLE.equals(action)) {
+            focusLogic.pausedByHand();
             nativeMediaCommand(TOGGLE, 0);
         } else if (ACTION_NEXT.equals(action)) {
             nativeMediaCommand(NEXT, 0);
@@ -155,6 +157,10 @@ public class PlaybackService extends Service {
 
     /** A button of the media session (PlayerSession), for the app. Only with the app running. */
     static void command(int code, long arg) {
+        PlaybackService service = running;
+        if (service != null && (code == PAUSE || code == TOGGLE)) {
+            service.focusLogic.pausedByHand();
+        }
         nativeMediaCommand(code, arg);
     }
 
@@ -249,6 +255,7 @@ public class PlaybackService extends Service {
         title = now.title;
         artist = now.artist;
         playing = now.playing;
+        focusLogic.playingNow(playing);
         duration = now.duration;
         position = now.position;
         speed = now.speed;
@@ -268,7 +275,7 @@ public class PlaybackService extends Service {
                 registerReceiver(noisy, new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY));
                 noisyRegistered = true;
             }
-        } else if (!playing && wasPlaying && wakeLock.isHeld() && !pausedForFocus) {
+        } else if (!playing && wasPlaying && wakeLock.isHeld() && !focusLogic.resumes()) {
             wakeLock.release();
         }
         publish();
@@ -367,14 +374,12 @@ public class PlaybackService extends Service {
     private void requestFocus() {
         if (focus == null) {
             AudioManager.OnAudioFocusChangeListener listener = change -> {
-                if (change == AudioManager.AUDIOFOCUS_LOSS) {
-                    pausedForFocus = false;
+                // Asked afresh: the poll's answer can be half a second old, and music the
+                // listener has just paused must not be taken for music that plays.
+                int action = focusLogic.changed(change, playsNow());
+                if (action == FocusLogic.PAUSE) {
                     nativeMediaCommand(PAUSE, 0);
-                } else if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                    pausedForFocus = true;
-                    nativeMediaCommand(PAUSE, 0);
-                } else if (change == AudioManager.AUDIOFOCUS_GAIN && pausedForFocus) {
-                    pausedForFocus = false;
+                } else if (action == FocusLogic.PLAY) {
                     nativeMediaCommand(PLAY, 0);
                 }
             };
@@ -383,9 +388,16 @@ public class PlaybackService extends Service {
                     .setOnAudioFocusChangeListener(listener)
                     .build();
         }
-        if (!focusHeld) {
-            focusHeld = audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        if (focusLogic.mustAsk() && audio.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            focusLogic.granted();
         }
+    }
+
+    /** Does music play right now, by the app's own word? */
+    private boolean playsNow() {
+        String line = nativeNowPlaying();
+        AutoLogic.Song now = line == null || line.isEmpty() ? null : AutoLogic.song(line);
+        return now == null ? playing : now.playing;
     }
 
     @Override
