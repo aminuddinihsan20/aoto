@@ -191,10 +191,21 @@ impl App {
             Action::HomeChip(params) => {
                 self.home_loading = true;
                 if let Some(h) = &mut self.home {
-                    h.shelves.clear();
-                    for c in &mut h.chips {
-                        c.selected = false;
+                    // The chip shows as chosen at once. A mood seen before shows the feed
+                    // it had while the service is asked again; a new one waits for it.
+                    let mood = super::feeds::choose(&mut h.chips, &params);
+                    match self.home_feeds.of(&mood) {
+                        Some(feed) => {
+                            h.chips = feed.chips.clone();
+                            h.shelves = feed.shelves.clone();
+                            h.continuation = feed.continuation.clone();
+                        }
+                        None => {
+                            h.shelves.clear();
+                            h.continuation = None;
+                        }
                     }
+                    h.loading_more = None;
                 }
                 self.backend.request(Req::Home(params));
             }

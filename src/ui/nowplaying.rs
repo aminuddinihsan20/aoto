@@ -397,7 +397,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
     }
     let line_w = text_w;
     let line_rect = widgets::linked_text(ui, pos2(x0, info_y + 21.0), &line, &track.artists, theme::regular(15.0), theme::text_dim(), line_w, &mut app.actions);
-    album_link(app, ui, track, &line, line_rect, theme::regular(15.0), line_w);
+    album_link(app, ui, track, &line, line_rect, theme::regular(15.0), line_w, widgets::LinkLook::PLAIN);
     // The star: a 30 px disc that washes under the pointer and fills in the accent
     // once liked. The ⋯ menu sits at the line's end, as on music.youtube.com.
     let liked = app.liked.contains(&heard.id);
@@ -567,7 +567,7 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
 
 /// The album named after the em dash in `line` (drawn at `line_rect` in `font`) opens
 /// its page, underlined under the pointer like the artists before it.
-pub(super) fn album_link(app: &mut App, ui: &Ui, track: &crate::model::Track, line: &str, line_rect: Rect, font: egui::FontId, width: f32) {
+pub(super) fn album_link(app: &mut App, ui: &Ui, track: &crate::model::Track, line: &str, line_rect: Rect, font: egui::FontId, width: f32, look: widgets::LinkLook) {
     let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty()) else { return };
     let Some(id) = album.id.clone() else { return };
     let g = widgets::galley(ui, line, font, theme::text_dim(), width);
@@ -580,10 +580,10 @@ pub(super) fn album_link(app: &mut App, ui: &Ui, track: &crate::model::Track, li
         return;
     }
     let r = Rect::from_min_max(pos2(line_rect.left() + a0, line_rect.top()), pos2(line_rect.left() + a1, line_rect.bottom()));
-    let resp = ui.interact(r, ui.scope_id().with(("album-link", &album.name)), Sense::click());
+    let resp = ui.interact(widgets::link_hit(r, look), ui.scope_id().with(("album-link", &album.name)), Sense::click());
     let resp = named(resp, &album.name).on_hover_cursor(egui::CursorIcon::PointingHand);
-    if resp.hovered() {
-        ui.painter().hline(r.x_range(), r.bottom() - 1.0, egui::Stroke::new(1.0, theme::text_dim()));
+    if look.underlined || resp.hovered() {
+        ui.painter().hline(r.x_range(), r.bottom() - 1.0, egui::Stroke::new(1.0, if look.underlined { theme::text_dim().gamma_multiply(0.6) } else { theme::text_dim() }));
     }
     if resp.clicked() {
         app.actions.push(Action::Open(super::Target::Album(id)));

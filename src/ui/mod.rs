@@ -11,6 +11,7 @@ mod dev;
 mod dialogs;
 mod downloading;
 mod equalizer;
+mod feeds;
 mod glyphs;
 mod integrations;
 mod jam;
@@ -356,6 +357,8 @@ pub struct App {
     // page data
     home: Option<HomeState>,
     home_loading: bool,
+    /// The Home feeds seen, by mood, to show again at once (see `feeds`).
+    home_feeds: feeds::Feeds,
     explore: Option<Explore>,
     search: Option<SearchResults>,
     /// Albums and playlists opened lately, so going back to one shows it at once (and
@@ -741,6 +744,7 @@ impl App {
             suggest_due: None,
             home: None,
             home_loading: true,
+            home_feeds: Default::default(),
             explore: None,
             search: None,
             lists: Lists::default(),

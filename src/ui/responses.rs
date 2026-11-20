@@ -542,6 +542,7 @@ impl App {
         if chips.is_empty() {
             chips = self.home.as_ref().map(|h| h.chips.clone()).unwrap_or_default();
         }
+        self.home_feeds.keep(super::feeds::Feed { chips: chips.clone(), shelves: page.shelves.clone(), continuation: page.continuation.clone() });
         self.home = Some(HomeState {
             chips,
             shelves: page.shelves,
@@ -679,6 +680,7 @@ impl App {
             self.refresh();
         }
         self.home = None;
+        self.home_feeds.clear();
         self.home_loading = true;
         self.backend.request(Req::Home(None));
         if v {

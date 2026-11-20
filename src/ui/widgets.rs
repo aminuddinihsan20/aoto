@@ -113,7 +113,33 @@ pub fn text_at(ui: &Ui, pos: Pos2, text: &str, font: egui::FontId, color: Color3
 /// Single-line text whose artist names are links: underlined on hover, and a click
 /// opens the artist's page. Names without a channel id stay plain text.
 #[allow(clippy::too_many_arguments)]
-pub fn linked_text(
+pub fn linked_text(ui: &Ui, pos: Pos2, text: &str, links: &[Link], font: egui::FontId, color: Color32, width: f32, acts: &mut Vec<Action>) -> Rect {
+    linked_text_look(ui, pos, text, links, font, color, width, LinkLook::PLAIN, acts)
+}
+
+/// How the names of a linked line show that they can be tapped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LinkLook {
+    /// A thin line under each name at all times: a finger has no pointer to underline it.
+    pub underlined: bool,
+    /// How far the tap area reaches beyond the text, up and down (points).
+    pub reach: f32,
+}
+
+impl LinkLook {
+    /// A pointer's: underlined when it is over a name, no more room than the text.
+    pub const PLAIN: LinkLook = LinkLook { underlined: false, reach: 0.0 };
+    /// A finger's, for the line under the player's title: marked, and a finger wide.
+    pub const FINGER: LinkLook = LinkLook { underlined: true, reach: 12.0 };
+}
+
+/// The tap area of a name drawn in `text`: the text's own height, and `look`'s reach beyond it.
+pub fn link_hit(name: Rect, look: LinkLook) -> Rect {
+    name.expand2(vec2(2.0, look.reach))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn linked_text_look(
     ui: &Ui,
     pos: Pos2,
     text: &str,
@@ -121,6 +147,7 @@ pub fn linked_text(
     font: egui::FontId,
     color: Color32,
     width: f32,
+    look: LinkLook,
     acts: &mut Vec<Action>,
 ) -> Rect {
     let g = galley(ui, text, font, color, width);
@@ -146,10 +173,10 @@ pub fn linked_text(
             continue; // truncated away
         }
         let r = Rect::from_min_max(pos2(pos.x + x0, rect.top()), pos2(pos.x + x1, rect.bottom()));
-        let resp = ui.interact(r, ui.scope_id().with(("artist-link", text, i, pos.x as i32, pos.y as i32)), Sense::click());
+        let resp = ui.interact(link_hit(r, look), ui.scope_id().with(("artist-link", text, i, pos.x as i32, pos.y as i32)), Sense::click());
         let resp = named(resp, &l.name).on_hover_cursor(egui::CursorIcon::PointingHand);
-        if resp.hovered() {
-            ui.painter().hline(r.x_range(), r.bottom() - 1.0, egui::Stroke::new(1.0, color));
+        if look.underlined || resp.hovered() {
+            ui.painter().hline(r.x_range(), r.bottom() - 1.0, egui::Stroke::new(1.0, if look.underlined { color.gamma_multiply(0.6) } else { color }));
         }
         if resp.clicked() {
             acts.push(Action::Open(Target::Artist(id.clone())));
@@ -1574,6 +1601,29 @@ pub fn skeleton(ui: &mut Ui, time: f64, rows: usize, card: f32) {
     // The shimmer needs frames only while it's on screen, and 15 fps is plenty.
     if ui.is_rect_visible(Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top())) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(66));
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::{LinkLook, link_hit};
+    use egui::{Rect, pos2};
+
+    #[test]
+    fn a_name_under_the_players_title_is_a_finger_tall_and_marked() {
+        let name = Rect::from_min_max(pos2(40.0, 500.0), pos2(120.0, 524.0));
+        let hit = link_hit(name, LinkLook::FINGER);
+        assert!(hit.height() >= 48.0, "{} points tall", hit.height());
+        assert!(hit.contains(name.center()) && hit.left() <= name.left() && hit.right() >= name.right());
+        assert!(LinkLook::FINGER.underlined, "a finger has no pointer to underline it");
+    }
+
+    #[test]
+    fn a_name_in_a_list_keeps_the_text_own_area_so_the_row_still_plays() {
+        let name = Rect::from_min_max(pos2(40.0, 500.0), pos2(120.0, 520.0));
+        let hit = link_hit(name, LinkLook::PLAIN);
+        assert!(hit.height() <= 20.0, "{} points tall", hit.height());
+        assert!(!LinkLook::PLAIN.underlined);
     }
 }
 

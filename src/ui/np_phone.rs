@@ -380,8 +380,9 @@ fn art_view(app: &mut App, ui: &mut Ui, screen: Rect, insets: Insets, track: &Tr
     if let Some(album) = track.album.as_ref().filter(|a| !a.name.is_empty()) {
         line = format!("{line} — {}", album.name);
     }
-    let line_rect = widgets::linked_text(ui, pos2(g.text.left(), line_y), &line, &track.artists, line_font.clone(), m.on_surface_variant, g.text.width(), &mut app.actions);
-    nowplaying::album_link(app, ui, track, &line, line_rect, line_font, g.text.width());
+    let look = widgets::LinkLook::FINGER;
+    let line_rect = widgets::linked_text_look(ui, pos2(g.text.left(), line_y), &line, &track.artists, line_font.clone(), m.on_surface_variant, g.text.width(), look, &mut app.actions);
+    nowplaying::album_link(app, ui, track, &line, line_rect, line_font, g.text.width(), look);
     like_button(app, ui, g.like, heard);
 
     // The seek bar and the two times, the quality mark between them.
