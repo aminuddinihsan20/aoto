@@ -13,6 +13,21 @@ use crate::model::Track;
 use super::queue::QueueFill;
 use super::{App, MixFrom, PlayingAs, Session, lyric_prefs};
 
+/// How long before a song's end (as heard) the next one is opened to follow it without
+/// a gap, and how long until it is asked for again while it isn't standing by (its
+/// prefetch may not have been there yet).
+const GAPLESS_LEAD: f64 = 20.0;
+const GAPLESS_RETRY: f64 = 2.0;
+
+/// The song asked to stand by behind the playing one.
+pub(super) struct Standby {
+    /// The play it follows.
+    after: u64,
+    id: String,
+    /// When it was last asked for (seconds since the app started).
+    asked: f64,
+}
+
 /// Where in the blend the two songs trade places: the outgoing one holds its level for
 /// the first 30% (see `audio::mix_handoff`) and the curves are mirrors, so the next song
 /// becomes the louder of the two at 65% of the mix. That's when the player follows it.
@@ -298,8 +313,16 @@ impl App {
         let shown = carried.clone().unwrap_or_else(|| track.clone());
         self.audio.status.duration_ms.store(shown.duration.map_or(0, |d| d as u64 * 1000), Ordering::Relaxed);
         // A song running into the next crossfades (so does Next, when that's switched
-        // on); going back or picking a song cuts over.
-        self.audio.send(if self.handoff && at.is_zero() { AudioCmd::Handoff } else { AudioCmd::Stop });
+        // on); one that ended with this song standing by behind it is followed by it,
+        // playing already; going back or picking a song cuts over.
+        let follows = self.standby.take().is_some_and(|s| self.carry && at.is_zero() && s.id == track.id);
+        self.audio.send(if self.handoff && at.is_zero() {
+            AudioCmd::Handoff
+        } else if follows {
+            AudioCmd::Carry
+        } else {
+            AudioCmd::Stop
+        });
         self.buffering = true;
         self.seek_drag = None;
         // A carried song version goes with its music video, which plays if the song won't.
@@ -357,6 +380,73 @@ impl App {
         }
     }
 
+    /// The speed the music plays at: the listener's, but 1× in a party, where every
+    /// device has to be at the same place in the song.
+    pub(super) fn speed_now(&self) -> f32 {
+        if self.jam.active() { 1.0 } else { self.speed }
+    }
+
+    /// Tell the player the speed. Cheap, and `pump` does it every time: joining or
+    /// leaving a party changes it.
+    pub(crate) fn set_speed(&self) {
+        self.audio.set_speed(self.speed_now(), self.keep_pitch);
+    }
+
+    /// How long a stretch of the song's own time takes to play at the speed set.
+    pub(super) fn heard(&self, song: Duration) -> Duration {
+        song.div_f32(self.audio.status.speed())
+    }
+
+    /// The song that follows the playing one without a gap: the next in the queue,
+    /// where nothing blends the two (a crossfade and Automix hand over their own way),
+    /// nothing stops or repeats the playing one, and no party decides what plays.
+    fn gapless_follower(&self) -> Option<&Track> {
+        if !self.gapless || self.crossfade || self.automix || self.jam.active() || self.sleep_stops_after_song() {
+            return None;
+        }
+        // A playlist still coming in waits for its next songs rather than wrap around.
+        if self.queue.fill.is_some() && self.queue.at_end() {
+            return None;
+        }
+        // (Repeat one has no upcoming song.) A music video that plays as its song is
+        // looked up when it starts: which stream that will be isn't known ahead.
+        self.queue.upcoming().filter(|t| self.song_of(t).is_none())
+    }
+
+    /// The playing song is close enough to its end for the next one to be opened.
+    fn gapless_due(&self) -> bool {
+        let status = &self.audio.status;
+        if self.buffering || self.resume_at.is_some() || status.playing_gen.load(Ordering::Relaxed) != self.generation {
+            return false;
+        }
+        status.duration().is_some_and(|d| self.heard(d.saturating_sub(status.position())).as_secs_f64() <= GAPLESS_LEAD)
+    }
+
+    /// Keep the right song standing by behind the playing one as it nears its end (see
+    /// `crate::gapless`), and none when none should follow it. `now`: seconds since the
+    /// app started.
+    pub(super) fn tick_gapless(&mut self, now: f64) {
+        let follower = self.gapless_follower().map(|t| t.id.clone());
+        // Only for what changed the plan (a setting, the queue, another play): a song
+        // that already follows is claimed by its play, not taken back here.
+        if self.standby.as_ref().is_some_and(|s| s.after != self.generation || follower.as_ref() != Some(&s.id)) {
+            self.drop_standby();
+        }
+        let Some(id) = follower.filter(|_| self.gapless_due()) else { return };
+        let standing = self.audio.status.standby_for() == self.generation;
+        if !standing && self.standby.as_ref().is_none_or(|s| now - s.asked > GAPLESS_RETRY) {
+            self.backend.request(Req::Standby { video_id: id.clone(), after: self.generation });
+            self.standby = Some(Standby { after: self.generation, id, asked: now });
+        }
+    }
+
+    /// Nothing follows the playing song on its own after all.
+    pub(super) fn drop_standby(&mut self) {
+        if self.standby.take().is_some() {
+            self.audio.send(AudioCmd::Unstandby);
+        }
+    }
+
     pub(crate) fn set_crossfade(&self) {
         // Automix is a crossfade with its own shape, so it needs the length too.
         self.audio.set_automix(self.automix);
@@ -394,7 +484,7 @@ impl App {
         let Some(seg) = segs.clone().find(|s| pos >= s.start && pos < s.end - 0.3).copied() else {
             // Wake up for the next one even when nothing else repaints.
             if let Some(next) = segs.find(|s| s.start > pos) {
-                ctx.request_repaint_after(Duration::from_secs_f64(next.start - pos + 0.05));
+                ctx.request_repaint_after(self.heard(Duration::from_secs_f64(next.start - pos)) + Duration::from_millis(50));
             }
             return;
         };

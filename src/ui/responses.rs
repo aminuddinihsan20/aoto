@@ -32,10 +32,19 @@ impl App {
             self.on_resp(r, now);
         }
         self.tick_downloads();
+        self.set_speed();
         while let Ok(ev) = self.ch.audio_rx.try_recv() {
             match ev {
                 AudioEvent::Finished { generation } if generation == self.generation && self.jam.follows() => {}
-                AudioEvent::Finished { generation } if generation == self.generation => self.song_finished(),
+                AudioEvent::Finished { generation } if generation == self.generation => {
+                    // The song standing by may be playing already, right behind this
+                    // one's last sample: its play claims it (see `tick_gapless`). If
+                    // nothing plays it after all, it stops.
+                    self.carry = true;
+                    self.song_finished();
+                    self.carry = false;
+                    self.drop_standby();
+                }
                 AudioEvent::Finished { .. } => {}
                 // A song the sleep timer stops after plays out on its own: nothing blends into it.
                 AudioEvent::Ending { generation } if generation == self.generation && self.sleep_stops_after_song() => {}
@@ -73,6 +82,7 @@ impl App {
                 AudioEvent::Error(e) => self.toast(e),
             }
         }
+        self.tick_gapless(now);
         // Once the next song is the louder of the two, it takes the player over; the
         // caption stays while the handoff's tail runs out.
         let released = self.mix_from.as_ref().is_some_and(|h| h.released);
@@ -747,6 +757,7 @@ impl App {
                     playing: self.playing() || self.buffering,
                     duration_ms: duration,
                     position_ms: status.position_smooth().as_millis() as i64,
+                    speed_pct: (status.speed() * 100.0).round() as i64,
                 }
             }
             None => crate::platform::NowPlaying::default(),

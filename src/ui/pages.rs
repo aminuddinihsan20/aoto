@@ -1808,6 +1808,14 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
 fn settings_playback(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Playback", None);
     settings_card(ui, |ui| {
+        setting_row(ui, "Playback speed", Some(super::speed::settings_note(app)), |ui| super::speed::settings_pills(app, ui));
+        divider(ui);
+        setting_row(ui, "Keep the pitch", Some("Voices and instruments stay in tune at any speed. Off, the pitch rises and falls with the speed."), |ui| {
+            if toggle(ui, &mut app.keep_pitch, "Keep the pitch").changed() {
+                app.set_speed();
+            }
+        });
+        divider(ui);
         setting_row(ui, "Autoplay", Some("Keep playing similar songs when the queue ends."), |ui| {
             toggle(ui, &mut app.autoplay, "Autoplay");
         });
@@ -1848,6 +1856,10 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
             if toggle(ui, &mut app.spatial, "Spatial audio").changed() {
                 app.set_crossfade();
             }
+        });
+        divider(ui);
+        setting_row(ui, "Gapless playback", Some("No silence between the songs of an album: each starts on the last one's final sample. With Automix or Crossfade on, songs blend that way instead."), |ui| {
+            toggle(ui, &mut app.gapless, "Gapless playback");
         });
         divider(ui);
         setting_row(ui, "Automix", Some("Slide from one song into the next the way a DJ would: both hold their level for a moment, then swap in one smooth move, instead of a straight fade. The mix picks its own length, in phrases of 8 or 16 bars (16 on long songs), following the beat it hears."), |ui| {

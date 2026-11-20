@@ -28,6 +28,7 @@ mod responses;
 mod sheet;
 mod shell;
 mod sleep;
+mod speed;
 mod storage;
 #[cfg(target_os = "android")]
 mod shared;
@@ -409,6 +410,17 @@ pub struct App {
     /// The sleep timer, and its sheet over Now Playing. Not kept across launches.
     sleep: crate::sleep::Timer,
     sleep_sheet: sleep::Pick,
+    /// How fast songs play and whether they keep their pitch at it (`crate::speed`),
+    /// and whether the speed's sheet is up over Now Playing.
+    speed: f32,
+    keep_pitch: bool,
+    speed_sheet: bool,
+    /// No silence between a song and the next (`crate::gapless`).
+    gapless: bool,
+    /// The song asked to stand by behind the playing one, to follow it without a gap.
+    standby: Option<playback::Standby>,
+    /// The song that just ended may have the next one playing right behind it.
+    carry: bool,
 
     // visuals
     art_key: Option<String>,
@@ -805,6 +817,12 @@ impl App {
             seek_drag: None,
             sleep: Default::default(),
             sleep_sheet: Default::default(),
+            speed: get("speed").and_then(|v| v.parse().ok()).map_or(1.0, crate::speed::nearest),
+            keep_pitch: get("keep_pitch").is_none_or(|v| v == "1"),
+            speed_sheet: false,
+            gapless: get("gapless").is_none_or(|v| v == "1"),
+            standby: None,
+            carry: false,
             art_key: None,
             apple_artists: Default::default(),
             apple_covers: Default::default(),
@@ -959,6 +977,7 @@ impl App {
         app.audio.set_normalize(app.normalize);
         app.audio.set_equalizer(&app.eq.settings());
         app.set_crossfade();
+        app.set_speed();
         app
     }
 
@@ -1532,12 +1551,14 @@ impl eframe::App for App {
                     });
                 });
         }
-        // The sleep timer's sheet goes with Now Playing.
+        // The sleep timer's sheet goes with Now Playing, and so does the speed's.
         self.sleep_sheet.open &= self.np_open;
+        self.speed_sheet &= self.np_open;
         if np > 0.001 {
             let pages = theme::set_mode(&ctx, false);
             nowplaying::overlay(self, &ctx, now);
             sleep::sheet(self, &ctx);
+            speed::sheet(self, &ctx);
             theme::set_mode(&ctx, pages);
         }
         if phone {
@@ -1715,6 +1736,9 @@ impl eframe::App for App {
         storage.set_string("eq_custom", self.eq.custom_text());
         storage.set_string("eq_bass", self.eq.bass.to_string());
         storage.set_string("crossfade_secs", self.crossfade_secs.to_string());
+        storage.set_string("speed", self.speed.to_string());
+        storage.set_string("keep_pitch", b(self.keep_pitch));
+        storage.set_string("gapless", b(self.gapless));
         storage.set_string("show_roman", b(self.show_roman));
         storage.set_string("show_trans", b(self.show_trans));
         // Background test runs mustn't change the listener's sources or per-song picks.

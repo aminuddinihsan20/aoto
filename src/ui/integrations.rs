@@ -31,8 +31,9 @@ impl App {
         let Some(d) = &self.discord else { return };
         let track = self.playing_track().filter(|_| self.playing() && !self.buffering);
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
-        let start_ms = now - self.audio.status.position().as_millis() as i64;
-        let dur = self.audio.status.duration_ms.load(Ordering::Relaxed) as i64;
+        // When the song started and how long it takes, by the clock on the wall.
+        let start_ms = now - self.heard(self.audio.status.position()).as_millis() as i64;
+        let dur = self.heard(Duration::from_millis(self.audio.status.duration_ms.load(Ordering::Relaxed))).as_millis() as i64;
         // The full quality line the player's track-info shows; YouTube's own audio is
         // the plain compressed one, so it has no detail numbers.
         let quality = self.audio_info.as_ref().map_or_else(|| "High".to_owned(), |(_, i)| i.rpc_line());
@@ -90,7 +91,7 @@ impl App {
             track: t.title.clone(),
             album: t.album.as_ref().map(|a| a.name.clone()),
             duration: (!dur.is_zero()).then_some(dur.as_secs() as u32),
-            timestamp: now - pos.as_secs() as i64,
+            timestamp: now - self.heard(pos).as_secs() as i64,
         };
         if play.artist.is_empty() {
             return;
