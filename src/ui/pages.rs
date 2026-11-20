@@ -86,6 +86,15 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
         // Room to scroll the last rows clear of the player's frosted strip.
         ui.add_space(96.0);
     });
+    // Dev hook: YTM_SELECT=<rows> ("0,2") selects those songs of a playlist once it is
+    // in, for a screenshot of the selection bar.
+    if let Some(rows) = super::dev_var("YTM_SELECT").filter(|_| selectable(app, &page).is_some() && !app.selection.on(&page)) {
+        static DONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !DONE.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            app.selection.start(&page);
+            app.selection.rows = rows.split(',').filter_map(|r| r.trim().parse().ok()).collect();
+        }
+    }
     selection_bar(app, ui.ctx(), &page, out.inner_rect);
     // Infinite scroll on home: fetch the next shelves when nearing the bottom.
     if page == Page::Home {
@@ -341,6 +350,14 @@ fn selectable<'a>(app: &'a App, page: &Page) -> Option<(&'a [Track], bool)> {
     }
 }
 
+/// How many rows the Material selection bar needs in `width` for `actions` action
+/// buttons beside its count and its two own (select all, done): the actions go on a
+/// second row when a finger-sized button each and the count do not fit one.
+fn selection_rows(width: f32, actions: usize) -> usize {
+    const COUNT: f32 = 20.0 + 96.0;
+    if COUNT + (actions + 2) as f32 * m3::TOUCH + 8.0 <= width { 1 } else { 2 }
+}
+
 /// While selecting: a bar floating over the bottom of the page with what to do with the picks.
 fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
     if !app.selection.on(page) {
@@ -359,6 +376,67 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
     let mut acts = Vec::new();
     let mut toggle_all = false;
     let mut done = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if m3::on() {
+        // Material: a floating toolbar of icon buttons a finger can hit, the count before
+        // them; on a narrow phone the actions take a row of their own under it.
+        let m = crate::material::scheme();
+        let count = if picked.is_empty() { "Select songs".to_owned() } else { format!("{} selected", picked.len()) };
+        let mut actions: Vec<(m3::Icon, &str, u8)> = Vec::new();
+        if !picked.is_empty() {
+            actions.push((icon::LIST_PLUS.into(), "Add to playlist", 0));
+            if own {
+                actions.push((icon::LIST_MINUS.into(), "Remove from playlist", 1));
+            }
+            actions.push((icon::HEART.into(), if all_liked { "Remove like" } else { "Like" }, 2));
+            actions.push((icon::LIST_MUSIC.into(), "Add to queue", 3));
+        }
+        let ends: [(m3::Icon, &str, u8); 2] = [(icon::LIST_CHECKS.into(), if all { "Select none" } else { "Select all" }, 4), (icon::X.into(), "Done selecting", 5)];
+        let width = (area.width() - 16.0).min(480.0);
+        let rows = selection_rows(width, actions.len());
+        let height = 8.0 + rows as f32 * m3::TOUCH + 8.0;
+        // Above the mini player, which floats over the page's foot while a song is loaded.
+        let lift = if app.current().is_some() { super::phone::MINI_LIFT } else { 0.0 };
+        let bar = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.bottom() - 12.0 - lift - height), vec2(width, height));
+        egui::Area::new(egui::Id::unique("selection-bar")).order(egui::Order::Foreground).fixed_pos(bar.min).show(ctx, |ui| {
+            ui.allocate_exact_size(bar.size(), Sense::click());
+            widgets::soft_shadow(ui, bar, crate::material::shape::CARD, 16.0, 0.35);
+            ui.painter().rect_filled(bar, crate::material::shape::CARD, m.surface_container_high);
+            let cy = bar.top() + 8.0 + m3::TOUCH / 2.0;
+            let mut tapped = None;
+            // The first row from its right end: done, select all, and (when they fit) the actions.
+            let first: Vec<_> = if rows == 1 { actions.iter().chain(&ends).collect() } else { ends.iter().collect() };
+            let mut x = bar.right() - 8.0 - m3::TOUCH / 2.0;
+            for (glyph, name, what) in first.into_iter().rev() {
+                let style = if *what == 0 { m3::IconStyle::Tonal } else { m3::IconStyle::Standard };
+                if m3::IconButton::new(*glyph, name).style(style).show_at(ui, pos2(x, cy), ui.scope_id().with(("selection", *what))).clicked() {
+                    tapped = Some(*what);
+                }
+                x -= m3::TOUCH;
+            }
+            let g = m3::galley(ui, &count, crate::material::Type::TitleSmall, m.on_surface, (x + m3::TOUCH / 2.0 - bar.left() - 20.0).max(0.0));
+            ui.painter().galley(pos2(bar.left() + 20.0, cy - g.size().y / 2.0), g, m.on_surface);
+            if rows == 2 {
+                // The actions, spread across the second row.
+                let cell = (bar.width() - 16.0) / actions.len().max(1) as f32;
+                for (i, (glyph, name, what)) in actions.iter().enumerate() {
+                    let at = pos2(bar.left() + 8.0 + cell * (i as f32 + 0.5), cy + m3::TOUCH);
+                    let style = if *what == 0 { m3::IconStyle::Tonal } else { m3::IconStyle::Standard };
+                    if m3::IconButton::new(*glyph, name).style(style).show_at(ui, at, ui.scope_id().with(("selection", *what))).clicked() {
+                        tapped = Some(*what);
+                    }
+                }
+            }
+            match tapped {
+                Some(0) => acts.push(Action::AddToPlaylist(picked.clone())),
+                Some(1) => acts.push(Action::RemoveFromPlaylist(app.selection.rows.iter().copied().collect())),
+                Some(2) => acts.push(Action::LikeMany(picked.clone(), !all_liked)),
+                Some(3) => acts.extend(picked.iter().cloned().map(Action::Enqueue)),
+                Some(4) => toggle_all = true,
+                Some(5) => done = true,
+                _ => {}
+            }
+        });
+    } else {
     egui::Area::new(egui::Id::unique("selection-bar"))
         .order(egui::Order::Foreground)
         .pivot(Align2::CENTER_BOTTOM)
@@ -394,6 +472,7 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
                     });
                 });
         });
+    }
     if toggle_all {
         let page = page.clone();
         app.selection.start(&page);
@@ -4171,6 +4250,18 @@ fn keycap(ui: &Ui, right: egui::Pos2, key: &str) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_selection_bar_takes_a_second_row_when_its_buttons_do_not_fit_one() {
+        // The bar is the screen less 8 points each side.
+        assert_eq!(selection_rows(344.0, 0), 1, "nothing picked: the count, select all and done");
+        assert_eq!(selection_rows(344.0, 3), 2, "a 360-point phone");
+        assert_eq!(selection_rows(344.0, 4), 2);
+        assert_eq!(selection_rows(396.0, 3), 1, "a 412-point phone holds three actions");
+        assert_eq!(selection_rows(396.0, 4), 2, "but not the fourth, of a playlist of your own");
+        // Spread across the second row, each action has more than a finger's width.
+        assert!((344.0 - 16.0) / 4.0 >= m3::TOUCH);
+    }
 
     #[test]
     fn a_phone_gives_a_song_column_nearly_the_whole_screen() {
