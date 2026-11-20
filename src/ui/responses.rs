@@ -127,6 +127,7 @@ impl App {
                 self.backend.request(Req::Suggest { query: q, round: self.suggest_round });
             }
         }
+        self.tick_stats();
     }
 
     /// A search's results are on screen: the first result clicked becomes what
