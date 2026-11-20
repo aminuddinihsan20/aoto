@@ -804,8 +804,8 @@ pub(super) fn overlay(app: &mut App, ctx: &egui::Context) {
         ui.allocate_rect(screen, Sense::click_and_drag());
         ui.set_opacity(ease);
         let rect = screen.translate(vec2(0.0, 28.0 * (1.0 - ease)));
-        let m = material::scheme();
-        super::shell::vgradient(ui.painter(), rect, theme::lerp_color(m.surface, m.primary_container, 0.5), m.surface);
+        // The player's own backdrop: the song's colour runs on from Now Playing into this.
+        super::np_phone::background(app, ui.ctx(), ui.painter(), rect);
         let area = Rect::from_min_max(pos2(rect.left() + insets.left, rect.top() + insets.top), pos2(rect.right() - insets.right, rect.bottom() - insets.bottom));
         asked = match (&card, &want) {
             (Some(card), Some(want)) => {
