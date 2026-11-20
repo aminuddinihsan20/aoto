@@ -296,12 +296,6 @@ pub struct App {
     audio: AudioHandle,
     ch: Channels,
     media: Option<Media>,
-    discord: Option<crate::discord::Discord>,
-    discord_enabled: bool,
-    /// Last state sent to Discord, to send only real changes.
-    discord_sent: Option<crate::discord::Presence>,
-    /// How the Discord card is worded and what it carries.
-    discord_prefs: crate::discord::Prefs,
     /// The Last.fm account scrobbles go to; a sign-in in progress and its outcome.
     lastfm_user: Option<String>,
     lastfm_busy: Arc<AtomicBool>,
@@ -666,7 +660,6 @@ impl App {
         let get = |k: &str| storage.and_then(|s| s.get_string(k));
         // Dev hook: YTM_FONT=<font name> tries a font without saving it.
         theme::set_font_choice(&dev_var("YTM_FONT").map(str::to_owned).or_else(|| get("font")).unwrap_or_default());
-        let discord_enabled = get("discord_enabled").is_none_or(|v| v == "1");
         let app_icon = crate::appicon::load(backend.data_dir());
         let wgpu_renderer = crate::renderer::load(backend.data_dir()) == crate::renderer::Renderer::Wgpu;
         // Updates reinstall the shortcuts with the classic icon: always put ours back,
@@ -699,21 +692,11 @@ impl App {
             let b = backend.clone();
             crate::transfer::Transfer::new(backend.data_dir(), Arc::new(move || b.wake()))
         };
-        let discord_prefs = crate::discord::Prefs::load(&get);
-        // Discord's card is the desktop Discord app's; a phone has none to talk to.
-        let discord = (discord_enabled && !cfg!(target_os = "android")).then(crate::discord::Discord::spawn).flatten();
-        if let Some(d) = &discord {
-            d.set_prefs(discord_prefs.clone());
-        }
         let mut app = Self {
             backend,
             audio,
             ch,
             media,
-            discord,
-            discord_enabled,
-            discord_sent: None,
-            discord_prefs,
             lastfm_user: crate::lastfm::user(),
             lastfm_busy: Default::default(),
             lastfm_result: Default::default(),
@@ -1401,7 +1384,6 @@ impl eframe::App for App {
         self.mini.tick(ctx, now);
         self.tray_window(ctx);
         self.window_hidden = self.tray.is_some() || ctx.input(|i| i.viewport().minimized == Some(true));
-        self.sync_discord();
         self.sync_lastfm();
         self.sync_server_queue(ctx, now);
         self.tick_updates(ctx, now);
@@ -1772,8 +1754,6 @@ impl eframe::App for App {
         if std::env::var_os("YTM_UPDATE_AS").is_none() {
             storage.set_string("last_version", crate::update::current_version());
         }
-        storage.set_string("discord_enabled", b(self.discord_enabled));
-        self.discord_prefs.save(storage);
         if dev_var("YTM_APPEARANCE").is_none() {
             storage.set_string("appearance", self.appearance.key().to_owned());
         }

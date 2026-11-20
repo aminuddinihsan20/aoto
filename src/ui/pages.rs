@@ -3501,75 +3501,10 @@ fn settings_window(app: &mut App, ui: &mut Ui) {
 
 /// Settings › Connections.
 fn settings_connections(app: &mut App, ui: &mut Ui) {
-    let mut discord_enabled = app.discord_enabled;
-    let prefs_before = app.discord_prefs.clone();
     section_label(ui, "Connections", None);
-    // Discord's card is drawn by the desktop Discord app, which a phone doesn't run.
-    let phone = crate::platform::phone();
     settings_card(ui, |ui| {
-        if !phone {
-            setting_row(ui, "Discord", Some("Show what you're playing on your Discord profile."), |ui| {
-                toggle(ui, &mut discord_enabled, "Discord");
-            });
-            divider(ui);
-        }
         settings_row(app, ui, Row::LastFm);
     });
-    if discord_enabled != app.discord_enabled {
-        app.set_discord_enabled(discord_enabled);
-    }
-    if phone {
-        return;
-    }
-    // The card's wording, as the desktop app's Discord settings: a few switches, then
-    // the activity and its name behind "Customize the card".
-    if app.discord_enabled {
-        section_label(ui, "Discord card", None);
-        settings_card(ui, |ui| {
-            setting_row(ui, "Lead with the song", Some("Discord repeats the song, not the artist, beside your name in a channel."), |ui| {
-                toggle(ui, &mut app.discord_prefs.lead_with_song, "Lead with the song");
-            });
-            divider(ui);
-            setting_row(ui, "Show audio quality", Some("Hi-Res, lossless and Dolby specs on the card's last line."), |ui| {
-                toggle(ui, &mut app.discord_prefs.show_quality, "Show audio quality");
-            });
-            divider(ui);
-            setting_row(ui, "Customize the card", Some("The activity and its name."), |ui| {
-                // Off means the plain card, so what was typed behind it is reset rather
-                // than merely hidden.
-                if toggle(ui, &mut app.discord_prefs.advanced, "Customize the card").changed() && !app.discord_prefs.advanced {
-                    app.discord_prefs.reset_card();
-                }
-            });
-            if app.discord_prefs.advanced {
-                divider(ui);
-                setting_row(ui, "Activity", Some("The verb shown above the card."), |ui| {
-                    let btn = dropdown_button(ui, app.discord_prefs.activity.label(), 220.0, "Activity");
-                    egui::Popup::menu(&btn).show(|ui| {
-                        ui.set_width(220.0);
-                        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                        ui.add_space(4.0);
-                        for k in [crate::discord::ActivityKind::Listening, crate::discord::ActivityKind::Playing, crate::discord::ActivityKind::Watching, crate::discord::ActivityKind::Competing] {
-                            if option_row(ui, k.label(), k == app.discord_prefs.activity).clicked() {
-                                app.discord_prefs.activity = k;
-                                ui.close();
-                            }
-                        }
-                        ui.add_space(4.0);
-                    });
-                });
-                divider(ui);
-                setting_row(ui, "Name", Some("What follows the verb. Empty shows BitChord PC Official."), |ui| {
-                    settings_field(ui, &mut app.discord_prefs.name, "BitChord PC Official", 128);
-                });
-            }
-        });
-    }
-    if app.discord_prefs != prefs_before
-        && let Some(d) = &app.discord
-    {
-        d.set_prefs(app.discord_prefs.clone());
-    }
 }
 
 /// A one-line text field in a settings row's control slot.

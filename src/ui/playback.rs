@@ -92,7 +92,7 @@ impl App {
     }
 
     /// What actually plays: the current track, or the song version standing in for it.
-    /// Lyrics, SponsorBlock, Last.fm, Discord, media controls and Now playing's actions go
+    /// Lyrics, SponsorBlock, Last.fm, media controls and Now playing's actions go
     /// by this (timing, length and title are the upload's own); lists and the queue keep
     /// the track as listed.
     pub(super) fn playing_track(&self) -> Option<&Track> {
