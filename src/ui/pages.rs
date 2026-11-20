@@ -234,6 +234,13 @@ fn card_row_plain(ui: &mut Ui, id: &str, title: &str, cards: &[Card], acts: &mut
     if cards.is_empty() {
         return;
     }
+    if m3::on() {
+        // As Home's shelves are: a carousel, turned by its header's arrow.
+        let next = format!("More of {title}");
+        let trailing = if cards.len() > 2 { m3::Trailing::Icon(icon::CHEVRON_RIGHT, &next) } else { m3::Trailing::None };
+        let nudge = m3::section_header(ui, &m3::SectionHeader { title, overline: None, avatar: None, trailing }) as i32;
+        return m3::carousel(ui, id, nudge, cards, &HashSet::new(), acts);
+    }
     let (l, r) = shelf_header(ui, title, None, None, true);
     let nudge = r as i32 - l as i32;
     let tile = feed_tile(ui, true);
@@ -1113,6 +1120,127 @@ fn top_result(ui: &mut Ui, c: &Card, pick: bool, liked: bool, acts: &mut Vec<Act
 
 // ------------------------------------------------------------------ album / playlist
 
+/// What an album's or playlist's "More" menu offers.
+struct CollectionMenu<'a> {
+    tracks: &'a [Track],
+    /// The id it is saved to the library by, and whether it is saved; none for a
+    /// playlist of the account's own.
+    save: Option<(&'a str, bool)>,
+    /// Its songs can be selected: signed in, and not one of the account's automatic lists.
+    selectable: bool,
+    selecting: bool,
+    owned: bool,
+    target: &'a Target,
+}
+
+impl CollectionMenu<'_> {
+    /// Draw the menu. `buttons`: saving and sharing are buttons on the page (the
+    /// Material phone), and not said again here. Returns whether select mode was
+    /// turned on (`Some(true)`) or off.
+    fn show(&self, ui: &mut Ui, buttons: bool, acts: &mut Vec<Action>) -> Option<bool> {
+        let mut select = None;
+        ui.set_width(226.0);
+        ui.add_space(3.0);
+        if let Some(first) = self.tracks.first()
+            && widgets::menu_action(ui, Some(icon::RADIO), "Start radio")
+        {
+            acts.push(Action::Radio(first.clone()));
+        }
+        if let Some((save_id, saved)) = self.save.filter(|_| !buttons)
+            && widgets::menu_action(ui, Some(icon::LIBRARY), if saved { "Remove from library" } else { "Save to library" })
+        {
+            acts.push(Action::SaveCollection(save_id.to_owned(), !saved));
+        }
+        if self.selectable && !self.tracks.is_empty() && widgets::menu_action(ui, Some(icon::LIST_CHECKS), if self.selecting { "Done selecting" } else { "Select" }) {
+            select = Some(!self.selecting);
+        }
+        if self.selectable && (self.save.is_some() || self.owned) && !(buttons && !self.owned) {
+            ui.separator();
+        }
+        if self.owned {
+            if widgets::menu_action(ui, Some(icon::MUSIC), "Edit playlist") {
+                acts.push(Action::EditPlaylist);
+            }
+            if widgets::menu_action(ui, Some(icon::USERS), "Collaborate") {
+                acts.push(Action::Collaborate);
+            }
+            if widgets::menu_action(ui, Some(icon::TRASH_2), "Delete playlist") {
+                acts.push(Action::DeletePlaylist);
+            }
+        }
+        if !buttons {
+            if self.selectable && !self.owned && self.save.is_none() {
+                ui.separator();
+            }
+            if widgets::menu_action(ui, Some(icon::LINK), "Share") {
+                acts.push(Action::Share(self.target.clone()));
+            }
+        }
+        ui.add_space(3.0);
+        select
+    }
+}
+
+/// How wide the cover at the head of an album's or playlist's page is, on a page
+/// `width` wide.
+fn cover_side(width: f32) -> f32 {
+    (width * 0.56).clamp(160.0, 220.0)
+}
+
+/// How long a list plays, in hours and minutes: "3 hr 12 min", "45 min".
+fn length_text(secs: u32) -> String {
+    let (hours, minutes) = (secs / 3600, secs % 3600 / 60);
+    if hours > 0 { format!("{hours} hr {minutes} min") } else { format!("{minutes} min") }
+}
+
+/// The one line under a collection's title: who it is by, how many songs and how long
+/// it plays. `counted`: the byline says how many songs already (a playlist's does).
+fn meta_line(byline: &str, counted: bool, songs: usize, secs: u32) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !byline.is_empty() {
+        parts.push(byline.to_owned());
+    }
+    if secs > 0 {
+        if !counted {
+            parts.push(count_text(songs, "song"));
+        }
+        parts.push(length_text(secs));
+    }
+    parts.join(" \u{2022} ")
+}
+
+/// The side of a round action beside the large Play, and that button's height.
+const ACTION: f32 = 48.0;
+const PLAY_H: f32 = 56.0;
+
+/// Where the actions of an album, playlist or artist are: the large Play, with round
+/// buttons before and after it, the row centred.
+#[derive(Clone, Debug, PartialEq)]
+struct ActionRow {
+    before: Vec<Rect>,
+    play: Rect,
+    after: Vec<Rect>,
+}
+
+fn action_row(row: Rect, before: usize, after: usize) -> ActionRow {
+    const GAP: f32 = 8.0;
+    let rounds = (before + after) as f32 * (ACTION + GAP);
+    let play_w = (row.width() - rounds).clamp(96.0, 136.0);
+    let mut x = row.center().x - (rounds + play_w) / 2.0;
+    let cy = row.center().y;
+    let mut round = |x: &mut f32, lead: f32| {
+        *x += lead;
+        let r = Rect::from_min_size(pos2(*x, cy - ACTION / 2.0), Vec2::splat(ACTION));
+        *x += ACTION + GAP - lead;
+        r
+    };
+    let before: Vec<Rect> = (0..before).map(|_| round(&mut x, 0.0)).collect();
+    let play = Rect::from_min_size(pos2(x, cy - PLAY_H / 2.0), vec2(play_w, PLAY_H));
+    x += play_w;
+    let after: Vec<Rect> = (0..after).map(|_| round(&mut x, GAP)).collect();
+    ActionRow { before, play, after }
+}
+
 fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     if app.opened(id).is_none() {
         placeholder(app, ui, now, 1, 232.0);
@@ -1144,6 +1272,18 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     let mut download = false;
     let downloading = app.downloads.queue.collection(id).is_some();
     ui.add_space(18.0);
+    let target = if is_album { Target::Album(id.to_owned()) } else { Target::Playlist(id.to_owned()) };
+    // Liked Music and Episodes for later are the account's own lists: they can't be
+    // saved, removed, edited or deleted.
+    let auto = matches!(id, "LM" | "SE");
+    let saved = app.library.as_ref().is_some_and(|l| {
+        let cards = if is_album { &l.albums } else { &l.playlists };
+        cards.iter().any(|card| card.target == target)
+    });
+    // Saving only applies to someone else's playlist or an album.
+    let save_id = if is_album { c.save_id.clone() } else { (!c.owned).then(|| id.to_owned()) };
+    let owned = !is_album && c.owned;
+    let menu = CollectionMenu { tracks, save: save_id.as_deref().map(|id| (id, saved)), selectable: app.logged_in && !auto, selecting, owned, target: &target };
     // Beside the art on a wide screen; below it, and smaller, on a phone.
     let phone = crate::platform::phone();
     let header = |ui: &mut Ui| {
@@ -1174,17 +1314,6 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
                 ui.label(g);
             }
             ui.add_space(16.0);
-            let target = if is_album { Target::Album(id.to_owned()) } else { Target::Playlist(id.to_owned()) };
-            // Liked Music and Episodes for later are the account's own lists: they can't be
-            // saved, removed, edited or deleted.
-            let auto = matches!(id, "LM" | "SE");
-            let saved = app.library.as_ref().is_some_and(|l| {
-                let cards = if is_album { &l.albums } else { &l.playlists };
-                cards.iter().any(|card| card.target == target)
-            });
-            // Saving only applies to someone else's playlist or an album.
-            let save_id = if is_album { c.save_id.clone() } else { (!c.owned).then(|| id.to_owned()) };
-            let owned = !is_album && c.owned;
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
                 // A phone downloads the whole of it: its sheet asks first, and shows one on its way.
@@ -1201,45 +1330,10 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
                     toggle_search = true;
                 }
                 let more = circle_action(ui, CircleGlyph::More, "More", false);
-                egui::Popup::menu(&more).show(|ui| {
-                    ui.set_width(226.0);
-                    ui.add_space(3.0);
-                    if let Some(first) = tracks.first()
-                        && widgets::menu_action(ui, Some(icon::RADIO), "Start radio")
-                    {
-                        acts.push(Action::Radio(first.clone()));
-                    }
-                    if let Some(save_id) = save_id.clone()
-                        && widgets::menu_action(ui, Some(icon::LIBRARY), if saved { "Remove from library" } else { "Save to library" })
-                    {
-                        acts.push(Action::SaveCollection(save_id, !saved));
-                    }
-                    if app.logged_in && !auto && !tracks.is_empty() {
-                        if widgets::menu_action(ui, Some(icon::LIST_CHECKS), if selecting { "Done selecting" } else { "Select" }) {
-                            if selecting { stop_select = true } else { start_select = true }
-                        }
-                    }
-                    if app.logged_in && !auto && (save_id.is_some() || owned) {
-                        ui.separator();
-                    }
-                    if owned {
-                        if widgets::menu_action(ui, Some(icon::MUSIC), "Edit playlist") {
-                            acts.push(Action::EditPlaylist);
-                        }
-                        if widgets::menu_action(ui, Some(icon::USERS), "Collaborate") {
-                            acts.push(Action::Collaborate);
-                        }
-                        if widgets::menu_action(ui, Some(icon::TRASH_2), "Delete playlist") {
-                            acts.push(Action::DeletePlaylist);
-                        }
-                    }
-                    if app.logged_in && !auto && !owned && save_id.is_none() {
-                        ui.separator();
-                    }
-                    if widgets::menu_action(ui, Some(icon::LINK), "Share") {
-                        acts.push(Action::Share(target.clone()));
-                    }
-                    ui.add_space(3.0);
+                egui::Popup::menu(&more).show(|ui| match menu.show(ui, false, acts) {
+                    Some(true) => start_select = true,
+                    Some(false) => stop_select = true,
+                    None => {}
                 });
             });
             if toggle_search {
@@ -1255,13 +1349,120 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
 
         });
     };
-    if phone {
+    if m3::on() {
+        use crate::material::{Type, Weight, shape};
+        let m = crate::material::scheme();
+        let w = ui.available_width();
+        // The cover, large and centred; its title and one line about it under it.
+        let side = cover_side(w);
+        ui.add_space(4.0);
+        let (band, _) = ui.allocate_exact_size(vec2(w, side), Sense::hover());
+        let img = Rect::from_center_size(band.center(), Vec2::splat(side));
+        widgets::soft_shadow(ui, img, shape::CARD, 28.0, 0.45);
+        paint_cover(ui, img, &c.thumbs, shape::CARD, 1.0);
+        if let Some(s) = &sprite {
+            widgets::paint_motion(ui, img, shape::CARD, s);
+        }
+        ui.add_space(20.0);
+        let centred = |ui: &mut Ui, g: std::sync::Arc<egui::Galley>, color: Color32| {
+            let (r, _) = ui.allocate_exact_size(vec2(w, g.size().y), Sense::hover());
+            ui.painter().galley(pos2(r.center().x, r.top()), g, color);
+        };
+        let title = m3::galley_centered(ui, &c.title, Type::HeadlineSmall.spec().weight(Weight::Medium), m.on_surface, w - 16.0, 2);
+        centred(ui, title, m.on_surface);
+        ui.add_space(6.0);
+        let total: u32 = tracks.iter().filter_map(|t| t.duration).sum();
+        let meta = meta_line(&c.byline(), c.count.is_some(), tracks.len(), total);
+        let meta_w = widgets::galley(ui, &meta, Type::BodyMedium.font(), m.on_surface_variant, w).size().x;
+        let (r, _) = ui.allocate_exact_size(vec2(w, Type::BodyMedium.spec().line_height), Sense::hover());
+        widgets::linked_text(ui, pos2(r.center().x - meta_w / 2.0, r.top()), &meta, &c.artists, Type::BodyMedium.font(), m.on_surface_variant, w, acts);
+        if let Some(d) = c.description.as_deref().filter(|d| !d.trim().is_empty()) {
+            ui.add_space(6.0);
+            let g = m3::galley_centered(ui, d.trim(), Type::BodyMedium, m.on_surface_variant, w - 16.0, 2);
+            centred(ui, g, m.on_surface_variant);
+        }
+        ui.add_space(16.0);
+        // The actions: the large Play, with round buttons either side of it.
+        let (row, _) = ui.allocate_exact_size(vec2(w, PLAY_H), Sense::hover());
+        let slots = action_row(row, 1 + save_id.is_some() as usize, 2);
+        let ids = ui.scope_id().with("collection-actions");
+        let round = |ui: &Ui, at: Rect, glyph: char, name: &str, style: m3::IconStyle| m3::IconButton::new(glyph, name).style(style).size(ACTION).show_at(ui, at.center(), ids.with(name)).clicked();
+        let quiet = m3::IconStyle::Surface;
+        // The whole of it is downloaded: its sheet asks first, and shows one on its way.
+        if round(ui, slots.before[0], icon::DOWNLOAD, if downloading { "Downloading" } else { "Download" }, if downloading { m3::IconStyle::Tonal } else { quiet }) {
+            download = true;
+        }
+        if let (Some(save_id), Some(at)) = (&save_id, slots.before.get(1)) {
+            let (glyph, name) = if saved { (icon::CHECK, "Remove from library") } else { (icon::LIST_PLUS, "Save to library") };
+            if round(ui, *at, glyph, name, if saved { m3::IconStyle::Tonal } else { quiet }) {
+                acts.push(Action::SaveCollection(save_id.clone(), !saved));
+            }
+        }
+        let active = widgets::active_state(ui, &target);
+        let (label, glyph) = if active == Some(true) { ("Pause", super::glyphs::PAUSE) } else { ("Play", super::glyphs::PLAY) };
+        if m3::big_button(ui, slots.play, label, glyph, ids.with("play")).clicked() {
+            if active.is_some() {
+                acts.push(Action::TogglePlay);
+            } else if !tracks.is_empty() {
+                acts.push(Action::Play(tracks.to_vec(), 0));
+            }
+        }
+        if round(ui, slots.after[0], icon::SHUFFLE, "Shuffle", m3::IconStyle::Tonal) && !tracks.is_empty() {
+            let mut t = tracks.clone();
+            super::shuffle(&mut t);
+            acts.push(Action::Play(t, 0));
+        }
+        if round(ui, slots.after[1], icon::LINK, "Share", quiet) {
+            acts.push(Action::Share(target.clone()));
+        }
+        // In the top bar's right end: the search in this list, and the rest of what can be done.
+        if let Some((first, second)) = super::phone::page_slots(ui.ctx()) {
+            let both = first.union(second);
+            egui::Area::new(ui.scope_id().with("collection-bar")).order(egui::Order::Middle).fixed_pos(both.min).show(ui.ctx(), |ui| {
+                ui.allocate_exact_size(both.size(), Sense::hover());
+                let style = if filter_on { m3::IconStyle::Tonal } else { m3::IconStyle::Standard };
+                if m3::IconButton::new(icon::SEARCH, "Search in this list").style(style).show_at(ui, first.center(), ui.scope_id().with("search")).clicked() {
+                    toggle_search = true;
+                }
+                let more = m3::IconButton::new(icon::ELLIPSIS_VERTICAL, "More").show_at(ui, second.center(), ui.scope_id().with("more"));
+                egui::Popup::menu(&more).show(|ui| match menu.show(ui, true, acts) {
+                    Some(true) => start_select = true,
+                    Some(false) => stop_select = true,
+                    None => {}
+                });
+            });
+        }
+        if toggle_search {
+            let closing = app.coll_search.as_ref().is_some_and(|(fid, _)| fid == id);
+            app.coll_search = (!closing).then(|| (id.to_owned(), String::new()));
+        }
+        if start_select {
+            app.selection.start(&app.page);
+        }
+        if stop_select {
+            app.selection.clear();
+        }
+    } else if phone {
         ui.vertical(header);
     } else {
         ui.horizontal_top(header);
     }
     let mut dismiss_search = false;
     if let Some((fid, query)) = &mut app.coll_search
+        && fid == id
+        && m3::on()
+    {
+        ui.add_space(12.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), m3::SEARCH_BAR_H), Sense::hover());
+        let edit = m3::search_bar(ui, rect, query, "Search in this list", 0.0).edit;
+        if toggle_search {
+            edit.request_focus();
+        } else if !edit.has_focus() && query.is_empty() {
+            // Left alone empty, the field goes away instead of sitting over the list.
+            dismiss_search = true;
+        }
+        ui.add_space(12.0);
+    } else if let Some((fid, query)) = &mut app.coll_search
         && fid == id
     {
         ui.add_space(14.0);
@@ -1295,7 +1496,7 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
         }
         ui.add_space(18.0);
     } else {
-        ui.add_space(26.0);
+        ui.add_space(if m3::on() { 12.0 } else { 26.0 });
     }
     if dismiss_search {
         app.coll_search = None;
@@ -1373,6 +1574,8 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     let Some(a) = &app.artist else { return };
     let acts = &mut app.actions;
     let top = &a.top;
+    let material = m3::on();
+    let hero_radius = if material { crate::material::shape::CARD } else { 14.0 };
     // Hero banner fading into the page.
     let w = ui.available_width();
     let hero_h = (w * 0.34).clamp(240.0, 380.0);
@@ -1382,13 +1585,18 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
         // Cover-fit: crop the image's top band to the hero's aspect.
         let vis_h = (img_ratio / (w / hero_h)).min(1.0);
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, vis_h));
-        ui.painter().rect_filled(hero, 14.0, theme::glass(0.07));
-        widgets::paint_remote(ui, &t.url, hero, 14.0, uv, Color32::WHITE);
+        ui.painter().rect_filled(hero, hero_radius, theme::glass(0.07));
+        widgets::paint_remote(ui, &t.url, hero, hero_radius, uv, Color32::WHITE);
     } else {
-        ui.painter().rect_filled(hero, 14.0, theme::with_alpha(accent, 0.25));
+        ui.painter().rect_filled(hero, hero_radius, theme::with_alpha(accent, 0.25));
     }
-    super::shell::vgradient(ui.painter(), Rect::from_min_max(pos2(hero.left(), hero.center().y - 40.0), hero.max), Color32::TRANSPARENT, theme::shade(0.85));
-    let base = hero.left_bottom() + vec2(28.0, -30.0);
+    if material {
+        // The darkening keeps to the picture's round corners.
+        m3::scrim_bottom(ui, hero, hero_radius, hero.center().y - 40.0, 0.85);
+    } else {
+        super::shell::vgradient(ui.painter(), Rect::from_min_max(pos2(hero.left(), hero.center().y - 40.0), hero.max), Color32::TRANSPARENT, theme::shade(0.85));
+    }
+    let base = hero.left_bottom() + vec2(if material { 20.0 } else { 28.0 }, -30.0);
     // Apple letters some artists a wordmark image instead of setting their name in type.
     // Until it downloads (or when there's none) the typed name stands in.
     let drawn = apple.as_ref().and_then(|x| x.logo.as_ref()).is_some_and(|logo| wordmark(ui, base, logo, w * 0.62));
@@ -1408,6 +1616,11 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
                 let tex = egui::load::SizedTexture::from_handle(tex);
                 egui::Image::from_texture(tex).uv(Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))).paint_at(ui, rect);
             }
+            None if material => {
+                let role = crate::material::Type::DisplaySmall.spec().weight(crate::material::Weight::Bold);
+                let g = m3::galley(ui, &name, role, Color32::WHITE, w - 40.0);
+                ui.painter().galley(base - vec2(0.0, 44.0 + g.size().y), g, Color32::WHITE);
+            }
             None => {
                 ui.painter().text(base - vec2(0.0, 44.0), Align2::LEFT_BOTTOM, &name, theme::bold(58.0), Color32::WHITE);
             }
@@ -1417,20 +1630,54 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
         ui.painter().text(base - vec2(0.0, 18.0), Align2::LEFT_BOTTOM, format!("{} subscribers", compact(s)), theme::regular(14.0), theme::text_dim());
     }
     ui.add_space(18.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 10.0;
-        play_pill(ui, acts, &Target::Artist(id.to_owned()), top);
-        if pill(ui, "Shuffle", Some(icon::SHUFFLE), false).clicked() && !top.is_empty() {
+    if material {
+        // The large Play between the artist's radio and a shuffle.
+        let (row, _) = ui.allocate_exact_size(vec2(w, PLAY_H), Sense::hover());
+        let slots = action_row(row, top.first().is_some() as usize, 1);
+        let ids = ui.scope_id().with("artist-actions");
+        if let (Some(first), Some(at)) = (top.first(), slots.before.first())
+            && m3::IconButton::new(icon::RADIO, "Radio").style(m3::IconStyle::Surface).size(ACTION).show_at(ui, at.center(), ids.with("radio")).clicked()
+        {
+            acts.push(Action::Radio(first.clone()));
+        }
+        let active = widgets::active_state(ui, &Target::Artist(id.to_owned()));
+        let (label, glyph) = if active == Some(true) { ("Pause", super::glyphs::PAUSE) } else { ("Play", super::glyphs::PLAY) };
+        if m3::big_button(ui, slots.play, label, glyph, ids.with("play")).clicked() {
+            if active.is_some() {
+                acts.push(Action::TogglePlay);
+            } else if !top.is_empty() {
+                acts.push(Action::Play(top.to_vec(), 0));
+            }
+        }
+        if m3::IconButton::new(icon::SHUFFLE, "Shuffle").style(m3::IconStyle::Tonal).size(ACTION).show_at(ui, slots.after[0].center(), ids.with("shuffle")).clicked() && !top.is_empty() {
             let mut t = top.clone();
             super::shuffle(&mut t);
             acts.push(Action::Play(t, 0));
         }
-        if let Some(first) = top.first()
-            && pill(ui, "Radio", Some(icon::RADIO), false).clicked() {
-                acts.push(Action::Radio(first.clone()));
+    }
+    if !material {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 10.0;
+            play_pill(ui, acts, &Target::Artist(id.to_owned()), top);
+            if pill(ui, "Shuffle", Some(icon::SHUFFLE), false).clicked() && !top.is_empty() {
+                let mut t = top.clone();
+                super::shuffle(&mut t);
+                acts.push(Action::Play(t, 0));
             }
-    });
-    if !top.is_empty() {
+            if let Some(first) = top.first()
+                && pill(ui, "Radio", Some(icon::RADIO), false).clicked() {
+                    acts.push(Action::Radio(first.clone()));
+                }
+        });
+    }
+    if !top.is_empty() && material {
+        let trailing = if a.top_playlist.is_some() { m3::Trailing::Text("Show all") } else { m3::Trailing::None };
+        if m3::section_header(ui, &m3::SectionHeader { title: "Top songs", overline: None, avatar: None, trailing })
+            && let Some(pl) = &a.top_playlist
+        {
+            acts.push(Action::Open(Target::Playlist(pl.clone())));
+        }
+    } else if !top.is_empty() {
         ui.add_space(26.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("Top songs").font(theme::bold(24.0)).color(theme::text()));
@@ -1443,6 +1690,8 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
             }
         });
         ui.add_space(12.0);
+    }
+    if !top.is_empty() {
         for (i, t) in top.iter().enumerate().take(5) {
             let o = rows.opts(&app.liked, t, None, true);
             if track_row(ui, t, &o, acts).clicked() {
@@ -1453,7 +1702,22 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     card_row_plain(ui, "a-albums", "Albums & singles", &a.albums, acts);
     card_row_plain(ui, "a-pl", "Featured on", &a.playlists, acts);
     card_row_plain(ui, "a-sim", "Fans might also like", &a.similar, acts);
-    if let Some(d) = a.description.as_deref().filter(|d| !d.trim().is_empty()) {
+    if let Some(d) = a.description.as_deref().filter(|d| !d.trim().is_empty()).filter(|_| material) {
+        // The signature of a lettered artist stands under the prose, at the page's width.
+        m3::section_header(ui, &m3::SectionHeader { title: "About", overline: None, avatar: None, trailing: m3::Trailing::None });
+        let g = m3::galley_wrapped(ui, d.trim(), crate::material::Type::BodyMedium, theme::text_dim(), ui.available_width(), 8);
+        ui.label(g);
+        if let Some(tex) = drawn.then_some(signature.as_ref()).flatten() {
+            ui.add_space(16.0);
+            let tex_size = tex.size_vec2();
+            let size = vec2(96.0 * tex_size.x / tex_size.y.max(1.0), 96.0);
+            let size = if size.x > ui.available_width() { size * (ui.available_width() / size.x) } else { size };
+            let (rect, _) = ui.allocate_exact_size(vec2(size.x, size.y + 22.0), Sense::hover());
+            ui.painter().text(rect.left_top(), Align2::LEFT_TOP, format!("Signed by {name}"), crate::material::Type::BodySmall.font(), theme::text_dim());
+            let img = Rect::from_min_size(pos2(rect.left(), rect.top() + 22.0), size);
+            egui::Image::from_texture(egui::load::SizedTexture::from_handle(tex)).uv(Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))).paint_at(ui, img);
+        }
+    } else if let Some(d) = a.description.as_deref().filter(|d| !d.trim().is_empty()) {
         shelf_header(ui, "About", None, None, false);
         let full = ui.available_width().min(820.0);
         // A lettered artist's signature can't be the hero, so it signs the About
@@ -3967,6 +4231,55 @@ mod tests {
             let (tile, mark) = library_row_marks(&card(plain), &downloaded);
             assert!(tile.is_none() && mark.is_none());
         }
+    }
+
+    #[test]
+    fn the_actions_of_a_collection_fit_its_page_and_a_finger_without_touching() {
+        for width in [328.0, 344.0, 361.0, 380.0] {
+            for (before, after) in [(2, 2), (1, 2), (1, 1), (0, 0)] {
+                let row = Rect::from_min_size(pos2(16.0, 500.0), vec2(width, PLAY_H));
+                let a = action_row(row, before, after);
+                assert_eq!((a.before.len(), a.after.len()), (before, after));
+                let all: Vec<Rect> = a.before.iter().chain([&a.play]).chain(&a.after).copied().collect();
+                for r in &all {
+                    assert!(row.expand(0.01).contains_rect(*r), "{width} {before}+{after}: {r:?}");
+                    assert!(r.width() >= m3::TOUCH && r.height() >= m3::TOUCH);
+                }
+                for pair in all.windows(2) {
+                    assert!(pair[0].right() + 7.99 <= pair[1].left(), "{width}: a gap between {pair:?}");
+                }
+                assert!(a.play.width() >= 96.0 && a.play.width() <= 136.0, "{width}: {}", a.play.width());
+                let (first, last) = (all[0], all[all.len() - 1]);
+                assert!(((first.left() - row.left()) - (row.right() - last.right())).abs() < 0.01, "the row is centred");
+            }
+        }
+        // The designs' sizes on a 412-point phone.
+        let a = action_row(Rect::from_min_size(pos2(16.0, 0.0), vec2(380.0, PLAY_H)), 2, 2);
+        assert_eq!(a.play.size(), vec2(136.0, 56.0));
+        assert_eq!(a.before[0].size(), Vec2::splat(48.0));
+    }
+
+    #[test]
+    fn a_lists_length_is_said_in_hours_and_minutes() {
+        assert_eq!(length_text(3 * 3600 + 12 * 60 + 40), "3 hr 12 min");
+        assert_eq!(length_text(45 * 60 + 59), "45 min");
+        assert_eq!(length_text(3600), "1 hr 0 min");
+        assert_eq!(length_text(20), "0 min");
+    }
+
+    #[test]
+    fn a_collections_one_line_says_who_how_many_and_how_long() {
+        assert_eq!(meta_line("Dadang Rusmana \u{2022} 48 songs", true, 48, 3 * 3600 + 12 * 60), "Dadang Rusmana \u{2022} 48 songs \u{2022} 3 hr 12 min");
+        assert_eq!(meta_line("Album \u{2022} Arunika \u{2022} 2024", false, 11, 41 * 60), "Album \u{2022} Arunika \u{2022} 2024 \u{2022} 11 songs \u{2022} 41 min");
+        assert_eq!(meta_line("Arunika", false, 11, 0), "Arunika", "songs that don't say how long they are");
+        assert_eq!(meta_line("", false, 1, 200), "1 song \u{2022} 3 min");
+    }
+
+    #[test]
+    fn a_collections_cover_is_large_but_leaves_the_page_its_sides() {
+        assert_eq!(cover_side(380.0), 212.8);
+        assert!(cover_side(328.0) >= 160.0 && cover_side(328.0) < 328.0 * 0.6);
+        assert_eq!(cover_side(900.0), 220.0);
     }
 
     #[test]
