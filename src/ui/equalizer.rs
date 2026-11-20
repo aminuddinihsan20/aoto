@@ -6,7 +6,8 @@
 use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 use super::widgets::{self, named};
-use super::{App, pages};
+use super::{App, m3, pages};
+use crate::material::{self, Type, Weight, shape};
 use crate::eq::{BANDS, Curve, MAX_DB, Preset, Tuning};
 use crate::theme;
 
@@ -23,6 +24,16 @@ pub(super) fn page(app: &mut App, ui: &mut Ui) {
     let mut s = Showing { tuning: app.eq.clone(), spatial: app.spatial, normalize: app.normalize };
     // One column, as on a phone, also where there is room for more.
     let w = ui.available_width().min(520.0);
+    // On the Material phone the top bar names the page, and its switch stands at the
+    // bar's right end.
+    if let Some((first, second)) = super::phone::page_slots(ui.ctx()).filter(|_| m3::on()) {
+        let both = first.union(second);
+        egui::Area::new(ui.scope_id().with("eq-bar")).order(egui::Order::Middle).fixed_pos(both.min).show(ui.ctx(), |ui| {
+            ui.allocate_exact_size(both.size(), Sense::hover());
+            let at = Rect::from_min_size(pos2(both.right() - pages::toggle_size().x, both.center().y - pages::toggle_size().y / 2.0), pages::toggle_size());
+            pages::toggle(&mut ui.new_child(egui::UiBuilder::new().max_rect(at)), &mut s.tuning.enabled, "Equalizer");
+        });
+    }
     ui.scope(|ui| {
         ui.set_max_width(w);
         contents(ui, &mut s, app.accent_color());
@@ -164,6 +175,10 @@ impl Grid {
 
 /// The page's title with the equalizer's switch at its right.
 fn header(ui: &mut Ui, on: &mut bool) {
+    if m3::on() {
+        // The top bar has both.
+        return;
+    }
     ui.add_space(12.0);
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 48.0), Sense::hover());
     ui.painter().text(pos2(r.left(), r.center().y), Align2::LEFT_CENTER, "Equalizer", theme::bold(34.0), theme::text());
@@ -200,13 +215,23 @@ fn presets(ui: &mut Ui, tuning: &mut Tuning) {
 /// make together drawn through it.
 fn bands(ui: &mut Ui, tuning: &mut Tuning, accent: Color32) {
     let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), CARD_H), Sense::hover());
-    ui.painter().rect_filled(card, theme::panel_radius(), theme::glass(0.06));
+    // Material: a card of the container colour, its tracks a step above, the curve in
+    // the tertiary colour so it reads apart from the bands' own.
+    let m = material::scheme();
+    let material = m3::on();
+    let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
+    let (track, label_font) = if material { (m.surface_container_highest, Type::LabelMedium.font()) } else { (theme::glass(0.10), theme::regular(11.5)) };
+    if material {
+        ui.painter().rect_filled(card, shape::CARD, m.surface_container);
+    } else {
+        ui.painter().rect_filled(card, theme::panel_radius(), theme::glass(0.06));
+    }
     let grid = Grid::of(card);
     let (left, right) = (grid.left, card.right() - 4.0);
     for (db, label) in [(MAX_DB, "+12"), (0.0, "0"), (-MAX_DB, "−12")] {
         let y = grid.y(db);
-        ui.painter().hline(left..=right - 8.0, y, egui::Stroke::new(1.0, theme::glass(0.10)));
-        ui.painter().text(pos2(left - 6.0, y), Align2::RIGHT_CENTER, label, theme::regular(11.5), theme::text_dim());
+        ui.painter().hline(left..=right - 8.0, y, egui::Stroke::new(1.0, if material { m.outline_variant.gamma_multiply(0.6) } else { theme::glass(0.10) }));
+        ui.painter().text(pos2(left - 6.0, y), Align2::RIGHT_CENTER, label, label_font.clone(), theme::text_dim());
     }
     let shown = tuning.bands();
     for (i, hz) in BANDS.into_iter().enumerate() {
@@ -231,18 +256,19 @@ fn bands(ui: &mut Ui, tuning: &mut Tuning, accent: Color32) {
         }
         let db = tuning.bands()[i];
         resp.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), db as f64, format!("{} Hz", hz_label(hz))));
-        ui.painter().rect_filled(Rect::from_x_y_ranges(x - 4.0..=x + 4.0, grid.top..=grid.bottom), 4.0, theme::glass(0.10));
+        ui.painter().rect_filled(Rect::from_x_y_ranges(x - 4.0..=x + 4.0, grid.top..=grid.bottom), 4.0, track);
         // Filled from the middle to where the band is.
         let (y, zero) = (grid.y(db), grid.y(0.0));
         ui.painter().rect_filled(Rect::from_x_y_ranges(x - 4.0..=x + 4.0, y.min(zero)..=y.max(zero)), 4.0, accent);
-        ui.painter().text(pos2(x, grid.bottom + 34.0), Align2::CENTER_CENTER, hz_label(hz), theme::regular(12.0), theme::text_dim());
+        ui.painter().text(pos2(x, grid.bottom + 34.0), Align2::CENTER_CENTER, hz_label(hz), if material { label_font.clone() } else { theme::regular(12.0) }, theme::text_dim());
     }
     // The curve that plays, switch aside: drawn dimmed with the rest while it is off.
     let curve = Curve::new(&crate::eq::Settings { enabled: true, ..tuning.settings() }, DRAWN_RATE);
     let reach = MAX_DB + 1.0;
     // As far to the right as hearing goes.
     let points = (0..=((right - left) / 3.0) as usize).map(|i| left + i as f32 * 3.0).take_while(|x| grid.hz(*x) <= 20_000.0).map(|x| pos2(x, grid.y(curve.db(grid.hz(x)).clamp(-reach, reach))));
-    ui.painter().add(egui::Shape::line(points.collect(), egui::Stroke::new(2.0, theme::lerp_color(accent, theme::text(), 0.55))));
+    let curve_ink = if material { m.tertiary.gamma_multiply(fade) } else { theme::lerp_color(accent, theme::text(), 0.55) };
+    ui.painter().add(egui::Shape::line(points.collect(), egui::Stroke::new(2.0, curve_ink)));
     for (i, db) in tuning.bands().into_iter().enumerate() {
         let thumb = Rect::from_center_size(pos2(grid.x(i), grid.y(db)), vec2(30.0, 10.0));
         ui.painter().rect_filled(thumb.translate(vec2(0.0, 1.0)), 5.0, theme::shade(0.25));
@@ -265,24 +291,49 @@ fn bass(ui: &mut Ui, tuning: &mut Tuning, accent: Color32) {
     if let Some(p) = resp.interact_pointer_pos()
         && (resp.clicked() || resp.dragged() && along)
     {
-        let t = ((p.x - track.left()) / track.width()).clamp(0.0, 1.0);
+        // Where the handle is drawn is where the finger sets it: Material's slider keeps
+        // a margin at its ends that the app's own does not.
+        let t = if m3::on() { m3::slider_value(r, p.x, 0, 100) as f32 / 100.0 } else { ((p.x - track.left()) / track.width()).clamp(0.0, 1.0) };
         tuning.set_bass((t * 100.0).round() / 100.0);
     }
     let value = tuning.bass;
     resp.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), (value * 100.0) as f64, "Bass boost"));
-    ui.painter().text(pos2(head.left(), head.center().y), Align2::LEFT_CENTER, "Bass boost", theme::regular(17.0), theme::text());
-    ui.painter().text(pos2(head.right(), head.center().y), Align2::RIGHT_CENTER, format!("{:.0}%", value * 100.0), theme::semibold(15.0), accent);
-    let x = egui::lerp(track.left()..=track.right(), value);
-    // A gap either side of the handle, as the design's slider has.
-    let filled = Rect::from_min_max(track.min, pos2((x - 6.0).max(track.left()), track.max.y));
-    let rest = Rect::from_min_max(pos2((x + 6.0).min(track.right()), track.min.y), track.max);
-    ui.painter().rect_filled(filled, 6.0, accent);
-    ui.painter().rect_filled(rest, 6.0, theme::glass(0.15));
-    ui.painter().rect_filled(Rect::from_center_size(pos2(x, track.center().y), vec2(4.0, 30.0)), 2.0, accent);
+    if m3::on() {
+        // Material's slider: a thick track in two parts with the upright handle between.
+        let m = material::scheme();
+        let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
+        m3::text(ui, pos2(head.left(), head.center().y - 12.0), "Bass boost", Type::TitleMedium, m.on_surface.gamma_multiply(fade), w - 60.0);
+        let pct = m3::galley(ui, &format!("{:.0}%", value * 100.0), Type::LabelLarge.spec().weight(Weight::Bold), m.primary.gamma_multiply(fade), 60.0);
+        ui.painter().galley(pos2(head.right() - pct.size().x, head.center().y - pct.size().y / 2.0), pct, m.primary.gamma_multiply(fade));
+        let g = m3::slider_geom(r, value);
+        let p = ui.painter();
+        if g.active.width() > 0.0 {
+            p.rect_filled(g.active, egui::CornerRadius { nw: 8, sw: 8, ne: 2, se: 2 }, m.primary.gamma_multiply(fade));
+        }
+        if g.rest.width() > 0.0 {
+            p.rect_filled(g.rest, egui::CornerRadius { nw: 2, sw: 2, ne: 8, se: 8 }, m.secondary_container.gamma_multiply(fade));
+            p.circle_filled(pos2(g.rest.right() - 8.0, g.rest.center().y), 2.0, m.primary.gamma_multiply(fade));
+        }
+        p.rect_filled(g.handle, 2.0, m.primary.gamma_multiply(fade));
+    } else {
+        ui.painter().text(pos2(head.left(), head.center().y), Align2::LEFT_CENTER, "Bass boost", theme::regular(17.0), theme::text());
+        ui.painter().text(pos2(head.right(), head.center().y), Align2::RIGHT_CENTER, format!("{:.0}%", value * 100.0), theme::semibold(15.0), accent);
+        let x = egui::lerp(track.left()..=track.right(), value);
+        // A gap either side of the handle, as the design's slider has.
+        let filled = Rect::from_min_max(track.min, pos2((x - 6.0).max(track.left()), track.max.y));
+        let rest = Rect::from_min_max(pos2((x + 6.0).min(track.right()), track.min.y), track.max);
+        ui.painter().rect_filled(filled, 6.0, accent);
+        ui.painter().rect_filled(rest, 6.0, theme::glass(0.15));
+        ui.painter().rect_filled(Rect::from_center_size(pos2(x, track.center().y), vec2(4.0, 30.0)), 2.0, accent);
+    }
     // Its line is kept free while there is nothing to say, so the rows below stay put.
     let (line, _) = ui.allocate_exact_size(vec2(w, 22.0), Sense::hover());
     if let Some(note) = headroom_note(tuning) {
-        widgets::text_at(ui, pos2(line.left(), line.top() + 2.0), &note, theme::regular(12.5), theme::text_dim(), w);
+        if m3::on() {
+            m3::text(ui, pos2(line.left(), line.top() + 2.0), &note, Type::BodySmall, theme::text_dim(), w);
+        } else {
+            widgets::text_at(ui, pos2(line.left(), line.top() + 2.0), &note, theme::regular(12.5), theme::text_dim(), w);
+        }
     }
 }
 
@@ -294,8 +345,13 @@ fn switch_row(ui: &mut Ui, id: egui::Id, title: &str, note: &str, on: &mut bool)
         *on = !*on;
     }
     let text_w = w - 60.0;
-    widgets::text_at(ui, pos2(r.left(), r.top() + 10.0), title, theme::regular(17.0), theme::text(), text_w);
-    widgets::text_at(ui, pos2(r.left(), r.top() + 34.0), note, theme::regular(13.5), theme::text_dim(), text_w);
+    if m3::on() {
+        let m = material::scheme();
+        m3::two_lines(ui, r.left(), r.center().y, text_w - 8.0, title, Type::BodyLarge, m.on_surface, note, Type::BodyMedium, m.on_surface_variant);
+    } else {
+        widgets::text_at(ui, pos2(r.left(), r.top() + 10.0), title, theme::regular(17.0), theme::text(), text_w);
+        widgets::text_at(ui, pos2(r.left(), r.top() + 34.0), note, theme::regular(13.5), theme::text_dim(), text_w);
+    }
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(Rect::from_center_size(pos2(r.right() - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size())));
     pages::toggle(&mut sui, on, title);
 }

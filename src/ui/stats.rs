@@ -8,7 +8,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 
 use super::widgets::{self, named};
-use super::{Action, App, Page, notes, pages, sleep};
+use super::{Action, App, Page, m3, notes, pages, sleep};
+use crate::material::{self, Type, Weight, shape};
 use crate::model::{Thumb, Track};
 use crate::stats::{Clock, Cover, Date, Day, Pace, Period, Playing, Song, Summary, TopSong};
 use crate::theme::{self, icon};
@@ -239,12 +240,19 @@ const HERO_H: f32 = 236.0;
 
 /// Week, Month and Year as three pills, the one showing filled.
 fn switch(ui: &mut Ui, period: &mut Period, accent: Color32) {
-    let (w, gap) = (ui.available_width(), 8.0);
+    let (w, gap) = (ui.available_width(), if m3::on() { 4.0 } else { 8.0 });
     let third = (w - 2.0 * gap) / 3.0;
     let (row, _) = ui.allocate_exact_size(vec2(w, PILL_H), Sense::hover());
     for (i, (p, label)) in [(Period::Week, "Week"), (Period::Month, "Month"), (Period::Year, "Year")].into_iter().enumerate() {
         let cell = Rect::from_min_size(pos2(row.left() + (third + gap) * i as f32, row.top()), vec2(third, PILL_H));
-        if sleep::pill(ui, cell, period_id(p), label, None, *period == p, false, accent) {
+        if m3::on() {
+            // Material: three connected buttons, the period showing a filled pill.
+            let resp = named(ui.interact(cell, period_id(p), Sense::click()), label);
+            m3::segment(ui, cell, label, &m3::Segment { on: *period == p, first: i == 0, last: i == 2, pressed: resp.is_pointer_button_down_on(), rest: material::scheme().surface_container_high, fade: 1.0 });
+            if resp.clicked() {
+                *period = p;
+            }
+        } else if sleep::pill(ui, cell, period_id(p), label, None, *period == p, false, accent) {
             *period = p;
         }
     }
@@ -255,10 +263,21 @@ fn switch(ui: &mut Ui, period: &mut Period, accent: Color32) {
 fn hero(ui: &mut Ui, s: &Summary, accent: Color32) {
     let w = ui.available_width();
     let (card, _) = ui.allocate_exact_size(vec2(w, HERO_H), Sense::hover());
-    ui.painter().rect_filled(card, theme::panel_radius(), theme::with_alpha(accent, 0.30));
     let (left, text_w) = (card.left() + 24.0, w - 48.0);
     let (name, time, sub) = (period_name(s.period, s.first), time_text(s.heard), sub_line(s));
     described(ui, card, hero_id(), &format!("{name}: {time}. {sub}"));
+    if m3::on() {
+        // Material: a tonal card in the primary container, its text in the colour for it.
+        let m = material::scheme();
+        ui.painter().rect_filled(card, shape::CARD, m.primary_container);
+        let ink = m.on_primary_container;
+        m3::text(ui, pos2(left, card.top() + 22.0), &name.to_uppercase(), Type::LabelLarge, ink.gamma_multiply(0.8), text_w);
+        m3::text(ui, pos2(left, card.top() + 40.0), &time, Type::DisplaySmall.spec().weight(Weight::Bold), ink, text_w);
+        m3::text(ui, pos2(left, card.top() + 90.0), &sub, Type::BodyMedium, ink.gamma_multiply(0.8), text_w);
+        bars(ui, Rect::from_min_max(pos2(left, card.top() + 124.0), pos2(card.right() - 24.0, card.bottom() - 18.0)), s, accent);
+        return;
+    }
+    ui.painter().rect_filled(card, theme::panel_radius(), theme::with_alpha(accent, 0.30));
     widgets::text_at(ui, pos2(left, card.top() + 22.0), &name.to_uppercase(), theme::semibold(12.0), theme::text_dim(), text_w);
     widgets::text_at(ui, pos2(left, card.top() + 40.0), &time, theme::bold(36.0), theme::text(), text_w);
     widgets::text_at(ui, pos2(left, card.top() + 90.0), &sub, theme::regular(14.0), theme::text_dim(), text_w);
@@ -274,7 +293,16 @@ fn bars(ui: &Ui, area: Rect, s: &Summary, accent: Color32) {
     let most = s.bars.iter().copied().max().unwrap_or(0);
     for (i, &secs) in s.bars.iter().enumerate() {
         let x = area.left() + slot * (i as f32 + 0.5);
-        let color = if i == s.today {
+        let color = if m3::on() {
+            // On the primary container: today in the primary colour, the rest in the
+            // container's text colour, fainter where nothing was heard or is yet to come.
+            let m = material::scheme();
+            match (i == s.today, secs > 0) {
+                (true, _) => m.primary,
+                (false, true) => m.on_primary_container.gamma_multiply(0.3),
+                (false, false) => m.on_primary_container.gamma_multiply(if i > s.today { 0.08 } else { 0.14 }),
+            }
+        } else if i == s.today {
             theme::lerp_color(accent, theme::text(), 0.3)
         } else if secs > 0 {
             theme::with_alpha(theme::text(), 0.30)
@@ -285,7 +313,8 @@ fn bars(ui: &Ui, area: Rect, s: &Summary, accent: Color32) {
         let top = chart.bottom() - bar_height(secs, most, chart.height(), bar_w);
         ui.painter().rect_filled(Rect::from_x_y_ranges(x - bar_w / 2.0..=x + bar_w / 2.0, top..=chart.bottom()), bar_w / 2.0, color);
         if let Some(label) = bar_label(s.period, i) {
-            ui.painter().text(pos2(x, area.bottom()), Align2::CENTER_BOTTOM, label, theme::regular(10.5), theme::text_dim());
+            let ink = if m3::on() { material::scheme().on_primary_container.gamma_multiply(0.8) } else { theme::text_dim() };
+            ui.painter().text(pos2(x, area.bottom()), Align2::CENTER_BOTTOM, label, theme::regular(10.5), ink);
         }
     }
 }
@@ -303,9 +332,24 @@ fn top_cards(ui: &mut Ui, s: &Summary) {
     let (row, _) = ui.allocate_exact_size(vec2(w, 108.0), Sense::hover());
     for (i, (card, label, name, note)) in cards.into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(row.left() + (each + gap) * i as f32, row.top()), vec2(each, row.height()));
-        ui.painter().rect_filled(r, theme::panel_radius(), theme::glass(0.07));
         described(ui, r, card_id(card), &format!("{label}: {name}, {note}"));
         let (left, text_w) = (r.left() + 18.0, each - 36.0);
+        if m3::on() {
+            // Material: a card with one of its shapes in a corner, the text over it.
+            let m = material::scheme();
+            ui.painter().rect_filled(r, shape::CARD, m.surface_container);
+            let corner = pos2(r.right() - 38.0, r.bottom() - 34.0);
+            if card == 0 {
+                super::phone::cookie(ui, corner, 26.0, m.tertiary_container);
+            } else {
+                ui.painter().rect_filled(Rect::from_center_size(corner, vec2(48.0, 48.0)), shape::TILE, m.secondary_container);
+            }
+            m3::text(ui, pos2(left, r.top() + 18.0), &label.to_uppercase(), Type::LabelMedium, m.on_surface_variant, text_w);
+            m3::text(ui, pos2(left, r.top() + 38.0), name, Type::TitleLarge.spec().weight(Weight::Medium), m.on_surface, text_w);
+            m3::text(ui, pos2(left, r.top() + 70.0), &note, Type::BodyMedium, m.on_surface_variant, text_w);
+            continue;
+        }
+        ui.painter().rect_filled(r, theme::panel_radius(), theme::glass(0.07));
         widgets::text_at(ui, pos2(left, r.top() + 18.0), &label.to_uppercase(), theme::semibold(11.5), theme::text_dim(), text_w);
         widgets::text_at(ui, pos2(left, r.top() + 38.0), name, theme::semibold(20.0), theme::text(), text_w);
         widgets::text_at(ui, pos2(left, r.top() + 70.0), &note, theme::regular(13.5), theme::text_dim(), text_w);
@@ -320,12 +364,37 @@ fn top_songs(ui: &mut Ui, songs: &[TopSong], accent: Color32) {
     }
     let w = ui.available_width();
     let (head, _) = ui.allocate_exact_size(vec2(w, 30.0), Sense::hover());
-    ui.painter().text(pos2(head.left() + 2.0, head.center().y), Align2::LEFT_CENTER, "Top songs", theme::bold(20.0), theme::text());
+    let material = m3::on();
+    if material {
+        m3::text(ui, pos2(head.left() + 2.0, head.center().y - 12.0), "Top songs", Type::TitleMedium.spec().weight(Weight::Bold), material::scheme().on_surface, w);
+    } else {
+        ui.painter().text(pos2(head.left() + 2.0, head.center().y), Align2::LEFT_CENTER, "Top songs", theme::bold(20.0), theme::text());
+    }
     ui.add_space(6.0);
     for (i, top) in songs.iter().enumerate() {
         let (row, _) = ui.allocate_exact_size(vec2(w, 64.0), Sense::hover());
         let (artists, plays) = (top.song.artists.join(", "), plays_text(top.plays as u64));
         described(ui, row, song_id(i), &format!("{}. {}, {artists}, {plays}", i + 1, top.song.title));
+        if material {
+            // Material: the place in the primary colour, then a list row's cover and lines.
+            let m = material::scheme();
+            let rank = m3::galley(ui, &(i + 1).to_string(), Type::HeadlineSmall, m.primary, 30.0);
+            ui.painter().galley(pos2(row.left() + 14.0 - rank.size().x / 2.0, row.center().y - rank.size().y / 2.0), rank, m.primary);
+            let cover = Rect::from_center_size(pos2(row.left() + 34.0 + 24.0, row.center().y), vec2(48.0, 48.0));
+            widgets::paint_cover(ui, cover, &thumbs_of(&top.song), shape::TILE_SMALL, 1.0);
+            let plays_g = m3::galley(ui, &plays, Type::LabelLarge, m.on_surface_variant, 120.0);
+            let left = cover.right() + 16.0;
+            let text_w = (row.right() - plays_g.size().x - 14.0 - left).max(20.0);
+            ui.painter().galley(pos2(row.right() - 2.0 - plays_g.size().x, row.center().y - plays_g.size().y / 2.0), plays_g, m.on_surface_variant);
+            if artists.is_empty() {
+                // A song that names nobody has its title to itself, in the middle.
+                let g = m3::galley(ui, &top.song.title, Type::BodyLarge, m.on_surface, text_w);
+                ui.painter().galley(pos2(left, row.center().y - g.size().y / 2.0), g, m.on_surface);
+            } else {
+                m3::two_lines(ui, left, row.center().y, text_w, &top.song.title, Type::BodyLarge, m.on_surface, &artists, Type::BodyMedium, m.on_surface_variant);
+            }
+            continue;
+        }
         ui.painter().text(pos2(row.left() + 14.0, row.center().y), Align2::CENTER_CENTER, (i + 1).to_string(), theme::semibold(20.0), accent);
         let cover = Rect::from_center_size(pos2(row.left() + 34.0 + 24.0, row.center().y), vec2(48.0, 48.0));
         widgets::paint_cover(ui, cover, &thumbs_of(&top.song), theme::thumb_radius(), 1.0);
@@ -347,6 +416,16 @@ fn nothing_yet(ui: &mut Ui, accent: Color32) {
     let (r, _) = ui.allocate_exact_size(vec2(w, 220.0), Sense::hover());
     described(ui, r, empty_id(), &format!("{TITLE}. {NOTE}"));
     let disc = pos2(r.center().x, r.top() + 76.0);
+    if m3::on() {
+        let m = material::scheme();
+        ui.painter().circle_filled(disc, 44.0, m.primary_container);
+        widgets::icon_at(ui, disc, icon::HEADPHONES, 38.0, m.on_primary_container);
+        let title = m3::galley(ui, TITLE, Type::TitleLarge, m.on_surface, w - 32.0);
+        ui.painter().galley(pos2(r.center().x - title.size().x / 2.0, r.top() + 138.0), title, m.on_surface);
+        let note = m3::galley_centered(ui, NOTE, Type::BodyMedium, m.on_surface_variant, w - 32.0, 2);
+        ui.painter().galley(pos2(r.center().x, r.top() + 170.0), note, m.on_surface_variant);
+        return;
+    }
     ui.painter().circle_filled(disc, 44.0, theme::with_alpha(accent, 0.22));
     widgets::icon_at(ui, disc, icon::HEADPHONES, 38.0, theme::text());
     ui.painter().text(pos2(r.center().x, r.top() + 152.0), Align2::CENTER_CENTER, TITLE, theme::bold(20.0), theme::text());
@@ -357,8 +436,13 @@ fn nothing_yet(ui: &mut Ui, accent: Color32) {
 /// The page: `summary` is the period's numbers, None while nothing was ever heard.
 fn contents(ui: &mut Ui, period: &mut Period, summary: Option<&Summary>, accent: Color32) {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    pages::page_title(ui, "Listening stats");
-    ui.add_space(14.0);
+    // The Material phone names the page in its top bar.
+    if m3::on() {
+        ui.add_space(8.0);
+    } else {
+        pages::page_title(ui, "Listening stats");
+        ui.add_space(14.0);
+    }
     let Some(s) = summary else { return nothing_yet(ui, accent) };
     switch(ui, period, accent);
     ui.add_space(16.0);
@@ -434,9 +518,25 @@ fn confirm_clear(ctx: &egui::Context, kept: &str) -> Option<bool> {
         ui.set_width(400.0_f32.min(ctx.content_rect().width() - 48.0));
         egui::Frame::new().inner_margin(egui::Margin { left: 26, right: 26, top: 24, bottom: 22 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            let body = format!("{kept} Listening stats starts again from nothing. This can't be undone.");
+            if m3::on() {
+                m3::dialog_title(ui, "Clear listening history?");
+                ui.add_space(16.0);
+                m3::dialog_text(ui, &body);
+                ui.add_space(24.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if m3::button(ui, "Clear", None, m3::ButtonStyle::Danger).clicked() {
+                        answer = Some(true);
+                    }
+                    if m3::button(ui, "Cancel", None, m3::ButtonStyle::Text).clicked() {
+                        answer = Some(false);
+                    }
+                });
+                return;
+            }
             ui.label(egui::RichText::new("Clear listening history?").font(theme::bold(22.0)).color(theme::text()));
             ui.add_space(10.0);
-            let body = format!("{kept} Listening stats starts again from nothing. This can't be undone.");
             ui.add(egui::Label::new(egui::RichText::new(body).font(theme::regular(14.0)).color(theme::text_dim())).wrap());
             ui.add_space(22.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

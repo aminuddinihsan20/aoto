@@ -170,6 +170,15 @@ fn bar_title(page: &Page, hour: u32) -> Option<&'static str> {
     }
 }
 
+/// The name beside the back arrow of a page that has no header of its own to say it.
+fn page_name(page: &Page) -> Option<&'static str> {
+    match page {
+        Page::Equalizer => Some("Equalizer"),
+        Page::Stats => Some("Listening stats"),
+        _ => None,
+    }
+}
+
 /// What stands at the right end of the top bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Ends {
@@ -184,8 +193,9 @@ enum Ends {
 fn bar_ends(page: &Page) -> Ends {
     match page {
         Page::Home | Page::Library(_) | Page::Downloads => Ends::Account { action: true },
-        Page::Album(_) | Page::Playlist(_) => Ends::Page,
-        Page::Settings | Page::SettingsCategory(_) => Ends::Nothing,
+        // The equalizer's switch stands there, drawn by its page.
+        Page::Album(_) | Page::Playlist(_) | Page::Equalizer => Ends::Page,
+        Page::Settings | Page::SettingsCategory(_) | Page::Stats => Ends::Nothing,
         _ => Ends::Account { action: false },
     }
 }
@@ -250,7 +260,7 @@ fn top_row(app: &mut App, ui: &mut Ui) {
         // (A child of its own: the bar's height is added once, below.)
         let mut bar_ui = ui.new_child(egui::UiBuilder::new().max_rect(field));
         super::shell::search_field(app, &mut bar_ui, field.width(), trailing);
-    } else if let Some(title) = super::settings::bar_title(app.jam_open, &page) {
+    } else if let Some(title) = super::settings::bar_title(app.jam_open, &page).or(page_name(&page)) {
         let galley = m3::galley(ui, title, Type::TitleLarge, m.on_surface, g.title.width() - 4.0);
         ui.painter().galley(pos2(g.title.left() + 4.0, g.title.center().y - galley.size().y / 2.0), galley, m.on_surface);
     } else if let Some(title) = bar_title(&page, local_hour()) {
@@ -671,7 +681,17 @@ mod tests {
         assert_eq!(bar_ends(&Page::Album("a".into())), Ends::Page);
         assert_eq!(bar_ends(&Page::Artist("a".into())), Ends::Account { action: false });
         assert_eq!(bar_ends(&Page::Settings), Ends::Nothing, "the picture is the way to Settings");
+        assert_eq!(bar_ends(&Page::Equalizer), Ends::Page, "its switch");
+        assert_eq!(bar_ends(&Page::Stats), Ends::Nothing);
         assert_eq!(bar_ends(&Page::SettingsCategory(crate::ui::settings::Category::Sound)), Ends::Nothing);
+    }
+
+    #[test]
+    fn the_equalizer_and_the_stats_are_named_beside_their_back_arrow() {
+        assert_eq!(page_name(&Page::Equalizer), Some("Equalizer"));
+        assert_eq!(page_name(&Page::Stats), Some("Listening stats"));
+        assert_eq!(page_name(&Page::Album("a".into())), None, "an album's header names it");
+        assert_eq!(page_name(&Page::Home), None);
     }
 
     #[test]
