@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 4×2 widget: cover, title, artist, progress, previous / play-pause / next. As
+     written here it is the widget with no song, which is also the widget picker's
+     preview; NowPlayingWidget fills in the rest. The cover is as large as the bitmap it
+     is given, and the paddings and button sizes are the ones WidgetLogic.wideCoverDp
+     counts with: change them together. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_surface"
+    android:baselineAligned="false"
+    android:clipToOutline="true"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <ImageView
+        android:id="@+id/widget_art"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:adjustViewBounds="true"
+        android:background="@drawable/widget_art_clip"
+        android:clipToOutline="true"
+        android:importantForAccessibility="no"
+        android:maxWidth="148dp"
+        android:maxHeight="148dp"
+        android:src="@drawable/widget_art_empty" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <!-- The text gets the height the bar and the buttons leave: too little, and the
+             artist is what is cut. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:text="@string/widget_empty_title"
+                android:textColor="@color/widget_on_surface"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/widget_empty_text"
+                android:textColor="@color/widget_on_surface_variant"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/widget_progress"
+            style="@android:style/Widget.ProgressBar.Horizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="6dp"
+            android:max="100"
+            android:progressDrawable="@drawable/widget_progress"
+            android:visibility="invisible" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <ImageButton
+                android:id="@+id/widget_previous"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="6dp"
+                android:background="@drawable/widget_button_tonal"
+                android:contentDescription="@string/widget_previous"
+                android:src="@drawable/ic_widget_previous"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/widget_toggle"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:background="@drawable/widget_button_primary"
+                android:contentDescription="@string/widget_play"
+                android:src="@drawable/ic_widget_play" />
+
+            <ImageButton
+                android:id="@+id/widget_next"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/widget_button_tonal"
+                android:contentDescription="@string/widget_next"
+                android:src="@drawable/ic_widget_next"
+                android:visibility="gone" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

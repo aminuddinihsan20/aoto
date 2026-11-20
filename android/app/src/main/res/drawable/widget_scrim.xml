@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Darkens the foot of the 2×2 widget's cover so the title reads on any artwork. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android">
+    <gradient
+        android:angle="90"
+        android:endColor="#00000000"
+        android:startColor="#CC000000" />
+    <corners
+        android:bottomLeftRadius="@dimen/widget_radius"
+        android:bottomRightRadius="@dimen/widget_radius" />
+</shape>

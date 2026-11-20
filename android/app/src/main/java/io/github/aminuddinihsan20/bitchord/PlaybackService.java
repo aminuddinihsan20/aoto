@@ -33,7 +33,8 @@ import java.net.URL;
  * Keeps the music going with the app away, and shows it: a foreground service with a
  * media notification (title, artist, artwork, previous / play-pause / next) and a media
  * session for the lock screen and headset buttons. What plays comes from the Rust app
- * (polled), and what is pressed goes back to it.
+ * (polled), and what is pressed goes back to it. The home-screen widgets (NowPlayingWidget)
+ * show the same and are told from here whenever it changes.
  */
 public class PlaybackService extends Service {
     private static final String CHANNEL = "playback";
@@ -55,6 +56,7 @@ public class PlaybackService extends Service {
     private NotificationManager notifications;
     private AudioManager audio;
     private AudioFocusRequest focus;
+    private PowerManager power;
     private PowerManager.WakeLock wakeLock;
     private boolean pausedForFocus;
     private boolean focusHeld;
@@ -74,6 +76,9 @@ public class PlaybackService extends Service {
     private Bitmap cover;
     private String coverLoading = "";
     private int emptyPolls;
+    /** The percent the widgets' progress bar shows, and when it was last moved. */
+    private int widgetPercent;
+    private long widgetProgressAt;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -99,7 +104,7 @@ public class PlaybackService extends Service {
         if (Build.VERSION.SDK_INT >= 26) {
             notifications.createNotificationChannel(new NotificationChannel(CHANNEL, "Playback", NotificationManager.IMPORTANCE_LOW));
         }
-        PowerManager power = getSystemService(PowerManager.class);
+        power = getSystemService(PowerManager.class);
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BitChord:playback");
         wakeLock.setReferenceCounted(false);
 
@@ -130,16 +135,24 @@ public class PlaybackService extends Service {
                 nativeMediaCommand(SEEK, pos);
             }
         });
-        session.setActive(true);
+        // Without the app (see onStartCommand) there is nothing to ask and nothing to tell.
+        boolean app = MainActivity.appRunning();
+        session.setActive(app);
 
         // A service started for the foreground must show its notification at once.
         startAsForeground(buildNotification());
-        handler.post(poll);
+        if (app) {
+            handler.post(poll);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? null : intent.getAction();
+        if (!MainActivity.appRunning()) {
+            leftBehind(action);
+            return START_NOT_STICKY;
+        }
         if (ACTION_PREVIOUS.equals(action)) {
             nativeMediaCommand(PREVIOUS, 0);
         } else if (ACTION_TOGGLE.equals(action)) {
@@ -148,6 +161,42 @@ public class PlaybackService extends Service {
             nativeMediaCommand(NEXT, 0);
         }
         return START_NOT_STICKY;
+    }
+
+    /** What a widget's button sends here: the same as the notification's. */
+    static Intent widgetButton(Context context, int control) {
+        String action = control == WidgetLogic.PREVIOUS ? ACTION_PREVIOUS : control == WidgetLogic.NEXT ? ACTION_NEXT : ACTION_TOGGLE;
+        return new Intent(context, PlaybackService.class).setAction(action);
+    }
+
+    /** Play, as the app's own button: what MainActivity does when a widget opened it to play. */
+    static void play() {
+        nativeMediaCommand(PLAY, 0);
+    }
+
+    /**
+     * Started in a process without the app: by a button of a widget that still showed a
+     * song from a run that was killed with no chance to say so. Music is played by the
+     * app, which only runs in its activity, so there is no player to tell: the app is
+     * opened (to play, if the button was Play) and the service goes again, which sets the
+     * widgets right (onDestroy). Should Android not let the app open from here, they now
+     * say "Play something", and that opens it.
+     */
+    private void leftBehind(String action) {
+        int control = ACTION_TOGGLE.equals(action) ? WidgetLogic.TOGGLE
+                : ACTION_PREVIOUS.equals(action) ? WidgetLogic.PREVIOUS
+                : ACTION_NEXT.equals(action) ? WidgetLogic.NEXT : WidgetLogic.BODY;
+        Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (WidgetLogic.coldTap(control) == WidgetLogic.OPEN_AND_PLAY) {
+            open.setAction(NowPlayingWidget.ACTION_PLAY);
+        }
+        try {
+            startActivity(open);
+        } catch (RuntimeException e) {
+            // Not from here, then.
+        }
+        stopForeground(STOP_FOREGROUND_REMOVE);
+        stopSelf();
     }
 
     private void startAsForeground(Notification n) {
@@ -190,6 +239,9 @@ public class PlaybackService extends Service {
                 && "1".equals(f[3]) == playing && parse(f[4]) == duration && newSpeed == speed
                 && Math.abs(parse(f[5]) - expected) < SEEK_SLACK_MS;
         if (same && published) {
+            if (playing) {
+                moveWidgetProgress(parse(f[5]));
+            }
             return;
         }
         title = f[0];
@@ -242,6 +294,24 @@ public class PlaybackService extends Service {
                 .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing ? speed : 0f)
                 .build());
         notifications.notify(NOTIFICATION_ID, buildNotification());
+        widgetPercent = WidgetLogic.percent(position, duration);
+        widgetProgressAt = publishedAt;
+        NowPlayingWidget.show(this, title, artist, playing, widgetPercent, cover);
+    }
+
+    /**
+     * A widget's progress bar can't count by itself as the notification's does: while a
+     * song plays it is told a percent at a time (WidgetLogic.progressDue), from the poll
+     * that runs anyway, and not at all with the screen off.
+     */
+    private void moveWidgetProgress(long positionNow) {
+        int percent = WidgetLogic.percent(positionNow, duration);
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (WidgetLogic.progressDue(widgetPercent, percent, now - widgetProgressAt) && power.isInteractive()) {
+            widgetPercent = percent;
+            widgetProgressAt = now;
+            NowPlayingWidget.progress(this, percent);
+        }
     }
 
     private Notification buildNotification() {
@@ -337,6 +407,8 @@ public class PlaybackService extends Service {
         }
         session.setActive(false);
         session.release();
+        // No player any more: the widgets' buttons would have no one to tell.
+        NowPlayingWidget.clear(this);
         super.onDestroy();
     }
 

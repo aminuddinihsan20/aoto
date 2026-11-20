@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Where a cover goes when there is none: with no song, or until the song's has loaded. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="@color/widget_primary_container"
+        android:pathData="M13,0h70a13,13 0 0 1 13,13v70a13,13 0 0 1 -13,13h-70a13,13 0 0 1 -13,-13v-70a13,13 0 0 1 13,-13z" />
+    <group
+        android:scaleX="1.5"
+        android:scaleY="1.5"
+        android:translateX="30"
+        android:translateY="30">
+        <path
+            android:fillColor="@color/widget_primary"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+</vector>
