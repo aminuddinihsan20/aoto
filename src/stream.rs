@@ -801,4 +801,73 @@ mod tests {
         let second = out.iter().skip(48_000 * 2).filter(|&&x| (x - 1.0).abs() < 1e-3).count() / 2;
         assert!((second as i64 - 48_000).abs() < 200, "the 44.1 kHz song came out as {second} frames, not 48000");
     }
+
+    /// The edit list of an MP4's audio track, when it has one: how many of the track's
+    /// first samples are the encoder's priming (`media_time`), and how long the track
+    /// is to play, with the two time scales those are counted in.
+    fn edit_list(data: &[u8]) -> Option<String> {
+        fn boxes(data: &[u8]) -> Vec<(&[u8], &[u8])> {
+            let mut out = Vec::new();
+            let mut at = 0;
+            while at + 8 <= data.len() {
+                let size = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
+                if size < 8 || at + size > data.len() {
+                    break;
+                }
+                out.push((&data[at + 4..at + 8], &data[at + 8..at + size]));
+                at += size;
+            }
+            out
+        }
+        let find = |data: &'_ [u8], kind: &[u8]| -> Option<Vec<u8>> { boxes(data).into_iter().find(|(k, _)| *k == kind).map(|(_, body)| body.to_vec()) };
+        let moov = find(data, b"moov")?;
+        let trak = find(&moov, b"trak")?;
+        let elst = find(&find(&trak, b"edts")?, b"elst")?;
+        let u32_at = |b: &[u8], at: usize| u32::from_be_bytes(b[at..at + 4].try_into().unwrap());
+        // Version 0: count, then (segment_duration, media_time, rate) of 4 bytes each.
+        Some(format!("elst v{} entries {}: segment_duration {} media_time {}", elst[0], u32_at(&elst, 4), u32_at(&elst, 8), u32_at(&elst, 12) as i32))
+    }
+
+    /// What a YouTube stream's decoder hands out around the song itself: the encoder's
+    /// priming before it and its padding after, which stand between two songs played
+    /// back to back however closely the player joins them.
+    /// `cargo test --release -- --ignored encoder_padding_live --nocapture`
+    #[tokio::test]
+    #[ignore]
+    async fn encoder_padding_live() {
+        let api = crate::ytmapi::Api::new(&std::env::temp_dir().join("ytm-rs-opus-test"));
+        let vd = api.visitor_data(false).await.unwrap();
+        let http = reqwest::Client::new();
+        for id in ["zuO2fClon98", "N48TFWsBA-k"] {
+            for opus in [true, false] {
+                let s = crate::innertube::audio_stream(&http, id, &vd, opus).await.unwrap();
+                let shared = super::Shared::new(s.size, s.duration_ms, s.loudness_db, super::Format::from_opus(s.opus), None, false);
+                super::download(http.clone(), s.url, crate::innertube::UA.to_owned(), shared.clone(), None, super::Ranging::Query).await;
+                let d = super::decoder(shared.clone(), false).unwrap();
+                let (ch, rate) = (rodio::Source::channels(&d).get() as usize, rodio::Source::sample_rate(&d).get() as f64);
+                let all: Vec<f32> = d.collect();
+                let frames = all.len() / ch;
+                // Digital silence, and anything under -80 dB, at each end.
+                let quiet = |limit: f32, it: &mut dyn Iterator<Item = &[f32]>| it.take_while(|f| f.iter().all(|x| x.abs() <= limit)).count();
+                let lead0 = quiet(0.0, &mut all.chunks(ch));
+                let lead80 = quiet(1e-4, &mut all.chunks(ch));
+                let tail0 = quiet(0.0, &mut all.chunks(ch).rev());
+                let tail80 = quiet(1e-4, &mut all.chunks(ch).rev());
+                println!(
+                    "{id} {}: {frames} frames at {rate} Hz = {:.4} s decoded, {:.4} s stated ({:+.1} ms); leading zeros {lead0} frames ({:.1} ms), under -80 dB {lead80} ({:.1} ms); trailing zeros {tail0} ({:.1} ms), under -80 dB {tail80} ({:.1} ms)",
+                    if opus { "opus" } else { "aac " },
+                    frames as f64 / rate,
+                    s.duration_ms as f64 / 1000.0,
+                    frames as f64 / rate * 1000.0 - s.duration_ms as f64,
+                    lead0 as f64 / rate * 1000.0,
+                    lead80 as f64 / rate * 1000.0,
+                    tail0 as f64 / rate * 1000.0,
+                    tail80 as f64 / rate * 1000.0,
+                );
+                if !opus {
+                    println!("    {}", edit_list(&shared.bytes().unwrap()).unwrap_or_else(|| "no edit list".to_owned()));
+                }
+            }
+        }
+    }
 }

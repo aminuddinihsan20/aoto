@@ -4,8 +4,8 @@
 //! `Stretch` wraps a song's decoder. At 1× it hands the decoder's samples through
 //! untouched. Keeping the pitch, it plays the song in short stretches taken from where
 //! the song has got to at that speed, each one laid over the end of the one before at
-//! the spot where the two sound most alike (WSOLA, with the stretch lengths SoundTouch
-//! settled on). Otherwise it reads the song through a low-pass interpolator, faster or
+//! the spot where the two sound most alike (WSOLA), and placed so that no drum hit or
+//! consonant falls where the song is cut or repeated: those are heard once. Otherwise it reads the song through a low-pass interpolator, faster or
 //! slower than it plays it. Every change of speed or of mode goes on from the input
 //! sample after the last one heard, so nothing clicks and the song keeps its place.
 //! Positions are counted in the song's own time.
@@ -79,6 +79,31 @@ enum Mode {
     Resample,
 }
 
+/// Keeping the pitch: how long two stretches overlap, and how far either way from
+/// where the song has got to the next one is looked for (20 ms in all: a whole period
+/// of the lowest bass to line up on).
+const OVERLAP_MS: f32 = 12.0;
+const SEEK_MS: f32 = 10.0;
+
+/// How long each stretch of the song is, keeping the pitch at `speed`. Slowed down, the
+/// end of one stretch is heard again at the start of the next; sped up, the song
+/// between two stretches is left out. Either is `STEP_MS` or so: short enough that what
+/// is repeated or left out is a part of a sound, not a whole one. A stretch is no
+/// shorter than twice the overlap and no longer than 80 ms.
+fn stride_ms(speed: f32) -> f32 {
+    (STEP_MS / (speed - 1.0).abs().max(0.01)).clamp(2.0 * OVERLAP_MS, 80.0)
+}
+const STEP_MS: f32 = 20.0;
+
+/// Onsets (a drum hit, a consonant) are looked for in windows this long: one stands
+/// out when it has this many times the treble of the 40 ms before it. Long enough that
+/// the pulses of a low voice aren't taken for hits.
+const ONSET_MS: f32 = 5.0;
+const ONSET_RISE: f32 = 3.0;
+/// Placing stretches clear of onsets, the song may run this far ahead of or behind
+/// where the speed puts it; past that the next stretch goes where it must.
+const SLACK_MS: f32 = 100.0;
+
 /// Input frames kept behind the sound: what the interpolator reads on its near side.
 const HISTORY: usize = 64;
 /// How many frames go by at 1× between tidying the input kept.
@@ -127,6 +152,9 @@ pub struct Stretch<S> {
     out_step: f64,
     /// The decoder has run out.
     ended: bool,
+    /// How much treble each `ONSET_MS` of `buf` holds, and whether an onset is in it.
+    flux: Vec<f32>,
+    onset: Vec<bool>,
     template: Vec<f32>,
     region: Vec<f32>,
     acc: Vec<f32>,
@@ -151,6 +179,8 @@ impl<S: rodio::Source> Stretch<S> {
             out_from: 0.0,
             out_step: 1.0,
             ended: false,
+            flux: Vec::new(),
+            onset: Vec::new(),
             template: Vec::new(),
             region: Vec::new(),
             acc: Vec::new(),
@@ -172,10 +202,25 @@ impl<S: rodio::Source> Stretch<S> {
         self.clock.0.store((secs * 1e6) as u64, Ordering::Relaxed);
     }
 
-    /// Forget the input before frame `keep`.
+    /// How many frames an onset is looked for in at a time.
+    fn hop(&self) -> usize {
+        ((ONSET_MS * self.rate as f32 / 1000.0) as usize).max(1)
+    }
+
+    /// Forget the input before frame `keep` (or a little before it: whole onset windows).
     fn trim_to(&mut self, keep: usize) {
         if keep < 2048 {
             return;
+        }
+        let hop = self.hop();
+        let keep = keep - keep % hop;
+        let windows = (keep / hop).min(self.flux.len());
+        self.flux.drain(..windows);
+        self.onset.drain(..windows);
+        if windows < keep / hop {
+            // Onsets weren't being listened for (at 1×): start over from here.
+            self.flux.clear();
+            self.onset.clear();
         }
         self.buf.drain(..keep * self.channels);
         self.read -= keep;
@@ -191,11 +236,51 @@ impl<S: rodio::Source> Stretch<S> {
         if channels != self.channels || rate != self.rate {
             self.origin += self.read as f64 / self.rate as f64;
             self.buf.clear();
+            self.flux.clear();
+            self.onset.clear();
             self.read = 0;
             self.at = 0.0;
             self.channels = channels;
             self.rate = rate;
         }
+    }
+
+    /// Listen for onsets in what `buf` has gained: a window with much more treble in it
+    /// (the change from one sample to the next) than the windows before.
+    fn hear_onsets(&mut self) {
+        let (ch, hop) = (self.channels, self.hop());
+        while (self.flux.len() + 1) * hop <= self.frames() {
+            let k = self.flux.len();
+            let from = (k * hop).max(1);
+            let mut last: f32 = self.buf[(from - 1) * ch..from * ch].iter().sum();
+            let mut treble = 0.0;
+            for frame in self.buf[from * ch..(k + 1) * hop * ch].chunks_exact(ch) {
+                let now: f32 = frame.iter().sum();
+                treble += (now - last) * (now - last);
+                last = now;
+            }
+            treble /= hop as f32;
+            let before = &self.flux[k.saturating_sub(8)..k];
+            let usual = before.iter().sum::<f32>() / before.len().max(1) as f32;
+            self.onset.push(before.len() == 8 && treble > 1e-7 && treble > usual * ONSET_RISE);
+            self.flux.push(treble);
+        }
+    }
+
+    /// The frames around onset window `k` that must be heard whole: half a window either
+    /// side of it.
+    fn guarded(&self, k: usize) -> (usize, usize) {
+        let hop = self.hop();
+        ((k * hop).saturating_sub(hop / 2), (k + 1) * hop + hop / 2)
+    }
+
+    /// The first onset whose guarded frames reach into `from..to`, and the last.
+    fn onsets_in(&self, from: usize, to: usize) -> (Option<(usize, usize)>, Option<(usize, usize)>) {
+        let hop = self.hop();
+        let windows = (from / hop).saturating_sub(1)..(to / hop + 2).min(self.onset.len());
+        let mut hits = windows.filter(|k| self.onset[*k]).map(|k| self.guarded(k)).filter(|(start, end)| *start < to && *end > from);
+        let first = hits.next();
+        (first, hits.last().or(first))
     }
 
     /// Read on until `buf` holds `need` frames, or the song ends.
@@ -254,13 +339,15 @@ impl<S: rodio::Source> Stretch<S> {
     /// and faded in over that.
     fn stretch(&mut self, speed: f32) -> bool {
         let ch = self.channels;
-        let ms = |m: f32| ((m * self.rate as f32 / 1000.0) as usize).max(2);
-        // Long stretches when slowing down, short ones when speeding up (SoundTouch's
-        // 90 to 40 ms), 12 ms of overlap, and 10 ms either way to look for the place.
-        let t = ((speed - 0.5) / 1.5).clamp(0.0, 1.0);
-        let (stride, overlap, seek) = (ms(82.0 - 50.0 * t), ms(12.0), ms(10.0));
+        let rate = self.rate as f32;
+        let ms = move |m: f32| ((m * rate / 1000.0) as usize).max(2);
+        let (stride, overlap, seek) = (ms(stride_ms(speed)), ms(OVERLAP_MS), ms(SEEK_MS));
         let target = self.at.round().max(0.0) as usize;
-        let need = (self.read + overlap).max(target + seek + stride);
+        // Where the speed puts the song may be well ahead of or behind the sound (a
+        // stretch kept clear of an onset): it is caught up with two steps at a time.
+        let reach = 2 * ms(STEP_MS);
+        let centre = target.clamp(self.read.saturating_sub(reach), self.read + reach);
+        let need = self.read.max(centre + seek) + stride;
         self.fill(need);
         let frames = self.frames();
         if frames < need {
@@ -273,8 +360,16 @@ impl<S: rodio::Source> Stretch<S> {
             self.at = frames as f64;
             return !self.out.is_empty();
         }
-        // Right where the sound is: that carries on as recorded, nothing to look for.
-        let s = if target == self.read { target } else { self.best(target.saturating_sub(seek), target + seek, overlap) };
+        self.hear_onsets();
+        let s = if target == self.read {
+            // Right where the sound is: that carries on as recorded, nothing to look for.
+            target
+        } else if target.abs_diff(self.read) > ms(SLACK_MS) {
+            self.best(centre.saturating_sub(seek), centre + seek, overlap)
+        } else {
+            let (lo, hi) = self.clear_of_onsets(centre.saturating_sub(seek), centre + seek, overlap, seek);
+            if lo == hi { lo } else { self.best(lo, hi, overlap) }
+        };
         for i in 0..overlap {
             let w = 0.5 - 0.5 * (PI * (i as f32 + 0.5) / overlap as f32).cos();
             for c in 0..ch {
@@ -284,12 +379,38 @@ impl<S: rodio::Source> Stretch<S> {
             }
         }
         self.out.extend_from_slice(&self.buf[(s + overlap) * ch..(s + stride) * ch]);
-        self.out_from = self.at;
-        self.out_step = speed as f64;
+        // The position is where the sound was taken from, not where the speed aims.
+        self.out_from = s as f64;
+        self.out_step = 1.0;
         self.at += speed as f64 * stride as f64;
         self.read = s + stride;
-        self.trim_to(self.read.min(self.at as usize).saturating_sub(seek + HISTORY));
+        self.trim_to(self.read.min(self.at.max(0.0) as usize).saturating_sub(seek + reach + HISTORY));
         true
+    }
+
+    /// Where between `lo` and `hi` the next stretch may start so that every onset is
+    /// heard once and whole: none in the song it leaves out (starting ahead of the
+    /// sound), none in what it plays again (starting behind it), and none under the
+    /// fade from the one to the other. With an onset just ahead, the sound carries on
+    /// as recorded; with one in the way, the stretch starts as near as the onset allows.
+    fn clear_of_onsets(&self, lo: usize, hi: usize, overlap: usize, seek: usize) -> (usize, usize) {
+        let read = self.read;
+        // An onset in what is about to fade out would be lost with it.
+        if self.onsets_in(read, read + overlap).0.is_some() {
+            return (read, read);
+        }
+        // Ahead: up to where the next onset still comes after the fade in.
+        let ahead = self.onsets_in(read + overlap, hi.max(read) + overlap).0.map_or(usize::MAX, |(start, _)| start.saturating_sub(overlap).max(read));
+        // Behind: from after the last onset heard, so only its ring plays again.
+        let behind = self.onsets_in(lo.min(read), read).1.map_or(0, |(_, end)| end.min(read));
+        let (from, to) = (lo.max(behind), hi.min(ahead));
+        if from <= to {
+            (from, to)
+        } else if lo > ahead {
+            (ahead.saturating_sub(2 * seek).max(read), ahead)
+        } else {
+            (behind, (behind + 2 * seek).min(read))
+        }
     }
 
     /// Where between input frames `lo` and `hi` a stretch sounds most like the `overlap`
@@ -465,6 +586,8 @@ impl<S: rodio::Source> rodio::Source for Stretch<S> {
     fn try_seek(&mut self, pos: Duration) -> Result<(), SeekError> {
         self.inner.try_seek(pos)?;
         self.buf.clear();
+        self.flux.clear();
+        self.onset.clear();
         self.out.clear();
         self.out_pos = 0;
         self.read = 0;
@@ -605,7 +728,8 @@ mod tests {
                 // One second of sound is `speed` seconds of the song.
                 assert_eq!(s.by_ref().take(RATE as usize * 2).count(), RATE as usize * 2);
                 let at = clock.get().as_secs_f32();
-                assert!((at - speed).abs() < 0.015, "a second in at {speed}× (pitch kept: {keep}) the song is at {at} s");
+                // (Keeping the pitch, to within the step one stretch takes.)
+                assert!((at - speed).abs() < 0.04, "a second in at {speed}× (pitch kept: {keep}) the song is at {at} s");
                 s.by_ref().count();
                 let end = clock.get().as_secs_f32();
                 assert!((end - 4.0).abs() < 0.001, "at {speed}× the song ends at {end} s");
@@ -625,8 +749,9 @@ mod tests {
             let before = clock.get().as_secs_f32();
             c.set(speed, keep);
             out.extend(s.by_ref().take(1));
+            // No further than the step every stretch takes.
             let moved = clock.get().as_secs_f32() - before;
-            assert!(moved.abs() < 0.012, "changing to {speed}× moved the song by {moved} s");
+            assert!(moved.abs() < 0.06, "changing to {speed}× moved the song by {moved} s");
             out.extend(s.by_ref().take(RATE as usize / 3));
         }
         assert!(steepest(&out) <= steepest(&input) * 1.02, "a sample jumps: {} against {}", steepest(&out), steepest(&input));
@@ -649,7 +774,7 @@ mod tests {
             c.set(speed, keep);
             out.extend(s.by_ref().take(1));
             let moved = clock.get().as_secs_f32() - before;
-            assert!(moved.abs() < 0.012, "changing to {speed}× (pitch kept: {keep}) moved the song by {moved} s");
+            assert!(moved.abs() < 0.06, "changing to {speed}× (pitch kept: {keep}) moved the song by {moved} s");
             out.extend(s.by_ref().take(RATE as usize / 4));
         }
         // The fastest it gets is the tone an octave up, at 2× without its pitch kept.
@@ -683,7 +808,7 @@ mod tests {
             assert!((heard - 3.0).abs() < 0.001, "at {speed}× a seek to 3 s landed at {heard} s");
             s.by_ref().take(RATE as usize / 4).count();
             let at = clock.get().as_secs_f32();
-            assert!((at - (3.0 + 0.25 * speed)).abs() < 0.015, "a quarter second later at {speed}× it is at {at} s");
+            assert!((at - (3.0 + 0.25 * speed)).abs() < 0.04, "a quarter second later at {speed}× it is at {at} s");
         }
     }
 
@@ -716,6 +841,74 @@ mod tests {
                 assert!(s.current_span_len().is_some());
             }
             assert_eq!(s.current_span_len(), Some(0), "at {speed}×");
+        }
+    }
+
+    #[test]
+    fn a_stretch_repeats_or_leaves_out_about_a_fiftieth_of_a_second() {
+        for speed in SPEEDS.into_iter().filter(|s| *s != 1.0) {
+            let stride = stride_ms(speed);
+            assert!((24.0..=80.0).contains(&stride), "{stride} ms at {speed}×");
+            assert!(stride * (speed - 1.0).abs() <= 24.0, "{} ms at {speed}×", stride * (speed - 1.0).abs());
+        }
+        assert_eq!(stride_ms(1.0), 80.0);
+    }
+
+    /// Drums over a held chord: a hit of noise every `beat` seconds, the first half a
+    /// beat in.
+    fn beats(secs: f32, beat: f32) -> Vec<f32> {
+        let mut seed = 12345u32;
+        (0..(RATE as f32 * secs) as usize)
+            .map(|i| {
+                let t = i as f32 / RATE as f32;
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let noise = (seed >> 8) as f32 / (1u32 << 23) as f32 - 1.0;
+                let since = (t + beat / 2.0) % beat;
+                let hit = if since < 0.03 { noise * (-since / 0.006).exp() * 0.6 } else { 0.0 };
+                hit + 0.08 * ((t * 196.0 * std::f32::consts::TAU).sin() + (t * 246.9 * std::f32::consts::TAU).sin())
+            })
+            .collect()
+    }
+
+    /// When the hits in `x` start, in seconds: where 10 ms are suddenly much louder than
+    /// the 30 ms before them.
+    fn onsets(x: &[f32]) -> Vec<f32> {
+        let hop = RATE as usize / 200;
+        let energy: Vec<f32> = x.chunks(hop).map(|c| c.iter().map(|v| v * v).sum::<f32>() / c.len() as f32).collect();
+        let mut found: Vec<f32> = Vec::new();
+        for i in 6..energy.len() - 1 {
+            let before = energy[i - 6..i].iter().sum::<f32>() / 6.0;
+            let now = (energy[i] + energy[i + 1]) / 2.0;
+            let t = i as f32 * hop as f32 / RATE as f32;
+            if now > 0.01 && now > before * 3.0 && found.last().is_none_or(|last| t - last > 0.045) {
+                found.push(t);
+            }
+        }
+        found
+    }
+
+    #[test]
+    fn every_drum_hit_is_heard_once_and_on_the_beat_at_any_speed() {
+        let (beat, secs) = (0.25, 8.0);
+        let input = beats(secs, beat);
+        assert_eq!(onsets(&input).len(), 32, "the detector hears the 32 hits as recorded");
+        for speed in SPEEDS {
+            let out: Vec<f32> = stretched(input.clone(), 1, &control(speed, true)).collect();
+            let hits = onsets(&out);
+            // None doubled into a flam, none left out.
+            // None doubled into a flam, none left out.
+            assert_eq!(hits.len(), 32, "{} hits at {speed}×: {hits:?}", hits.len());
+            // Each close to where the beat puts it, and the beat itself steady: slowed
+            // down, a hit is heard the first of the two times its place in the song is
+            // played, so all of them come a little early, by much the same.
+            for (n, at) in hits.iter().enumerate() {
+                let want = (n as f32 + 0.5) * beat / speed;
+                assert!((at - want).abs() < 0.08, "hit {n} at {speed}× came at {at} s, not {want} s");
+            }
+            for pair in hits.windows(2) {
+                let gap = pair[1] - pair[0];
+                assert!((gap - beat / speed).abs() < 0.045, "at {speed}× two hits came {gap} s apart, not {} s", beat / speed);
+            }
         }
     }
 

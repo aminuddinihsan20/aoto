@@ -1261,7 +1261,12 @@ fn play(rx: Receiver<AudioCmd>, tx: Sender<AudioCmd>, status: Arc<AudioStatus>, 
                 seekable = s;
                 let paused = player.is_paused();
                 player.clear();
-                // (The song standing by stays: this is the same song, somewhere else in it.)
+                // The song standing by stays: this is the same song, somewhere else in it.
+                // (One that started at this very moment went with the old decoder.)
+                if slot.take_joined() {
+                    standby = None;
+                    status.standby_for.store(0, Ordering::Relaxed);
+                }
                 let (source, new) = song(decoder, &status, 0, false, shared.as_ref().expect("a current generation has a stream"));
                 deck = new;
                 player.append(Joined::new(source, slot.clone()));
@@ -1359,8 +1364,13 @@ fn play(rx: Receiver<AudioCmd>, tx: Sender<AudioCmd>, status: Arc<AudioStatus>, 
                 status.playing.store(false, Ordering::Relaxed);
                 status.set_position(0);
             }
-            // The song that stood by is playing already, and its `Start` is on its way.
-            Ok(AudioCmd::Carry) if carried.is_some() => {}
+            // The song that stood by is playing already, and its `Start` is on its way:
+            // from here the position shown is that song's.
+            Ok(AudioCmd::Carry) if carried.is_some() => {
+                if let Some((next, _)) = &carried {
+                    status.set_position(next.deck.clock.get().as_millis() as u64);
+                }
+            }
             Ok(cmd @ (AudioCmd::Stop | AudioCmd::Handoff | AudioCmd::Carry)) => {
                 slot.clear();
                 if matches!(cmd, AudioCmd::Handoff) {
