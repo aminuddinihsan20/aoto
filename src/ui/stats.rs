@@ -332,7 +332,9 @@ fn top_songs(ui: &mut Ui, songs: &[TopSong], accent: Color32) {
         let plays_w = ui.painter().text(pos2(row.right() - 2.0, row.center().y), Align2::RIGHT_CENTER, plays, theme::regular(13.5), theme::text_dim()).width();
         let left = cover.right() + 14.0;
         let text_w = (row.right() - plays_w - 14.0 - left).max(20.0);
-        widgets::text_at(ui, pos2(left, row.center().y - 20.0), &top.song.title, theme::regular(16.0), theme::text(), text_w);
+        // A song that names nobody has its title to itself, in the middle.
+        let title_y = if artists.is_empty() { row.center().y - 10.0 } else { row.center().y - 20.0 };
+        widgets::text_at(ui, pos2(left, title_y), &top.song.title, theme::regular(16.0), theme::text(), text_w);
         widgets::text_at(ui, pos2(left, row.center().y + 2.0), &artists, theme::regular(13.5), theme::text_dim(), text_w);
     }
 }
