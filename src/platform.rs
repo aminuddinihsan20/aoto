@@ -281,6 +281,8 @@ pub struct NowPlaying {
     pub playing: bool,
     pub duration_ms: i64,
     pub position_ms: i64,
+    /// How fast the position moves while playing, in hundredths: 100 as recorded.
+    pub speed_pct: i64,
 }
 
 const FIELD: char = '\u{1f}';
@@ -293,13 +295,13 @@ impl NowPlaying {
             return String::new();
         }
         let clean = |t: &str| t.replace([FIELD, '\n', '\r'], " ");
-        [clean(&self.title), clean(&self.artist), clean(&self.cover), u8::from(self.playing).to_string(), self.duration_ms.to_string(), self.position_ms.to_string()].join(&FIELD.to_string())
+        [clean(&self.title), clean(&self.artist), clean(&self.cover), u8::from(self.playing).to_string(), self.duration_ms.to_string(), self.position_ms.to_string(), self.speed_pct.to_string()].join(&FIELD.to_string())
     }
 
     pub fn from_line(line: &str) -> Option<NowPlaying> {
         let mut f = line.split(FIELD);
-        let (title, artist, cover, playing, duration, position) = (f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?);
-        Some(NowPlaying { title: title.to_owned(), artist: artist.to_owned(), cover: cover.to_owned(), playing: playing == "1", duration_ms: duration.parse().ok()?, position_ms: position.parse().ok()? })
+        let (title, artist, cover, playing, duration, position, speed) = (f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?);
+        Some(NowPlaying { title: title.to_owned(), artist: artist.to_owned(), cover: cover.to_owned(), playing: playing == "1", duration_ms: duration.parse().ok()?, position_ms: position.parse().ok()?, speed_pct: speed.parse().ok()? })
     }
 }
 
@@ -655,8 +657,9 @@ mod tests {
 
     #[test]
     fn what_is_playing_is_told_to_the_notification_as_one_line() {
-        let now = NowPlaying { title: "Tabun".into(), artist: "YOASOBI".into(), cover: "https://x/y.jpg".into(), playing: true, duration_ms: 261_000, position_ms: 15_500 };
+        let now = NowPlaying { title: "Tabun".into(), artist: "YOASOBI".into(), cover: "https://x/y.jpg".into(), playing: true, duration_ms: 261_000, position_ms: 15_500, speed_pct: 125 };
         let line = now.to_line();
+        assert!(line.ends_with("\u{1f}15500\u{1f}125"), "the speed is its seventh field, after the position");
         assert_eq!(NowPlaying::from_line(&line), Some(now));
     }
 

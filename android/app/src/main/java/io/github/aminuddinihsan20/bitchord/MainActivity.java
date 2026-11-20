@@ -44,6 +44,17 @@ public class MainActivity extends GameActivity {
 
     private boolean hadMedia;
 
+    private static volatile boolean appRunning;
+
+    /**
+     * Whether the Rust app runs in this process. It starts with this activity and the
+     * process ends with it, so a process without it (started for a widget alone) has no
+     * player, and not even the native library loaded.
+     */
+    static boolean appRunning() {
+        return appRunning;
+    }
+
     /** The next job the app asks of Java ("id kind arg" joined by U+001F), or empty. */
     private static native String nativeTakeCall();
 
@@ -53,9 +64,21 @@ public class MainActivity extends GameActivity {
     private static final int REQUEST_FOLDER = 7;
     private long folderCall;
 
+    /** Asking for the storage permission, which saving a picture needs before Android 10. */
+    private static final int REQUEST_STORAGE = 8;
+    /** The save waiting for that answer: its call, the picture's file and its name. */
+    private long saveCall;
+    private String[] saveArgs;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        appRunning = true;
+        // Whatever an earlier run left on the home screen: nothing plays yet.
+        NowPlayingWidget.refresh(this);
+        if (savedInstanceState == null) {
+            playIfAsked(getIntent());
+        }
 
         // Edge to edge: the app draws under the status and gesture bars and keeps its
         // content clear of them (and above the keyboard) by these insets.
@@ -110,6 +133,24 @@ public class MainActivity extends GameActivity {
         });
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        playIfAsked(intent);
+    }
+
+    /**
+     * A widget's Play with no player to tell opens the app to play: as Play in the app,
+     * which starts last time's song. (Not when Android reopens the app from the recent
+     * apps with the intent it was first started with.)
+     */
+    private static void playIfAsked(Intent intent) {
+        if (intent != null && NowPlayingWidget.ACTION_PLAY.equals(intent.getAction())
+                && (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+            PlaybackService.play();
+        }
+    }
+
     /** A job the app asked for: choosing a folder, listing music, copying files. */
     private void handleCall(String line) {
         String[] f = line.split("\u001f", 3);
@@ -159,8 +200,45 @@ public class MainActivity extends GameActivity {
                 }
                 break;
             }
+            case "lyric-card":
+                LyricCard.render(this, arg, done);
+                break;
+            case "save-image": {
+                String[] s = arg.split("\u001e", 2);
+                if (s.length < 2) {
+                    done.finish(false, "bad save request");
+                } else if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                    // Before Android 10 the Pictures folder is written to directly: ask first.
+                    saveCall = id;
+                    saveArgs = s;
+                    requestPermissions(new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE);
+                } else {
+                    LyricCard.save(this, s[0], s[1], done);
+                }
+                break;
+            }
+            case "share-image":
+                LyricCard.share(this, arg, done);
+                break;
             default:
                 done.finish(false, "unknown request " + kind);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQUEST_STORAGE || saveCall == 0) {
+            return;
+        }
+        final long id = saveCall;
+        String[] s = saveArgs;
+        saveCall = 0;
+        saveArgs = null;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            LyricCard.save(this, s[0], s[1], (ok, text) -> nativeAnswer(id, ok, text));
+        } else {
+            nativeAnswer(id, false, "the storage permission was not given");
         }
     }
 
@@ -217,6 +295,9 @@ public class MainActivity extends GameActivity {
 
     /** Stop the music service and end the process. Never returns. */
     static void endProcess(android.content.Context context) {
+        // The widgets outlive the process: they must not be left showing a song and
+        // buttons for a player that is gone.
+        NowPlayingWidget.clearNow(context);
         try {
             context.stopService(new Intent(context, PlaybackService.class));
         } catch (RuntimeException ignored) {

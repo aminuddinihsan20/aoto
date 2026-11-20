@@ -2719,6 +2719,23 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
         }
         Row::ListeningStats => super::stats::stats_row(app, ui),
         Row::ClearHistory => super::stats::clear_row(app, ui),
+        Row::PlaybackSpeed => {
+            setting_row(ui, "Playback speed", Some(super::speed::settings_note(app)), |ui| super::speed::settings_pills(app, ui));
+        }
+        Row::KeepPitch => {
+            setting_row(ui, "Keep the pitch", Some("Voices and instruments stay in tune at any speed. Off, the pitch rises and falls with the speed."), |ui| {
+                if toggle(ui, &mut app.keep_pitch, "Keep the pitch").changed() {
+                    app.set_speed();
+                }
+            });
+        }
+        Row::Gapless => {
+            setting_row(ui, "Gapless playback", Some("No silence between the songs of an album: each starts on the last one's final sample. With Automix or Crossfade on, songs blend that way instead."), |ui| {
+                if toggle(ui, &mut app.gapless, "Gapless playback").changed() {
+                    app.set_gapless();
+                }
+            });
+        }
         Row::Autoplay => {
             setting_row(ui, "Autoplay", Some("Keep playing similar songs when the queue ends."), |ui| {
                 toggle(ui, &mut app.autoplay, "Autoplay");
@@ -3162,6 +3179,10 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
 fn settings_playback(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Playback", None);
     settings_card(ui, |ui| {
+        settings_row(app, ui, Row::PlaybackSpeed);
+        divider(ui);
+        settings_row(app, ui, Row::KeepPitch);
+        divider(ui);
         settings_row(app, ui, Row::Autoplay);
         divider(ui);
         settings_row(app, ui, Row::Normalize);
@@ -3185,6 +3206,8 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         settings_row(app, ui, Row::Equalizer);
         divider(ui);
         settings_row(app, ui, Row::SpatialAudio);
+        divider(ui);
+        settings_row(app, ui, Row::Gapless);
         divider(ui);
         settings_row(app, ui, Row::Automix);
         if !app.automix {

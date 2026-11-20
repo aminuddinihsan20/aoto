@@ -97,7 +97,10 @@ pub enum Row {
     Channel,
     ListenTogether,
     ClearHistory,
+    PlaybackSpeed,
+    KeepPitch,
     Autoplay,
+    Gapless,
     Automix,
     Crossfade,
     CrossfadeLength,
@@ -134,12 +137,15 @@ pub enum Row {
 }
 
 impl Row {
-    pub const ALL: [Row; 38] = [
+    pub const ALL: [Row; 41] = [
         Row::Account,
         Row::Channel,
         Row::ListenTogether,
         Row::ClearHistory,
+        Row::PlaybackSpeed,
+        Row::KeepPitch,
         Row::Autoplay,
+        Row::Gapless,
         Row::Automix,
         Row::Crossfade,
         Row::CrossfadeLength,
@@ -182,7 +188,7 @@ impl Row {
         match self {
             Row::Account | Row::Channel | Row::ListenTogether => (C::Account, "Account"),
             Row::ClearHistory => (C::Account, "Listening history"),
-            Row::Autoplay | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, ""),
+            Row::PlaybackSpeed | Row::KeepPitch | Row::Autoplay | Row::Gapless | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, ""),
             Row::Equalizer | Row::SpatialAudio | Row::Normalize | Row::LogVolume => (C::Sound, "Sound"),
             Row::HiRes | Row::PreferAtmos | Row::DisableDirect | Row::PlaySongs => (C::Sound, "Quality"),
             Row::DownloadFolder => (C::Downloads, ""),
@@ -374,7 +380,7 @@ mod tests {
         use Category as C;
         let rows = |c: Category| c.rows().collect::<Vec<_>>();
         assert_eq!(rows(C::Account), [Row::Account, Row::Channel, Row::ListenTogether, Row::ClearHistory]);
-        assert_eq!(rows(C::Playback), [Row::Autoplay, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic]);
+        assert_eq!(rows(C::Playback), [Row::PlaybackSpeed, Row::KeepPitch, Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic]);
         assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::LogVolume, Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
         assert_eq!(rows(C::Downloads), [Row::DownloadFolder]);
         assert_eq!(rows(C::Lyrics), [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim, Row::LyricsSources]);

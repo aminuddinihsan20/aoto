@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A widget's corners, and those of a cover inside one, below Android 12; from 12 on
+         the system says (values-v31). -->
+    <dimen name="widget_radius">28dp</dimen>
+    <dimen name="widget_inner_radius">20dp</dimen>
+</resources>

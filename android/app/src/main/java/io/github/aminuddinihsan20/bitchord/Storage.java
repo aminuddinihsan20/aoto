@@ -195,7 +195,7 @@ final class Storage {
         }, "storage-export").start();
     }
 
-    private static void copy(InputStream in, OutputStream out) throws java.io.IOException {
+    static void copy(InputStream in, OutputStream out) throws java.io.IOException {
         byte[] buffer = new byte[64 * 1024];
         int n;
         while ((n = in.read(buffer)) > 0) {

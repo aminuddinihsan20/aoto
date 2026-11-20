@@ -711,10 +711,14 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
     let frame = karaoke::Frame { lyrics, key, roman, trans, t, playing, now, rect, style, accent, centered, scale };
     // The view lives in `app`; the frame borrows `app` for decorations, so swap it out.
     let mut view = std::mem::take(&mut app.lyric_view);
-    let out = if karaoke::dev_off("view") { karaoke::Out { seek: None, animating: true, user_scrolling: false } } else { view.show(ui, frame) };
+    let out = if karaoke::dev_off("view") { karaoke::Out { seek: None, animating: true, user_scrolling: false, long_press: None } } else { view.show(ui, frame) };
     app.lyric_view = view;
     if let Some(s) = out.seek {
         app.actions.push(Action::Seek(s as f32));
+    }
+    // A line held on the phone starts sharing the lyrics as a picture, with that line.
+    if let Some(line) = out.long_press.filter(|_| crate::platform::phone()) {
+        super::lyric_share::start_with(app, id, lyrics, line);
     }
     if out.animating {
         ui.ctx().request_repaint();
@@ -822,6 +826,12 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
         if lyrics {
             lyric_options(app, ui);
             menu_divider(ui);
+            if crate::platform::phone() {
+                if widgets::menu_action_drawn(ui, "Share lyrics", |ui, at, color| super::lyric_share::share_mark(ui, at, 16.0, color)) {
+                    super::lyric_share::start(app);
+                }
+                menu_divider(ui);
+            }
         }
         // Spatial audio on or off, right where the music is, and the way to the equalizer.
         let mut spatial = app.spatial;
@@ -832,6 +842,10 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
         }
         if widgets::menu_action_drawn(ui, "Equalizer", |ui, at, color| super::equalizer::sliders(ui, at, 16.0, color)) {
             app.actions.push(Action::Go(Page::Equalizer));
+        }
+        if widgets::menu_action_drawn(ui, &super::speed::menu_label(app), |ui, at, color| super::speed::gauge(ui, at, 16.0, color)) {
+            app.speed_sheet = true;
+            ui.close();
         }
         menu_divider(ui);
         widgets::song_actions(ui, track, liked, None, false, &mut app.actions);

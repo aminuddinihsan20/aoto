@@ -12,6 +12,8 @@ use rodio::cpal::traits::{DeviceTrait, HostTrait};
 use rodio::mixer::{Mixer, MixerSource};
 use rodio::{DeviceSinkBuilder, MixerDeviceSink, Player};
 
+use crate::gapless::{Joined, Link, Slot};
+use crate::speed::{Clock, Stretch};
 use crate::stream::{self, Shared};
 
 pub use crate::stream::TrackDecoder;
@@ -30,6 +32,15 @@ pub enum AudioCmd {
     /// Another song is on its way: with crossfade on, fade this one out instead of
     /// stopping it, and fade the next one in when it starts.
     Handoff,
+    /// The song after generation `after`, decoded ahead: it follows that song's last
+    /// sample without a gap (see `crate::gapless`), unless something else is asked first.
+    Standby { after: u64, decoder: TrackDecoder, shared: Arc<Shared> },
+    /// Nothing follows the playing song on its own after all; a song that already has
+    /// stops.
+    Unstandby,
+    /// The song that ended is followed by the one that stood by, whose `Start` is on
+    /// its way: when it is playing already, it stays. Otherwise a `Stop`.
+    Carry,
     Seek(Duration),
     /// Seek to where `pos` will have moved on to by the time the seek lands (`pos` was
     /// current at `at`): following someone else's playback (listen together).
@@ -91,6 +102,10 @@ pub struct AudioStatus {
     spatial: AtomicBool,
     /// The equalizer's settings (see `crate::eq`), read by every song that plays.
     eq: crate::eq::Shared,
+    /// The playback speed (see `crate::speed`), read by every song that plays.
+    speed: Arc<crate::speed::Control>,
+    /// The generation whose next song stands by to follow it without a gap; 0 when none.
+    standby_for: AtomicU64,
     /// Tempo estimate of the playing song in BPM (f32 bits); 0 until one is heard.
     bpm: AtomicU32,
     mix_generation: AtomicU64,
@@ -113,14 +128,30 @@ impl AudioStatus {
         if !self.playing.load(Ordering::Relaxed) {
             return Duration::from_millis(pos);
         }
-        let age = now_ms().saturating_sub(self.sampled_at.load(Ordering::Relaxed)).min(250);
-        Duration::from_millis(pos + age)
+        Duration::from_millis(pos + self.played_since(self.sampled_at.load(Ordering::Relaxed)))
     }
 
     pub fn outgoing_position(&self) -> Duration {
         let pos = self.outgoing_position_ms.load(Ordering::Relaxed);
-        let age = if self.outgoing_playing() { now_ms().saturating_sub(self.outgoing_sampled_at.load(Ordering::Relaxed)).min(250) } else { 0 };
+        let age = if self.outgoing_playing() { self.played_since(self.outgoing_sampled_at.load(Ordering::Relaxed)) } else { 0 };
         Duration::from_millis(pos + age)
+    }
+
+    /// How many ms of a song play between `sampled` (ms since EPOCH) and now: the time
+    /// gone by, at the speed it plays.
+    fn played_since(&self, sampled: u64) -> u64 {
+        (now_ms().saturating_sub(sampled).min(250) as f32 * self.speed()) as u64
+    }
+
+    /// The speed songs play at: 1 as recorded. Positions and lengths are the song's own
+    /// time; this is how fast the clock on the wall goes through them.
+    pub fn speed(&self) -> f32 {
+        self.speed.speed()
+    }
+
+    /// The generation whose next song stands by to follow it without a gap; 0 when none.
+    pub fn standby_for(&self) -> u64 {
+        self.standby_for.load(Ordering::Relaxed)
     }
 
     pub fn outgoing_playing(&self) -> bool {
@@ -138,26 +169,28 @@ impl AudioStatus {
         (d > 0).then(|| Duration::from_millis(d))
     }
 
-    /// Automix's handoff window for a song of this length, in seconds: how much of the
-    /// end is given to the next song coming in. 0 when Automix is off.
+    /// Automix's handoff window for a song of this length, in seconds of the song: how
+    /// much of the end is given to the next song coming in. 0 when Automix is off.
     pub fn mix_secs(&self, length: Option<Duration>) -> f32 {
         if !self.automix.load(Ordering::Relaxed) {
             return 0.0;
         }
-        mix_ms(self, length) as f32 / 1000.0
+        mix_ms(self, length) as f32 / 1000.0 * self.speed()
     }
 
+    /// How long the mix into `generation` runs, in seconds of the song.
     pub fn mix_duration(&self, generation: u64) -> Option<f32> {
         (self.mix_generation.load(Ordering::Acquire) == generation)
-            .then(|| self.mix_duration_ms.load(Ordering::Relaxed) as f32 / 1000.0)
+            .then(|| self.mix_duration_ms.load(Ordering::Relaxed) as f32 / 1000.0 * self.speed())
     }
 
     pub fn mixing(&self) -> bool {
         self.mix_active.load(Ordering::Relaxed)
     }
 
+    /// How far what is heard runs behind the position, in the song's time.
     pub fn latency(&self) -> Duration {
-        Duration::from_millis(self.latency_ms.load(Ordering::Relaxed) as u64)
+        Duration::from_millis(self.latency_ms.load(Ordering::Relaxed) as u64).mul_f32(self.speed())
     }
 
     pub fn level(&self) -> f32 {
@@ -362,6 +395,11 @@ struct Meter<S> {
     spatial: crate::spatial::Spatial,
     /// The right ear's sample of a pair already worked out, for the next call.
     spatial_right: Option<f32>,
+    /// This song's volume normalization (f32 bits), set by the audio thread: in the
+    /// song rather than on the player, so that a song following another without a gap
+    /// has its own from its first sample.
+    gain: Arc<AtomicU32>,
+    gain_now: f32,
 }
 
 /// How many samples go by between looks at the equalizer's settings.
@@ -464,11 +502,19 @@ impl<S: rodio::Source> Meter<S> {
         }
         let spatial = crate::spatial::Spatial::new(inner.sample_rate().get());
         let eq = crate::eq::Equalizer::new(status.eq.get(), inner.sample_rate().get(), inner.channels().get());
-        let mut m = Self { inner, status, fade_out, seen_out: 0, ramp: None, mix, acc: 0.0, n: 0, smooth: 0.0, tempo, analysis, analysis_acc: 0.0, fx, eq, spatial, spatial_right: None };
+        let gain = Arc::new(AtomicU32::new(1.0f32.to_bits()));
+        let mut m = Self { inner, status, fade_out, seen_out: 0, ramp: None, mix, acc: 0.0, n: 0, smooth: 0.0, tempo, analysis, analysis_acc: 0.0, fx, eq, spatial, spatial_right: None, gain, gain_now: 1.0 };
         if fade_in_ms > 0 {
             m.ramp = Some(if mix { Ramp::MixIn { at: 0, len: m.samples(fade_in_ms) } } else { Ramp::In { at: 0, len: m.samples(fade_in_ms) } });
         }
         m
+    }
+
+    /// Played at `gain` (f32 bits) of its level, wherever that is moved to.
+    fn with_gain(mut self, gain: Arc<AtomicU32>) -> Self {
+        self.gain_now = f32::from_bits(gain.load(Ordering::Relaxed));
+        self.gain = gain;
+        self
     }
 
     fn samples(&self, ms: u32) -> u32 {
@@ -505,6 +551,7 @@ impl<S: rodio::Source> Iterator for Meter<S> {
         // The equalizer hears of a change a few milliseconds later, and glides to it.
         if self.n.is_multiple_of(EQ_POLL) {
             self.eq.set(self.status.eq.get());
+            self.gain_now = f32::from_bits(self.gain.load(Ordering::Relaxed));
         }
         let mut s = match self.spatial_right.take() {
             Some(right) => right,
@@ -570,7 +617,7 @@ impl<S: rodio::Source> Iterator for Meter<S> {
             self.analysis_acc = 0.0;
             self.n = 0;
         }
-        Some(s)
+        Some(s * self.gain_now)
     }
 }
 
@@ -651,6 +698,12 @@ impl AudioHandle {
         self.status.eq.set(settings);
     }
 
+    /// The speed songs play at, and whether they keep their pitch at it: for the songs
+    /// playing, from where they are, and every one after.
+    pub fn set_speed(&self, speed: f32, keep_pitch: bool) {
+        self.status.speed.set(speed, keep_pitch);
+    }
+
     pub fn set_volume(&self, v: f32) {
         self.status.volume.store(v.to_bits(), Ordering::Relaxed);
         self.send(AudioCmd::Volume(v));
@@ -706,12 +759,47 @@ fn build_seek(j: SeekJob, tx: &Sender<AudioCmd>, events: &Sender<AudioEvent>) {
     }
 }
 
+/// A song as a player plays it: at the listener's speed, metered and equalized.
+type Song = Meter<Stretch<TrackDecoder>>;
+
+/// The audio thread's hold on a song it gave a player: its fade-out control (see
+/// `Meter`), where in the song the sound is, and its volume normalization.
+#[derive(Clone)]
+struct Deck {
+    fade_out: Arc<AtomicU32>,
+    clock: Arc<Clock>,
+    gain: Arc<AtomicU32>,
+}
+
+impl Default for Deck {
+    fn default() -> Self {
+        Self { fade_out: Arc::default(), clock: Arc::default(), gain: Arc::new(AtomicU32::new(1.0f32.to_bits())) }
+    }
+}
+
+/// `decoder` as a player plays it, and the audio thread's hold on it. Its running out
+/// is the song's end unless it was told to fade out or its download failed.
+fn song(decoder: TrackDecoder, status: &Arc<AudioStatus>, fade_in_ms: u32, mix: bool, shared: &Arc<Shared>) -> (Link<Song>, Deck) {
+    let stretch = Stretch::new(decoder, status.speed.clone());
+    let deck = Deck { fade_out: Arc::default(), clock: stretch.clock(), gain: Arc::new(AtomicU32::new(norm_gain(status, Some(shared)).to_bits())) };
+    let source = Meter::new(stretch, status.clone(), fade_in_ms, deck.fade_out.clone(), mix, shared.tempo.clone()).with_gain(deck.gain.clone());
+    let (out, stream) = (deck.fade_out.clone(), shared.clone());
+    (Link { source, ended_well: Box::new(move || out.load(Ordering::Relaxed) == 0 && stream.error().is_none()) }, deck)
+}
+
+/// The next song, decoded ahead: standing by to follow the playing one without a gap,
+/// or already following it.
+struct Standby {
+    shared: Arc<Shared>,
+    deck: Deck,
+}
+
 /// A song fading out under the next one, kept until it's silent.
 struct Fading {
     player: Player,
     offset: Duration,
     shared: Option<Arc<Shared>>,
-    out: Arc<AtomicU32>,
+    deck: Deck,
     /// Still at full volume, waiting for the next song to start (as Morphe does): when
     /// that was asked for, and how much of this song was left then.
     waiting: Option<(Instant, Option<Duration>)>,
@@ -725,7 +813,7 @@ impl Fading {
     fn start(&mut self, crossfade: u32, automix: bool) -> u32 {
         let left = self.waiting.take().and_then(|(at, left)| Some(left?.saturating_sub(at.elapsed())));
         let len = crossfade.min(left.map_or(u32::MAX, |l| l.as_millis() as u32)).max(QUICK_FADE_MS);
-        self.out.store(len | if automix { AUTOMIX_FADE } else { 0 }, Ordering::Relaxed);
+        self.deck.fade_out.store(len | if automix { AUTOMIX_FADE } else { 0 }, Ordering::Relaxed);
         len
     }
 }
@@ -746,6 +834,10 @@ const QUICK_FADE_MS: u32 = 40;
 /// fades out anyway.
 const HANDOFF_WAIT: Duration = Duration::from_secs(3);
 
+/// How long a song that followed another without a gap plays on unclaimed: its `Start`
+/// comes within moments, or something went wrong and it stops.
+const CARRY_WAIT: Duration = Duration::from_secs(10);
+
 /// Automix counts its mix in bars of four beats: eight bars normally, sixteen on a song
 /// long enough to hold them, and never more than 32 — nor longer than this, or than a
 /// third of the song.
@@ -755,9 +847,11 @@ const AUTOMIX_MAX_BARS: f32 = 32.0;
 const AUTOMIX_MAX_MS: u32 = 45_000;
 const AUTOMIX_MIN_MS: u32 = 4_000;
 
-/// How long the mix runs, in ms. Automix works it out from the bars and the tempo it
-/// hears in the outgoing song; a plain crossfade uses its setting.
+/// How long the mix runs, in ms as heard. Automix works it out from the bars and the
+/// tempo it hears in the outgoing song; a plain crossfade uses its setting.
 fn mix_ms(status: &AudioStatus, length: Option<Duration>) -> u32 {
+    // How long the song takes to play, at the speed it plays.
+    let length = length.map(|d| d.div_f32(status.speed()));
     let crossfade = status.crossfade_ms.load(Ordering::Relaxed);
     if !status.automix.load(Ordering::Relaxed) {
         return crossfade;
@@ -806,6 +900,9 @@ struct Output {
     /// Set by the device's error callback.
     lost: Arc<AtomicBool>,
     checked: Instant,
+    /// No device is ever opened: a test pulls the mixer's samples itself.
+    #[cfg(test)]
+    headless: bool,
 }
 
 impl Output {
@@ -816,9 +913,26 @@ impl Output {
         let rate = config.as_ref().and_then(|c| std::num::NonZero::new(c.sample_rate())).unwrap_or(std::num::NonZero::new(48_000).unwrap());
         let (mixer, source) = rodio::mixer::mixer(channels, rate);
         let lost = Arc::new(AtomicBool::new(false));
-        let mut out = Self { mixer, slot: Arc::new(std::sync::Mutex::new(Some(source))), sink: None, device: None, preferred, lost, checked: Instant::now() };
+        let mut out = Self {
+            mixer,
+            slot: Arc::new(std::sync::Mutex::new(Some(source))),
+            sink: None,
+            device: None,
+            preferred,
+            lost,
+            checked: Instant::now(),
+            #[cfg(test)]
+            headless: false,
+        };
         out.open(tx, status);
         out
+    }
+
+    /// A 48 kHz stereo mixer no device plays, and its output for the test to pull.
+    #[cfg(test)]
+    fn headless() -> (Self, MixerSource) {
+        let (mixer, source) = rodio::mixer::mixer(std::num::NonZero::new(2).unwrap(), std::num::NonZero::new(48_000).unwrap());
+        (Self { mixer, slot: Arc::default(), sink: None, device: None, preferred: None, lost: Arc::default(), checked: Instant::now(), headless: true }, source)
     }
 
     /// Opens the picked device, or the default one. False if there's none to open.
@@ -827,6 +941,10 @@ impl Output {
         self.sink = None;
         self.device = None;
         self.checked = Instant::now();
+        #[cfg(test)]
+        if self.headless {
+            return false;
+        }
         let Some(device) = target(self.preferred.as_deref()) else {
             return false;
         };
@@ -995,15 +1113,27 @@ fn run(
     events: Sender<AudioEvent>,
     wake: impl Fn(),
 ) {
-    let mut output = Output::new(tx.clone(), &status, device);
+    let output = Output::new(tx.clone(), &status, device);
     if output.sink.is_none() {
         let _ = events.send(AudioEvent::Error("No audio output device".into()));
         wake();
     }
+    play(rx, tx, status, volume, output, events, wake)
+}
+
+/// The audio thread's loop: the commands it is sent, and every 100 ms while a song
+/// plays, where that has got to.
+fn play(rx: Receiver<AudioCmd>, tx: Sender<AudioCmd>, status: Arc<AudioStatus>, volume: f32, mut output: Output, events: Sender<AudioEvent>, wake: impl Fn()) {
     let mut player = Player::connect_new(&output.mixer);
     player.set_volume(slider_gain(&status, volume));
-    // The playing source's fade-out control (see `Meter`).
-    let mut fade_out = Arc::new(AtomicU32::new(0));
+    // The playing song (see `Deck`).
+    let mut deck = Deck::default();
+    // Where the next song stands by to follow the playing one without a gap (see
+    // `crate::gapless`), the audio thread's hold on it, and the one that has followed
+    // and plays until its `Start` claims it.
+    let slot: Arc<Slot<Song>> = Arc::default();
+    let mut standby: Option<Standby> = None;
+    let mut carried: Option<(Standby, Instant)> = None;
     // Songs fading out under the current one (more than one only for a moment).
     let mut fading: Vec<Fading> = Vec::new();
     // Whether `Ending` went out for this generation.
@@ -1029,48 +1159,78 @@ fn run(
     let mut dev_lost = std::env::var("YTM_DEVICE_LOST").ok().and_then(|v| v.parse::<f32>().ok()).map(Duration::from_secs_f32);
     loop {
         // Poll while playing so the position stays fresh and the end is noticed; idle otherwise.
-        let timeout = if (current != 0 || !fading.is_empty()) && !player.is_paused() { Duration::from_millis(100) } else { Duration::from_secs(3600) };
-        match rx.recv_timeout(timeout) {
+        let timeout = if (current != 0 || !fading.is_empty() || carried.is_some()) && !player.is_paused() { Duration::from_millis(100) } else { Duration::from_secs(3600) };
+        let received = rx.recv_timeout(timeout);
+        // The playing song ran into the one standing by: that song is over, as far as
+        // anyone is told, and the next one plays on until its `Start` claims it.
+        if slot.take_joined()
+            && let Some(next) = standby.take()
+        {
+            log::debug!("audio: generation {current} ran into the next song without a gap");
+            let _ = events.send(AudioEvent::Finished { generation: current });
+            carried = Some((next, Instant::now()));
+            current = 0;
+            status.playing_gen.store(0, Ordering::Relaxed);
+            status.standby_for.store(0, Ordering::Relaxed);
+            shared = None;
+            wake();
+        }
+        match received {
             Ok(AudioCmd::Start { generation, decoder, shared: s, at }) => {
                 if generation != status.wanted_gen.load(Ordering::Relaxed) {
                     log::debug!("audio: dropping stale generation {generation}");
                     continue;
                 }
                 log::debug!("audio: start generation {generation}");
-                if output.sink.is_none() || output.default_changed() {
-                    output.open(tx.clone(), &status);
-                }
-                player.clear();
+                let followed = carried.take().filter(|(c, _)| at.is_zero() && Arc::ptr_eq(&c.shared, &s));
                 let gain = norm_gain(&status, Some(&s));
                 log::info!("audio: loudness {:?} dB, normalization gain {gain:.3}", s.loudness_db);
-                player.set_volume(slider_gain(&status, f32::from_bits(status.volume.load(Ordering::Relaxed))) * gain);
-                // Fade in only over a song still playing, both over the same length.
-                fading.retain(|f| {
-                    if f.player.empty() {
-                        if let Some(s) = &f.shared {
-                            s.cancel();
-                        }
-                        false
-                    } else {
-                        true
-                    }
-                });
-                let skip_len = status.crossfade_ms.load(Ordering::Relaxed);
-                let natural_len = mix_ms(&status, length);
                 let mut fade_in = 0;
-                for f in fading.iter_mut().filter(|f| f.waiting.is_some()) {
-                    // A song that ended on its own gets the full phrase; a skip stays quick.
-                    fade_in = f.start(if f.natural { natural_len } else { skip_len }, status.automix.load(Ordering::Relaxed));
-                    log::debug!("audio: crossfade into generation {generation} over {fade_in} ms");
+                if let Some((next, _)) = followed {
+                    // Playing already: it followed the last song without a gap, and goes
+                    // on as it is. The decoder opened for this start isn't needed.
+                    log::debug!("audio: generation {generation} is the song that followed without a gap");
+                    deck = next.deck;
+                    deck.gain.store(gain.to_bits(), Ordering::Relaxed);
+                } else {
+                    if output.sink.is_none() || output.default_changed() {
+                        output.open(tx.clone(), &status);
+                    }
+                    slot.clear();
+                    player.clear();
+                    slot.take_joined();
+                    standby = None;
+                    status.standby_for.store(0, Ordering::Relaxed);
+                    player.set_volume(slider_gain(&status, f32::from_bits(status.volume.load(Ordering::Relaxed))));
+                    // Fade in only over a song still playing, both over the same length.
+                    fading.retain(|f| {
+                        if f.player.empty() {
+                            if let Some(s) = &f.shared {
+                                s.cancel();
+                            }
+                            false
+                        } else {
+                            true
+                        }
+                    });
+                    let skip_len = status.crossfade_ms.load(Ordering::Relaxed);
+                    let natural_len = mix_ms(&status, length);
+                    for f in fading.iter_mut().filter(|f| f.waiting.is_some()) {
+                        // A song that ended on its own gets the full phrase; a skip stays quick.
+                        fade_in = f.start(if f.natural { natural_len } else { skip_len }, status.automix.load(Ordering::Relaxed));
+                        log::debug!("audio: crossfade into generation {generation} over {fade_in} ms");
+                    }
+                    let mix = fade_in > 0 && status.automix.load(Ordering::Relaxed);
+                    let (source, new) = song(decoder, &status, fade_in, mix, &s);
+                    deck = new;
+                    player.append(Joined::new(source, slot.clone()));
+                    player.play();
                 }
-                fade_out = Arc::new(AtomicU32::new(0));
                 let mix = fade_in > 0 && status.automix.load(Ordering::Relaxed);
                 status.bpm.store(s.tempo.get().copied().flatten().unwrap_or(0.0).to_bits(), Ordering::Relaxed);
                 status.mix_duration_ms.store(fade_in, Ordering::Relaxed);
                 status.mix_active.store(mix, Ordering::Relaxed);
                 status.mix_generation.store(generation, Ordering::Release);
-                player.append(Meter::new(decoder, status.clone(), fade_in, fade_out.clone(), mix, s.tempo.clone()));
-                player.play();
                 // 0 means the stream didn't say; keep the length the UI already knows.
                 if s.duration_ms > 0 {
                     status.duration_ms.store(s.duration_ms, Ordering::Relaxed);
@@ -1089,8 +1249,9 @@ fn run(
                 // The new song's needle, claimed before `playing`: the first sample from a
                 // fresh decoder is a moment away, and until then the reader — the progress
                 // bar, the party's announce — would take the song that just ended for this one.
-                status.set_position(at.as_millis() as u64);
-                status.playing.store(true, Ordering::Relaxed);
+                // (A song that followed without a gap is as far in as it has played.)
+                status.set_position((at + deck.clock.get()).as_millis() as u64);
+                status.playing.store(!player.is_paused(), Ordering::Relaxed);
             }
             Ok(AudioCmd::Replace { generation, seek, decoder, at, seekable: s }) => {
                 if generation != current || seek != seek_seq {
@@ -1100,9 +1261,15 @@ fn run(
                 seekable = s;
                 let paused = player.is_paused();
                 player.clear();
-                fade_out = Arc::new(AtomicU32::new(0));
-                let analysis = shared.as_ref().expect("a current generation has a stream").tempo.clone();
-                player.append(Meter::new(decoder, status.clone(), 0, fade_out.clone(), false, analysis));
+                // The song standing by stays: this is the same song, somewhere else in it.
+                // (One that started at this very moment went with the old decoder.)
+                if slot.take_joined() {
+                    standby = None;
+                    status.standby_for.store(0, Ordering::Relaxed);
+                }
+                let (source, new) = song(decoder, &status, 0, false, shared.as_ref().expect("a current generation has a stream"));
+                deck = new;
+                player.append(Joined::new(source, slot.clone()));
                 if !paused {
                     player.play();
                 }
@@ -1120,9 +1287,10 @@ fn run(
                 }
                 let paused = player.is_paused();
                 if !paused && !player.empty() {
-                    fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
+                    // (Fading out, it isn't followed by the song standing by: the new copy is.)
+                    deck.fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
                     let old = std::mem::replace(&mut player, Player::connect_new(&output.mixer));
-                    fading.push(Fading { player: old, offset, shared: shared.take(), out: fade_out.clone(), waiting: None, natural: false });
+                    fading.push(Fading { player: old, offset, shared: shared.take(), deck: deck.clone(), waiting: None, natural: false });
                 } else {
                     player.clear();
                     if let Some(old) = shared.take() {
@@ -1131,12 +1299,12 @@ fn run(
                 }
                 let gain = norm_gain(&status, Some(&*s));
                 log::info!("audio: hi-res loudness {:?} dB, normalization gain {gain:.3}", s.loudness_db);
-                player.set_volume(slider_gain(&status, f32::from_bits(status.volume.load(Ordering::Relaxed))) * gain);
-                fade_out = Arc::new(AtomicU32::new(0));
+                player.set_volume(slider_gain(&status, f32::from_bits(status.volume.load(Ordering::Relaxed))));
                 let fade_in = if !paused { QUICK_FADE_MS } else { 0 };
-                let analysis = s.tempo.clone();
                 status.bpm.store(s.tempo.get().copied().flatten().unwrap_or(0.0).to_bits(), Ordering::Relaxed);
-                player.append(Meter::new(decoder, status.clone(), fade_in, fade_out.clone(), false, analysis));
+                let (source, new) = song(decoder, &status, fade_in, false, &s);
+                deck = new;
+                player.append(Joined::new(source, slot.clone()));
                 if !paused {
                     player.play();
                 }
@@ -1151,7 +1319,7 @@ fn run(
                 status.set_position(at.as_millis() as u64);
             }
             Ok(AudioCmd::Pause) => {
-                log::debug!("audio: pause at {:?}", offset + player.get_pos());
+                log::debug!("audio: pause at {:?}", offset + deck.clock.get());
                 player.pause();
                 fading.iter().for_each(|f| f.player.pause());
                 status.playing.store(false, Ordering::Relaxed);
@@ -1180,30 +1348,44 @@ fn run(
                     && !player.empty()
                     && fading.iter().all(|f| f.player.empty()) =>
             {
-                // Keeps playing at full volume until the next song starts (see `Start`).
-                let left = length.map(|d| d.saturating_sub(offset + player.get_pos()));
+                // Keeps playing at full volume until the next song starts (see `Start`):
+                // for as long as what is left of it takes at this speed.
+                let left = length.map(|d| d.saturating_sub(offset + deck.clock.get()).div_f32(status.speed()));
                 log::debug!("audio: handing off from generation {current}, {left:?} left");
+                // The two songs blend: nothing follows this one on its own.
+                slot.clear();
+                slot.take_joined();
+                standby = None;
+                status.standby_for.store(0, Ordering::Relaxed);
                 let old = std::mem::replace(&mut player, Player::connect_new(&output.mixer));
-                fading.push(Fading { player: old, offset, shared: shared.take(), out: fade_out.clone(), waiting: Some((Instant::now(), left)), natural: ending_sent });
+                fading.push(Fading { player: old, offset, shared: shared.take(), deck: deck.clone(), waiting: Some((Instant::now(), left)), natural: ending_sent });
                 current = 0;
                 status.playing_gen.store(0, Ordering::Relaxed);
                 status.playing.store(false, Ordering::Relaxed);
                 status.set_position(0);
             }
-            Ok(cmd @ (AudioCmd::Stop | AudioCmd::Handoff)) => {
+            // The song that stood by is playing already, and its `Start` is on its way:
+            // from here the position shown is that song's.
+            Ok(AudioCmd::Carry) if carried.is_some() => {
+                if let Some((next, _)) = &carried {
+                    status.set_position(next.deck.clock.get().as_millis() as u64);
+                }
+            }
+            Ok(cmd @ (AudioCmd::Stop | AudioCmd::Handoff | AudioCmd::Carry)) => {
+                slot.clear();
                 if matches!(cmd, AudioCmd::Handoff) {
                     // Skipping again mid-crossfade: everything playing goes, quickly enough
                     // to sound like a cut but without a click, and the next song comes in
                     // at full volume.
                     for f in fading.iter_mut() {
                         f.waiting = None;
-                        f.out.store(QUICK_FADE_MS, Ordering::Relaxed);
+                        f.deck.fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
                     }
                     log::debug!("audio: skipped mid-crossfade, cutting over");
                     if current != 0 && !player.is_paused() && !player.empty() {
-                        fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
+                        deck.fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
                         let old = std::mem::replace(&mut player, Player::connect_new(&output.mixer));
-                        fading.push(Fading { player: old, offset, shared: shared.take(), out: fade_out.clone(), waiting: None, natural: false });
+                        fading.push(Fading { player: old, offset, shared: shared.take(), deck: deck.clone(), waiting: None, natural: false });
                     } else {
                         player.clear();
                     }
@@ -1211,6 +1393,11 @@ fn run(
                     player.clear();
                     fading.clear();
                 }
+                // Nothing stands by any more, and a song that followed is gone with the rest.
+                slot.take_joined();
+                standby = None;
+                carried = None;
+                status.standby_for.store(0, Ordering::Relaxed);
                 current = 0;
                 status.playing_gen.store(0, Ordering::Relaxed);
                 status.mix_active.store(false, Ordering::Relaxed);
@@ -1234,7 +1421,7 @@ fn run(
                 }
                 // Seeking ends a crossfade: the new song alone from here.
                 for f in &fading {
-                    f.out.store(QUICK_FADE_MS, Ordering::Relaxed);
+                    f.deck.fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
                 }
                 // A seekable decoder already indexed the (fully downloaded) file.
                 if seekable && player.try_seek(pos).is_ok() {
@@ -1293,16 +1480,54 @@ fn run(
             }
             Ok(AudioCmd::Volume(v)) => {
                 let v = slider_gain(&status, v);
-                player.set_volume(v * norm_gain(&status, shared.as_deref()));
+                player.set_volume(v);
+                deck.gain.store(norm_gain(&status, shared.as_deref()).to_bits(), Ordering::Relaxed);
                 for f in &fading {
-                    f.player.set_volume(v * norm_gain(&status, f.shared.as_deref()));
+                    f.player.set_volume(v);
+                    f.deck.gain.store(norm_gain(&status, f.shared.as_deref()).to_bits(), Ordering::Relaxed);
                 }
+                for next in standby.iter().chain(carried.iter().map(|(next, _)| next)) {
+                    next.deck.gain.store(norm_gain(&status, Some(&next.shared)).to_bits(), Ordering::Relaxed);
+                }
+            }
+            Ok(AudioCmd::Standby { after, decoder, shared: s }) => {
+                // Behind the song it was opened for, while that is still the one wanted,
+                // and only where nothing blends the two songs: a crossfade or Automix
+                // hands over its own way.
+                if after != current || after != status.wanted_gen.load(Ordering::Relaxed) || mix_ms(&status, length) > 0 {
+                    continue;
+                }
+                log::debug!("audio: the next song stands by behind generation {after}");
+                let (source, new) = song(decoder, &status, 0, false, &s);
+                slot.put(source);
+                standby = Some(Standby { shared: s, deck: new });
+                status.standby_for.store(after, Ordering::Relaxed);
+            }
+            Ok(AudioCmd::Unstandby) => {
+                slot.clear();
+                // It had started already: nothing more is heard of it, and the song it
+                // followed is over.
+                if slot.take_joined() || carried.is_some() {
+                    log::debug!("audio: the song that followed without a gap isn't wanted");
+                    player.clear();
+                    if current != 0 {
+                        let _ = events.send(AudioEvent::Finished { generation: current });
+                        current = 0;
+                        status.playing_gen.store(0, Ordering::Relaxed);
+                        shared = None;
+                    }
+                    status.playing.store(false, Ordering::Relaxed);
+                    wake();
+                }
+                standby = None;
+                carried = None;
+                status.standby_for.store(0, Ordering::Relaxed);
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
         }
 
-        if current != 0 && dev_lost.is_some_and(|at| offset + player.get_pos() >= at) {
+        if current != 0 && dev_lost.is_some_and(|at| offset + deck.clock.get() >= at) {
             dev_lost = None;
             log::info!("audio: dev hook: output device lost");
             output.sink = None;
@@ -1322,7 +1547,7 @@ fn run(
         }
         if !fading.is_empty() {
             if let Some(f) = fading.iter().find(|f| f.natural) {
-                status.sample_outgoing(f.offset + f.player.get_pos(), !f.player.is_paused() && !f.player.empty());
+                status.sample_outgoing(f.offset + f.deck.clock.get(), !f.player.is_paused() && !f.player.empty());
             }
             // The next song is taking too long: don't hold this one up any longer.
             for f in fading.iter_mut().filter(|f| !status.automix.load(Ordering::Relaxed) && f.waiting.is_some_and(|(at, _)| at.elapsed() > HANDOFF_WAIT)) {
@@ -1345,12 +1570,20 @@ fn run(
                 log::debug!("audio: crossfade done");
             }
         }
+        if carried.as_ref().is_some_and(|(_, since)| since.elapsed() > CARRY_WAIT) {
+            log::warn!("audio: nothing claimed the song that followed without a gap; stopping it");
+            carried = None;
+            player.clear();
+            status.playing.store(false, Ordering::Relaxed);
+            wake();
+        }
         if current != 0 {
-            let pos = offset + player.get_pos();
+            let pos = offset + deck.clock.get();
             status.set_position(pos.as_millis() as u64);
             // Start the next song early, to crossfade into it. Not for songs barely
-            // longer than the fade.
-            let crossfade = Duration::from_millis(mix_ms(&status, length) as u64);
+            // longer than the fade. (The fade's length is as heard: at another speed it
+            // takes more or less of the song.)
+            let crossfade = Duration::from_millis(mix_ms(&status, length) as u64).mul_f32(status.speed());
             if !ending_sent
                 && !crossfade.is_zero()
                 && let Some(d) = length
@@ -1366,10 +1599,15 @@ fn run(
             if player.empty() {
                 // A failed download ends the decoder early: that's not the song ending.
                 let event = match shared.as_ref().and_then(|s| s.error()) {
-                    Some(reason) => AudioEvent::Interrupted { generation: current, at: offset + player.get_pos(), reason },
+                    Some(reason) => AudioEvent::Interrupted { generation: current, at: offset + deck.clock.get(), reason },
                     None => AudioEvent::Finished { generation: current },
                 };
                 let _ = events.send(event);
+                // A song that stood by and couldn't follow (another format, not ready in
+                // time) starts the usual way.
+                slot.clear();
+                standby = None;
+                status.standby_for.store(0, Ordering::Relaxed);
                 current = 0;
                 status.playing_gen.store(0, Ordering::Relaxed);
                 shared = None;
@@ -1807,5 +2045,394 @@ mod tests {
         assert!((audio.volume() - 0.5).abs() < 1e-6);
         audio.set_log_volume(false);
         assert!((audio.volume() - 0.125).abs() < 1e-6);
+    }
+
+    /// A song of 48 kHz stereo PCM, every sample of it `level` (of 32768), `frames` long.
+    fn pcm_song(level: i16, frames: usize, loudness_db: Option<f32>) -> Arc<Shared> {
+        let data: Vec<u8> = std::iter::repeat_n(level.to_le_bytes(), frames * 2).flatten().collect();
+        Shared::from_bytes_with_format(data, frames as u64 * 1000 / 48_000, loudness_db, crate::stream::Format::Pcm { rate: 48_000, channels: 2 }, None)
+    }
+
+    fn pcm_decoder(shared: &Arc<Shared>) -> TrackDecoder {
+        stream::decoder(shared.clone(), false).unwrap()
+    }
+
+    /// A sample of a `pcm_song` as it plays.
+    fn heard(level: i16) -> f32 {
+        level as f32 / 32768.0
+    }
+
+    #[test]
+    fn the_song_standing_by_follows_the_playing_ones_last_sample_with_nothing_between() {
+        let status = Arc::new(AudioStatus::default());
+        let (a, b) = (pcm_song(8000, 3000, None), pcm_song(-6000, 2000, None));
+        let slot: Arc<Slot<Song>> = Arc::default();
+        let (first, _) = song(pcm_decoder(&a), &status, 0, false, &a);
+        let (next, deck) = song(pcm_decoder(&b), &status, 0, false, &b);
+        let mut playing = Joined::new(first, slot.clone());
+        let mut out: Vec<f32> = playing.by_ref().take(1000).collect();
+        slot.put(next);
+        out.extend(playing);
+        let want: Vec<f32> = [vec![heard(8000); 6000], vec![heard(-6000); 4000]].concat();
+        assert!(out == want, "the first song's samples, then the second's, and nothing else");
+        assert!(slot.take_joined());
+        // The second song's own clock ran for it alone.
+        assert_eq!(deck.clock.get(), Duration::from_micros(2000 * 1_000_000 / 48_000));
+    }
+
+    #[test]
+    fn a_song_that_follows_without_a_gap_is_normalized_as_itself_from_its_first_sample() {
+        let status = Arc::new(AudioStatus::default());
+        status.normalize.store(true, Ordering::Relaxed);
+        // The first is as loud as the target; the second 6 dB over it.
+        let (a, b) = (pcm_song(8000, 1000, Some(0.0)), pcm_song(8000, 1000, Some(6.0)));
+        let slot: Arc<Slot<Song>> = Arc::default();
+        let (first, _) = song(pcm_decoder(&a), &status, 0, false, &a);
+        slot.put(song(pcm_decoder(&b), &status, 0, false, &b).0);
+        let out: Vec<f32> = Joined::new(first, slot).collect();
+        assert_eq!(out.len(), 4000);
+        assert!(out[..2000].iter().all(|s| *s == heard(8000)));
+        let turned_down = heard(8000) * 10f32.powf(-6.0 / 20.0);
+        assert!(out[2000..].iter().all(|s| *s == turned_down), "{} then {}", out[2000], out[3999]);
+    }
+
+    #[test]
+    fn a_song_fading_out_or_broken_off_is_not_followed() {
+        let status = Arc::new(AudioStatus::default());
+        let (a, b) = (pcm_song(8000, 48_000, None), pcm_song(-6000, 2000, None));
+        let slot: Arc<Slot<Song>> = Arc::default();
+        let (first, deck) = song(pcm_decoder(&a), &status, 0, false, &a);
+        slot.put(song(pcm_decoder(&b), &status, 0, false, &b).0);
+        let mut playing = Joined::new(first, slot.clone());
+        playing.by_ref().take(1000).count();
+        // A skip cuts it over quickly: it ends in silence, not in the next song.
+        deck.fade_out.store(QUICK_FADE_MS, Ordering::Relaxed);
+        let rest: Vec<f32> = playing.collect();
+        assert_eq!(rest.len(), 48 * QUICK_FADE_MS as usize * 2);
+        assert!(rest.iter().all(|s| *s > 0.0 || *s == 0.0), "only the first song is heard");
+        assert!(!slot.take_joined());
+    }
+
+    #[test]
+    fn at_another_speed_the_whole_chain_still_ends_one_song_and_starts_the_next_on_their_own_samples() {
+        let status = Arc::new(AudioStatus::default());
+        status.speed.set(1.5, true);
+        let (a, b) = (pcm_song(8000, 48_000, None), pcm_song(-6000, 48_000, None));
+        let slot: Arc<Slot<Song>> = Arc::default();
+        let (first, _) = song(pcm_decoder(&a), &status, 0, false, &a);
+        slot.put(song(pcm_decoder(&b), &status, 0, false, &b).0);
+        let out: Vec<f32> = Joined::new(first, slot).collect();
+        // Two seconds of song in about a second and a third, and not one sample of silence.
+        assert!((out.len() as f32 / 96_000.0 - 2.0 / 1.5).abs() < 0.2, "{} samples", out.len());
+        let turn = out.iter().position(|s| *s != heard(8000)).unwrap();
+        assert!(out[turn..].iter().all(|s| *s == heard(-6000)));
+    }
+
+    #[test]
+    fn the_progress_shown_between_updates_moves_at_the_speed_the_song_plays() {
+        for (speed, want) in [(1.0, 10_250), (2.0, 10_500), (0.5, 10_125)] {
+            let status = AudioStatus::default();
+            status.speed.set(speed, true);
+            status.playing.store(true, Ordering::Relaxed);
+            status.position_ms.store(10_000, Ordering::Relaxed);
+            // Sampled long ago: the extrapolation is capped at 250 ms of the clock on the wall.
+            status.sampled_at.store(0, Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(1));
+            LazyLock::force(&EPOCH);
+            std::thread::sleep(Duration::from_millis(260));
+            assert_eq!(status.position_smooth(), Duration::from_millis(want), "at {speed}×");
+        }
+    }
+
+    #[test]
+    fn a_mix_takes_more_or_less_of_the_song_at_another_speed() {
+        let status = AudioStatus::default();
+        status.crossfade_ms.store(6000, Ordering::Relaxed);
+        let length = Some(Duration::from_secs(200));
+        // As heard, the crossfade is the length it was set to at any speed.
+        for speed in [0.5, 1.0, 2.0] {
+            status.speed.set(speed, true);
+            assert_eq!(mix_ms(&status, length), 6000);
+        }
+        // Automix shows its window in the song's own time: twice as much of it at 2×.
+        status.automix.store(true, Ordering::Relaxed);
+        status.speed.set(1.0, true);
+        let plain = status.mix_secs(length);
+        status.speed.set(2.0, true);
+        assert!((status.mix_secs(length) - plain * 2.0).abs() < 1e-3);
+        // A short song gives Automix a third of the time it takes to play, not of its length.
+        status.bpm.store(120.0f32.to_bits(), Ordering::Relaxed);
+        assert_eq!(mix_ms(&status, Some(Duration::from_secs(12))), 2000);
+        status.speed.set(1.0, true);
+        assert_eq!(mix_ms(&status, Some(Duration::from_secs(12))), 4000);
+    }
+
+    /// The audio thread with no device: what it plays is pulled at the pace a device
+    /// would, and kept.
+    struct Rig {
+        audio: AudioHandle,
+        events: Receiver<AudioEvent>,
+        heard: Arc<std::sync::Mutex<Vec<f32>>>,
+        stop: Arc<AtomicBool>,
+    }
+
+    impl Rig {
+        fn new() -> Self {
+            let (tx, rx) = unbounded();
+            let (events_tx, events) = unbounded();
+            let status = Arc::new(AudioStatus::default());
+            status.volume.store(1.0f32.to_bits(), Ordering::Relaxed);
+            let (tap_tx, tap_rx) = unbounded();
+            std::thread::spawn({
+                let (tx, status) = (tx.clone(), status.clone());
+                move || {
+                    let (output, tap) = Output::headless();
+                    tap_tx.send(tap).unwrap();
+                    play(rx, tx, status, 1.0, output, events_tx, || {});
+                }
+            });
+            let mut tap = tap_rx.recv().unwrap();
+            let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            std::thread::spawn({
+                let (heard, stop) = (heard.clone(), stop.clone());
+                move || {
+                    // 10 ms of sound every 10 ms.
+                    let (started, mut pulled) = (Instant::now(), 0u64);
+                    while !stop.load(Ordering::Relaxed) {
+                        let due = started.elapsed().as_millis() as u64 / 10;
+                        while pulled < due {
+                            let block: Vec<f32> = tap.by_ref().take(960).collect();
+                            heard.lock().unwrap().extend(block);
+                            pulled += 1;
+                        }
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                }
+            });
+            let rig = Self { audio: AudioHandle { tx, status }, events, heard, stop };
+            // The first song after launch has its first 512 samples taken for mono (the
+            // silence rodio's queue idles on has no format until a song gave it one): a
+            // moment of stereo silence plays first, as in an app that has played before.
+            rig.start(u64::MAX, &pcm_song(0, 480, None));
+            assert_eq!(rig.finished().0, u64::MAX);
+            rig
+        }
+
+        fn start(&self, generation: u64, shared: &Arc<Shared>) {
+            self.audio.status.wanted_gen.store(generation, Ordering::Relaxed);
+            self.audio.send(AudioCmd::Start { generation, decoder: pcm_decoder(shared), shared: shared.clone(), at: Duration::ZERO });
+        }
+
+        /// The next `Finished`, and how long it took to come.
+        fn finished(&self) -> (u64, Duration) {
+            let asked = Instant::now();
+            loop {
+                match self.events.recv_timeout(Duration::from_secs(10)).expect("the song never finished") {
+                    AudioEvent::Finished { generation } => return (generation, asked.elapsed()),
+                    _ => continue,
+                }
+            }
+        }
+
+        fn wait(&self, ms: u64) {
+            std::thread::sleep(Duration::from_millis(ms));
+        }
+
+        /// What was heard so far, as runs of one level: (level, frames).
+        fn runs(&self) -> Vec<(f32, usize)> {
+            let heard = self.heard.lock().unwrap();
+            let mut runs: Vec<(f32, usize)> = Vec::new();
+            for frame in heard.chunks(2) {
+                match runs.last_mut() {
+                    Some((level, n)) if *level == frame[0] => *n += 1,
+                    _ => runs.push((frame[0], 1)),
+                }
+            }
+            runs
+        }
+    }
+
+    impl Drop for Rig {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// What plays today when one song ends and the next starts with no crossfade: the
+    /// player runs empty, the audio thread notices on its next look, and the next song
+    /// starts when it is asked for. Here it is asked for the instant `Finished` comes, as
+    /// a UI that answered at once with the decoder already open would; the real one adds
+    /// a frame (or the 400 ms background tick) and the decoder's opening to the silence.
+    /// `cargo test the_next_song_starts_after_a_silence -- --nocapture` prints it.
+    #[test]
+    fn without_a_song_standing_by_the_next_song_starts_after_a_silence() {
+        let rig = Rig::new();
+        let (a, b) = (pcm_song(8000, 24_000, None), pcm_song(-6000, 24_000, None));
+        rig.start(1, &a);
+        assert_eq!(rig.finished().0, 1);
+        rig.audio.send(AudioCmd::Carry);
+        rig.start(2, &b);
+        rig.wait(400);
+        let runs: Vec<(f32, usize)> = rig.runs().into_iter().skip_while(|(level, _)| *level == 0.0).collect();
+        assert_eq!(runs[0], (heard(8000), 24_000), "the first song, whole");
+        assert_eq!(runs[1].0, 0.0, "then silence");
+        assert_eq!(runs[2].0, heard(-6000), "then the second");
+        println!("silence between the two songs: {} frames ({:.1} ms)", runs[1].1, runs[1].1 as f32 / 48.0);
+        assert!(runs[1].1 > 0);
+    }
+
+    #[test]
+    fn a_song_standing_by_plays_right_behind_the_last_and_its_start_claims_it_as_it_plays() {
+        let rig = Rig::new();
+        let status = rig.audio.status.clone();
+        let (a, b) = (pcm_song(8000, 24_000, None), pcm_song(-6000, 48_000, None));
+        rig.start(1, &a);
+        rig.wait(150);
+        rig.audio.send(AudioCmd::Standby { after: 1, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        rig.wait(100);
+        assert_eq!(status.standby_for(), 1);
+        // The first song ends: the UI hears so, and asks for the next one the usual way.
+        assert_eq!(rig.finished().0, 1);
+        assert_eq!(status.standby_for(), 0);
+        rig.audio.send(AudioCmd::Carry);
+        rig.start(2, &b);
+        rig.wait(250);
+        assert_eq!(status.playing_gen.load(Ordering::Relaxed), 2);
+        assert!(status.playing.load(Ordering::Relaxed));
+        // It has been playing since the first one's last sample: about 350 ms by now.
+        let at = status.position().as_millis();
+        assert!((250..=700).contains(&at), "the second song is {at} ms in");
+        rig.wait(800);
+        assert_eq!(rig.finished().0, 2);
+        let runs: Vec<(f32, usize)> = rig.runs().into_iter().filter(|(level, _)| *level != 0.0).collect();
+        assert_eq!(runs, [(heard(8000), 24_000), (heard(-6000), 48_000)], "each song once, whole");
+        let between: Vec<(f32, usize)> = rig.runs().into_iter().skip_while(|(level, _)| *level == 0.0).take(2).collect();
+        assert_eq!(between[1].0, heard(-6000), "nothing between the two");
+    }
+
+    #[test]
+    fn a_song_taken_back_before_the_end_does_not_follow() {
+        let rig = Rig::new();
+        let (a, b) = (pcm_song(8000, 24_000, None), pcm_song(-6000, 48_000, None));
+        rig.start(1, &a);
+        rig.audio.send(AudioCmd::Standby { after: 1, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        rig.wait(150);
+        assert_eq!(rig.audio.status.standby_for(), 1);
+        rig.audio.send(AudioCmd::Unstandby);
+        assert_eq!(rig.finished().0, 1);
+        rig.wait(200);
+        assert!(rig.runs().iter().all(|(level, _)| *level != heard(-6000)), "the second song is never heard");
+        assert!(!rig.audio.status.playing.load(Ordering::Relaxed));
+        // Its download wasn't given up: the song's own play still finds the buffer whole.
+        assert!(b.is_complete() && b.error().is_none());
+        assert!(pcm_decoder(&b).next().is_some());
+    }
+
+    #[test]
+    fn a_song_that_followed_and_is_not_wanted_after_all_stops() {
+        let rig = Rig::new();
+        let (a, b) = (pcm_song(8000, 12_000, None), pcm_song(-6000, 96_000, None));
+        rig.start(1, &a);
+        rig.audio.send(AudioCmd::Standby { after: 1, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        assert_eq!(rig.finished().0, 1);
+        // The queue changed in the song's last moment: something else is to play.
+        rig.audio.send(AudioCmd::Unstandby);
+        rig.wait(200);
+        let followed: usize = rig.runs().iter().filter(|(level, _)| *level == heard(-6000)).map(|(_, n)| n).sum();
+        assert!(followed > 0 && followed < 48_000, "{followed} frames of it were heard");
+        assert!(!rig.audio.status.playing.load(Ordering::Relaxed));
+        rig.wait(200);
+        let later: usize = rig.runs().iter().filter(|(level, _)| *level == heard(-6000)).map(|(_, n)| n).sum();
+        assert_eq!(later, followed, "and no more of it");
+    }
+
+    #[test]
+    fn nothing_stands_by_while_songs_crossfade_or_for_a_song_no_longer_playing() {
+        let rig = Rig::new();
+        let (a, b) = (pcm_song(8000, 96_000, None), pcm_song(-6000, 48_000, None));
+        rig.audio.set_crossfade(1);
+        rig.start(1, &a);
+        rig.wait(100);
+        rig.audio.send(AudioCmd::Standby { after: 1, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        rig.wait(100);
+        assert_eq!(rig.audio.status.standby_for(), 0, "a crossfade hands over its own way");
+        rig.audio.set_crossfade(0);
+        rig.audio.send(AudioCmd::Standby { after: 7, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        rig.wait(100);
+        assert_eq!(rig.audio.status.standby_for(), 0, "that was for another play");
+        rig.audio.send(AudioCmd::Standby { after: 1, decoder: stream::decoder_ahead(b.clone()).unwrap(), shared: b.clone() });
+        rig.wait(100);
+        assert_eq!(rig.audio.status.standby_for(), 1);
+        // Skipping on: the song standing by was for the one skipped.
+        rig.audio.send(AudioCmd::Stop);
+        rig.wait(100);
+        assert_eq!(rig.audio.status.standby_for(), 0);
+    }
+
+    #[test]
+    fn the_position_and_the_songs_end_go_by_at_the_speed_set() {
+        let rig = Rig::new();
+        let status = rig.audio.status.clone();
+        rig.audio.set_speed(2.0, true);
+        // Three seconds of song: a second and a half at 2×.
+        let a = pcm_song(8000, 144_000, None);
+        rig.start(1, &a);
+        rig.wait(600);
+        let at = status.position().as_millis();
+        assert!((900..=1500).contains(&at), "0.6 s in, the song is at {at} ms");
+        // A seek lands where it was asked to, in the song's own time.
+        rig.audio.send(AudioCmd::Seek(Duration::from_millis(2000)));
+        rig.wait(250);
+        let at = status.position().as_millis();
+        assert!((2100..=2900).contains(&at), "a quarter second after seeking to 2 s it is at {at} ms");
+        let (_, took) = rig.finished();
+        assert!(took < Duration::from_millis(600), "the last second of the song took {took:?}");
+    }
+
+    #[test]
+    fn a_crossfade_starts_as_far_before_the_end_as_it_takes_at_the_speed_set() {
+        let rig = Rig::new();
+        let status = rig.audio.status.clone();
+        rig.audio.set_speed(2.0, true);
+        rig.audio.set_crossfade(1);
+        // Six seconds of song; a one-second fade is its last two seconds at 2×.
+        let a = pcm_song(8000, 288_000, None);
+        rig.start(1, &a);
+        let ending = loop {
+            match rig.events.recv_timeout(Duration::from_secs(10)).expect("the song never neared its end") {
+                AudioEvent::Ending { generation: 1 } => break status.position().as_millis(),
+                _ => continue,
+            }
+        };
+        assert!((4000..=4500).contains(&ending), "the next song was asked for at {ending} ms");
+    }
+
+    #[test]
+    fn a_crossfade_still_blends_one_song_into_the_next_with_no_silence() {
+        let rig = Rig::new();
+        rig.audio.set_crossfade(1);
+        // Three seconds each: the last second of the first under the first of the second.
+        let (a, b) = (pcm_song(8000, 144_000, None), pcm_song(-6000, 144_000, None));
+        rig.start(1, &a);
+        loop {
+            match rig.events.recv_timeout(Duration::from_secs(10)).expect("the song never neared its end") {
+                AudioEvent::Ending { generation: 1 } => break,
+                _ => continue,
+            }
+        }
+        rig.audio.send(AudioCmd::Handoff);
+        rig.start(2, &b);
+        rig.wait(1500);
+        let runs: Vec<(f32, usize)> = rig.runs().into_iter().skip_while(|(level, _)| *level == 0.0).collect();
+        assert_eq!(runs[0].0, heard(8000), "the first song alone");
+        assert!(runs[0].1 > 90_000, "for its first two seconds or so: {} frames", runs[0].1);
+        // Then the two together, each frame somewhere between them, and the second alone.
+        let alone = runs.iter().position(|(level, n)| *level == heard(-6000) && *n > 4800).expect("the second song plays on alone");
+        let blend: usize = runs[1..alone].iter().map(|(_, n)| n).sum();
+        assert!((40_000..=56_000).contains(&blend), "the blend took {blend} frames");
+        assert!(runs[1..alone].iter().all(|(level, n)| *level != 0.0 || *n < 8), "no silence in the blend");
+        assert!(runs[1..alone].iter().all(|(level, _)| (heard(-6000)..=heard(8000)).contains(level)));
+        assert_eq!(rig.audio.status.playing_gen.load(Ordering::Relaxed), 2);
     }
 }

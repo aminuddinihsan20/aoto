@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 4×1 widget as the widget picker shows it below Android 12. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="380dp"
+    android:height="72dp"
+    android:viewportWidth="380"
+    android:viewportHeight="72">
+    <path
+        android:fillColor="@color/widget_primary_container"
+        android:pathData="M36,0h308a36,36 0 0 1 36,36a36,36 0 0 1 -36,36h-308a36,36 0 0 1 -36,-36a36,36 0 0 1 36,-36z" />
+    <path
+        android:fillColor="@color/widget_primary"
+        android:pathData="M36,12h0a24,24 0 0 1 24,24a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24a24,24 0 0 1 24,-24z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="24"
+        android:translateY="24">
+        <path
+            android:fillColor="@color/widget_on_primary"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+    <path
+        android:fillColor="@color/widget_on_surface"
+        android:pathData="M78.5,20h111a6.5,6.5 0 0 1 6.5,6.5a6.5,6.5 0 0 1 -6.5,6.5h-111a6.5,6.5 0 0 1 -6.5,-6.5a6.5,6.5 0 0 1 6.5,-6.5z" />
+    <path
+        android:fillColor="@color/widget_on_surface_variant"
+        android:pathData="M77,42h66a5,5 0 0 1 5,5a5,5 0 0 1 -5,5h-66a5,5 0 0 1 -5,-5a5,5 0 0 1 5,-5z" />
+    <path
+        android:fillColor="@color/widget_primary"
+        android:pathData="M288,12h0a24,24 0 0 1 24,24a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24a24,24 0 0 1 24,-24z" />
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="276"
+        android:translateY="24">
+        <path
+            android:fillColor="@color/widget_on_primary"
+            android:pathData="M8,5v14l11,-7z" />
+    </group>
+    <group
+        android:scaleX="1"
+        android:scaleY="1"
+        android:translateX="332"
+        android:translateY="24">
+        <path
+            android:fillColor="@color/widget_on_surface"
+            android:pathData="M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z" />
+    </group>
+</vector>

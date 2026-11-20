@@ -84,6 +84,9 @@ pub enum Req {
     Play { video_id: String, generation: u64, at: std::time::Duration, report: bool, song_of: Option<Track>, song: Option<Track>, track: Option<Track> },
     /// Resolve and download a track ahead of time so skipping to it is instant.
     Prefetch { video_id: String, song_of: Option<Track>, track: Option<Track> },
+    /// Open the prefetched `video_id` to follow play `after` without a gap. Nothing
+    /// happens when it isn't prefetched (yet): the song then starts the usual way.
+    Standby { video_id: String, after: u64 },
     Like { video_id: String, like: bool },
     /// Several likes (or unlikes) one after another, for a selection.
     LikeMany { video_ids: Vec<String>, like: bool },
@@ -135,6 +138,7 @@ impl Req {
             Req::PlayCollection { .. } => "Playback",
             Req::Play { .. } => "Playback",
             Req::Prefetch { .. } => "Prefetch",
+            Req::Standby { .. } => "Standby",
             Req::Like { .. } | Req::LikeMany { .. } => "Like",
             Req::Dislike(_) => "Dislike",
             Req::CreatePlaylist { .. } => "Create playlist",
@@ -152,7 +156,7 @@ impl Req {
 
     /// Background requests fail quietly (logged, no toast).
     fn quiet(&self) -> bool {
-        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::Prefetch { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
+        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::Prefetch { .. } | Req::Standby { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
     }
 }
 
@@ -867,6 +871,10 @@ impl Backend {
                     self.prefetch(video_id, song_of, track).await?;
                     return Ok(None);
                 }
+                Req::Standby { video_id, after } => {
+                    self.standby(&video_id, after);
+                    return Ok(None);
+                }
                 Req::Like { video_id, like } => {
                     ytm::set_like(api, &video_id, like).await?;
                     Resp::Liked { video_id, like }
@@ -1047,6 +1055,22 @@ impl Backend {
             old.cancel();
         }
         Ok(())
+    }
+
+    /// Hand the audio thread the prefetched `video_id`, decoded from its start, to follow
+    /// play `after` without a gap. The buffer stays prefetched: the song's own play
+    /// finds it there, and the audio thread knows the song by it.
+    fn standby(&self, video_id: &str, after: u64) {
+        if self.audio.status.wanted_gen.load(Ordering::Relaxed) != after {
+            return;
+        }
+        let Some(shared) = self.prefetched.lock().unwrap().as_ref().filter(|(id, _)| id == video_id).map(|(_, s)| s.clone()) else { return };
+        let audio = self.audio.clone();
+        // Opening the decoder reads the container header (the prefetched start holds it).
+        tokio::task::spawn_blocking(move || match stream::decoder_ahead(shared.clone()) {
+            Ok(decoder) => audio.send(AudioCmd::Standby { after, decoder, shared }),
+            Err(e) => log::debug!("the next song won't open ahead: {e}"),
+        });
     }
 
     async fn lyrics_for(&self, t: &Track) -> LyricsSet {
