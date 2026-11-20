@@ -1099,6 +1099,74 @@ mod tests {
         assert!(on);
     }
 
+    /// Draw `add` on a phone's page in a headless egui, tap where `at` says (given the
+    /// page's top left and width), and return what the taps asked for.
+    fn tapped(at: impl Fn(Pos2, f32) -> Pos2, mut add: impl FnMut(&mut Ui, &mut Vec<Action>)) -> Vec<Action> {
+        let ctx = egui::Context::default();
+        let mut acts = Vec::new();
+        let mut origin = (Pos2::ZERO, 0.0);
+        let mut frame = |events: Vec<egui::Event>, acts: &mut Vec<Action>| {
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(412.0, 900.0))), events, ..Default::default() };
+            let run = ctx.run_ui(input, |ui| {
+                origin = (ui.cursor().min, ui.available_width());
+                add(ui, acts);
+            });
+            run.drop_without_applying_deltas();
+            origin
+        };
+        frame(vec![], &mut acts);
+        let (min, width) = frame(vec![], &mut acts);
+        let at = at(min, width);
+        frame(vec![egui::Event::PointerMoved(at), egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }], &mut acts);
+        frame(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }], &mut acts);
+        frame(vec![], &mut acts);
+        acts
+    }
+
+    fn playlists(n: usize) -> Vec<Card> {
+        (0..n).map(|i| Card { title: format!("Playlist {i}"), subtitle: "Someone \u{2022} 48 songs".into(), thumbs: vec![], target: Target::Playlist(format!("PL{i}")), round: false, links: vec![] }).collect()
+    }
+
+    #[test]
+    fn a_tap_on_a_carousel_item_opens_that_card() {
+        let cards = playlists(6);
+        let draw = |ui: &mut Ui, acts: &mut Vec<Action>| carousel(ui, "test-carousel", 0, &cards, &HashSet::new(), acts);
+        let large = tapped(|min, width| min + vec2(carousel_sizes(width)[0] / 2.0, CAROUSEL_H / 2.0), draw);
+        assert!(matches!(large.as_slice(), [Action::Open(Target::Playlist(id))] if id == "PL0"), "the large one");
+        let medium = tapped(|min, width| min + vec2(carousel_sizes(width)[0] + CAROUSEL_GAP + 20.0, CAROUSEL_H / 2.0), draw);
+        assert!(matches!(medium.as_slice(), [Action::Open(Target::Playlist(id))] if id == "PL1"), "the medium one");
+        let small = tapped(|min, width| min + vec2(width - 20.0, CAROUSEL_H / 2.0), draw);
+        assert!(matches!(small.as_slice(), [Action::Open(Target::Playlist(id))] if id == "PL2"), "the small one");
+    }
+
+    #[test]
+    fn the_heros_button_plays_it_and_a_tap_elsewhere_opens_it() {
+        let cards = playlists(1);
+        let draw = |ui: &mut Ui, acts: &mut Vec<Action>| hero_card(ui, "Mixed for you", &cards[0], acts);
+        let hero = |min: Pos2, width: f32| hero_geom(Rect::from_min_size(min, vec2(width, HERO_H)));
+        let played = tapped(|min, width| hero(min, width).play.center(), draw);
+        assert!(matches!(played.as_slice(), [Action::PlayCollection(Target::Playlist(id), false)] if id == "PL0"));
+        let opened = tapped(|min, width| hero(min, width).cover.center(), draw);
+        assert!(matches!(opened.as_slice(), [Action::Open(Target::Playlist(id))] if id == "PL0"));
+    }
+
+    #[test]
+    fn a_tap_on_a_song_tile_is_the_tiles_and_asks_for_nothing_by_itself() {
+        let track = Track { id: "v1".into(), title: "Teh Hijau".into(), artists: vec![], album: None, duration: None, thumbs: vec![], track_nr: None, plays: None, music_video: false };
+        let opts = widgets::RowOpts { number: None, show_album: false, current: false, playing: false, accent: Color32::WHITE, time: 0.0, liked: false, added_by: None, pick: false, selected: None, remove: None, queue_remove: None, queue_move: None };
+        let clicks = std::cell::Cell::new(0);
+        let acts = tapped(
+            |min, _| min + vec2(100.0, TILE_H / 2.0),
+            |ui, acts| {
+                if song_tile(ui, 186.0, &track, &opts, acts).clicked() {
+                    clicks.set(clicks.get() + 1);
+                }
+            },
+        );
+        assert_eq!(clicks.get(), 1);
+        assert!(acts.is_empty(), "what a tap does is the page's to say (Home starts the song's radio)");
+    }
+
     #[test]
     fn a_section_header_is_as_tall_as_its_action_needs() {
         let (plain, over) = drawn(360.0, |ui| {
