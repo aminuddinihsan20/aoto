@@ -36,6 +36,7 @@ mod preset;
 mod shader;
 mod sleep;
 mod spatial;
+mod speed;
 mod sponsorblock;
 mod stream;
 mod theme;
