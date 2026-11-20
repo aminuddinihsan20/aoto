@@ -2086,6 +2086,37 @@ mod tests {
     }
 
     #[test]
+    fn where_none_need_be_chosen_a_tap_on_the_chosen_segment_is_told_too() {
+        let tap = |at: f32, chosen: Option<usize>| {
+            let picked = std::cell::Cell::new(None);
+            tapped(
+                |min, width| min + vec2(width * at, TOUCH / 2.0),
+                |ui, _| {
+                    if let Some(i) = segmented_any(ui, &["Private", "Unlisted", "Public"], chosen, Color32::BLACK) {
+                        picked.set(Some(i));
+                    }
+                },
+            );
+            picked.get()
+        };
+        assert_eq!(tap(0.5, None), Some(1));
+        assert_eq!(tap(0.1, Some(0)), Some(0), "a second tap on it, so it can be let go");
+        assert_eq!(tap(0.9, Some(0)), Some(2));
+    }
+
+    #[test]
+    fn a_dialogs_buttons_and_text_field_fit_a_finger() {
+        let (text, danger, field) = drawn(360.0, |ui| {
+            let mut name = String::new();
+            (button(ui, "OK", None, ButtonStyle::Text).rect, button(ui, "Delete", None, ButtonStyle::Danger).rect, text_field(ui, &mut name, "My playlist", false).rect)
+        });
+        for r in [text, danger] {
+            assert!(r.width() >= TOUCH && r.height() >= TOUCH, "{r:?}");
+        }
+        assert!(field.height() >= 40.0 && field.width() > 200.0, "the text itself, inside its 56-point outline: {field:?}");
+    }
+
+    #[test]
     fn a_list_row_with_a_chevron_keeps_its_text_clear_of_it() {
         let rect = Rect::from_min_size(pos2(16.0, 0.0), vec2(328.0, 72.0));
         let g = row_geom(rect, 56.0, 20.0, false);

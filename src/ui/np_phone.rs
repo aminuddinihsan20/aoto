@@ -146,7 +146,7 @@ struct PeekGeom {
 }
 
 fn peek_geom(peek: Rect) -> PeekGeom {
-    let roomy = peek.height() >= 96.0;
+    let roomy = peek.height() >= 86.0;
     let handle = Rect::from_center_size(pos2(peek.center().x, peek.top() + if roomy { 12.0 } else { 9.0 }), vec2(32.0, 4.0));
     let label = roomy.then(|| pos2(peek.left() + 24.0, peek.top() + 24.0));
     let rows_top = if roomy { peek.top() + 42.0 } else { handle.bottom() + 4.0 };
@@ -642,7 +642,8 @@ mod tests {
         for (w, h) in SCREENS {
             let g = art_geom(screen(w, h), INSETS);
             assert!(g.text.width() >= 200.0, "{w}x{h}: {}", g.text.width());
-            assert_eq!(g.text.left(), g.art.left().min(g.text.left()), "it starts no further in than the artwork");
+            assert!(g.text.left() <= g.art.left() + 0.01, "{w}x{h}: it starts no further in than the artwork");
+            assert!(g.text.right() < g.like.left(), "{w}x{h}: and stops short of the like button");
         }
     }
 
@@ -677,7 +678,7 @@ mod tests {
 
     #[test]
     fn the_peeks_parts_stay_inside_it_and_apart() {
-        for (w, h) in [(360.0, 72.0), (360.0, 86.0), (412.0, 100.0)] {
+        for (w, h) in [(360.0, 72.0), (360.0, 80.0), (360.0, 86.0), (412.0, 100.0)] {
             let peek = Rect::from_min_size(pos2(0.0, 700.0), vec2(w, h));
             let g = peek_geom(peek);
             for part in [g.handle, g.cover, g.text] {
@@ -685,7 +686,7 @@ mod tests {
             }
             assert!(apart(g.handle, g.cover) && apart(g.cover, g.text));
             assert!(g.text.right() < g.mark.x - 12.0, "the text stops short of the queue mark");
-            assert_eq!(g.label.is_some(), h >= 96.0, "the label needs room above the row");
+            assert_eq!(g.label.is_some(), h >= 86.0, "the label needs room above the row");
             if let Some(at) = g.label {
                 assert!(at.y >= g.handle.bottom() && at.y + 16.0 <= g.cover.top(), "{w}x{h}");
             }

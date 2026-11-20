@@ -1158,7 +1158,7 @@ fn autoplay_row(ui: &mut Ui, on: &mut bool) {
     let m = crate::material::scheme();
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 64.0), Sense::hover());
     let switch = Rect::from_center_size(pos2(row.right() - 6.0 - super::m3::SWITCH_TARGET.x / 2.0, row.center().y), super::m3::SWITCH_TARGET);
-    super::m3::two_lines(ui, row.left() + 6.0, row.center().y, switch.left() - 12.0 - row.left() - 6.0, "Autoplay", Type::BodyLarge, m.on_surface, "Similar songs follow when the queue ends", Type::BodyMedium, m.on_surface_variant);
+    super::m3::two_lines(ui, row.left() + 6.0, row.center().y, switch.left() - 12.0 - row.left() - 6.0, "Autoplay", Type::BodyLarge, m.on_surface, "Similar songs when the queue ends", Type::BodyMedium, m.on_surface_variant);
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     super::m3::switch(&mut sui, on, "Autoplay similar songs");
 }
