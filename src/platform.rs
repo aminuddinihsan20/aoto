@@ -271,6 +271,13 @@ pub fn in_background() -> bool {
     BACKGROUND.load(Ordering::SeqCst)
 }
 
+/// How loud the app itself plays, given the volume it saved. A phone has one media
+/// volume, the system's (its keys, and the "Play on" sheet): there the app plays at full
+/// and leaves the loudness to it. A desktop app keeps its own.
+pub fn app_volume(saved: f32, android: bool) -> f32 {
+    if android { 1.0 } else { saved }
+}
+
 /// What the media notification shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NowPlaying {
@@ -471,6 +478,16 @@ pub fn call(kind: &str, arg: &str, timeout: std::time::Duration) -> Result<Strin
         c.queue.retain(|r| r.id != id);
     });
     answer
+}
+
+/// Ask the activity for `kind` without waiting for its answer. A request of the same
+/// kind it hasn't taken yet is replaced: only the newest counts (a volume being dragged).
+pub fn post(kind: &str, arg: &str) {
+    with_calls(|c| {
+        c.queue.retain(|r| r.kind != kind || c.waiting.contains_key(&r.id));
+        c.next += 1;
+        c.queue.push_back(CallRequest { id: c.next, kind: kind.to_owned(), arg: arg.to_owned() });
+    });
 }
 
 /// The activity polls this for the next request.
@@ -756,6 +773,40 @@ mod tests {
         assert!(take_call().is_none(), "the abandoned request is not left for the activity");
         // A late answer to it is ignored.
         answer_call(u64::MAX, true, "late");
+    }
+
+    #[test]
+    fn a_posted_request_reaches_the_activity_and_nobody_waits_for_its_answer() {
+        let _one = CALL.lock().unwrap_or_else(|e| e.into_inner());
+        post("output-switch", "");
+        let request = take_call().expect("it is there for the activity");
+        assert_eq!((request.kind.as_str(), request.arg.as_str()), ("output-switch", ""));
+        assert!(take_call().is_none());
+        // The activity answers as always; nobody is waiting, and that is fine.
+        answer_call(request.id, true, "");
+    }
+
+    #[test]
+    fn only_the_newest_of_a_kind_of_posted_request_is_kept() {
+        let _one = CALL.lock().unwrap_or_else(|e| e.into_inner());
+        post("output-volume", "5");
+        post("output-switch", "");
+        post("output-volume", "6");
+        post("output-volume", "7");
+        let taken: Vec<(String, String)> = std::iter::from_fn(take_call).map(|r| (r.kind, r.arg)).collect();
+        assert_eq!(taken, [("output-switch".to_owned(), String::new()), ("output-volume".to_owned(), "7".to_owned())]);
+    }
+
+    #[test]
+    fn a_phone_plays_at_full_and_leaves_the_volume_to_the_system() {
+        assert_eq!(app_volume(0.8, true), 1.0);
+        assert_eq!(app_volume(0.0, true), 1.0, "a mute saved by an earlier version doesn't silence the phone");
+    }
+
+    #[test]
+    fn a_desktop_keeps_the_volume_it_saved() {
+        assert_eq!(app_volume(0.8, false), 0.8);
+        assert_eq!(app_volume(0.0, false), 0.0);
     }
 
     #[test]

@@ -3,6 +3,7 @@ package io.github.aminuddinihsan20.bitchord;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Build;
@@ -89,6 +90,10 @@ public class MainActivity extends GameActivity {
         Handler main = new Handler(Looper.getMainLooper());
         // Downloads wait for Wi-Fi when asked to: the app hears what the phone is on.
         main.post(() -> Connectivity.watch(getApplicationContext()));
+        // "Play on": the app hears where the music goes and how loud the phone is set, and
+        // the volume keys are the music's whether or not a song plays.
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        main.post(() -> AudioOutput.watch(getApplicationContext()));
         main.post(new Runnable() {
             @Override
             public void run() {
@@ -179,6 +184,17 @@ public class MainActivity extends GameActivity {
                     done.finish(false, "no browser to open it with");
                 }
                 break;
+            case "output-switch":
+                done.finish(AudioOutput.openSwitcher(this), "");
+                break;
+            case "output-volume":
+                try {
+                    AudioOutput.setVolume(Integer.parseInt(arg));
+                    done.finish(true, "");
+                } catch (NumberFormatException e) {
+                    done.finish(false, "not a volume");
+                }
+                break;
             case "scan":
                 Storage.scan(this, arg, done);
                 break;
@@ -230,6 +246,7 @@ public class MainActivity extends GameActivity {
     protected void onStart() {
         super.onStart();
         nativeSetBackground(false);
+        AudioOutput.refresh();
     }
 
     @Override

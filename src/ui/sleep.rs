@@ -398,8 +398,8 @@ fn contents(ui: &mut Ui, pick: &mut Pick, s: &Showing) -> Option<Ask> {
 }
 
 /// The chip on Now Playing that opens the sheet, its left end at `at`: its name, or
-/// what the running timer waits for (the time left, counting down).
-pub(super) fn chip(app: &mut App, ui: &mut Ui, at: Pos2) {
+/// what the running timer waits for (the time left, counting down). Returns where it is.
+pub(super) fn chip(app: &mut App, ui: &mut Ui, at: Pos2) -> Rect {
     let running = app.sleep.running();
     let label = chip_label(running, app.sleep.remaining(clock()));
     let ink = if running.is_some() { app.accent_color() } else { theme::text() };
@@ -414,6 +414,7 @@ pub(super) fn chip(app: &mut App, ui: &mut Ui, at: Pos2) {
     if resp.clicked() {
         open_sheet(app);
     }
+    rect
 }
 
 /// Bring the sheet up, on the timer that runs when one does (to change or cancel it).

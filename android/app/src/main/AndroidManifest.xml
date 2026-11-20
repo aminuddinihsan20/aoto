@@ -11,6 +11,21 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- "Play on" opens Android's own output switcher, which the System UI (Android 12
+         and 13) or the Settings app (10 and 11) shows when asked; and the Bluetooth
+         settings where there is none. The app checks that a system app answers first. -->
+    <queries>
+        <intent>
+            <action android:name="com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG" />
+        </intent>
+        <intent>
+            <action android:name="com.android.settings.panel.action.MEDIA_OUTPUT" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
+        </intent>
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"

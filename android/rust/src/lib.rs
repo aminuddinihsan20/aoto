@@ -137,6 +137,14 @@ extern "system" fn Java_io_github_aminuddinihsan20_bitchord_Connectivity_nativeN
     bitchord::platform::set_network(state);
 }
 
+/// Where the music goes and the phone's media volume, whenever either changes
+/// (AudioOutput.java).
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_AudioOutput_nativeOutput(mut env: jni::JNIEnv, _class: jni::objects::JClass, line: jni::objects::JString) {
+    let line: String = env.get_string(&line).map(Into::into).unwrap_or_default();
+    bitchord::playon::set_output_line(&line);
+}
+
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_aminuddinihsan20_bitchord_MainActivity_nativeTakeCall(env: jni::JNIEnv, _class: Jni) -> jni::sys::jstring {
     let line = bitchord::platform::take_call().map(|c| c.to_line()).unwrap_or_default();

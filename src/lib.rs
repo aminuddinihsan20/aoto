@@ -32,6 +32,7 @@ mod media;
 mod model;
 mod motion;
 pub mod platform;
+pub mod playon;
 mod opus;
 mod material;
 mod preset;
@@ -187,6 +188,7 @@ pub fn run_with(configure: impl FnOnce(&mut eframe::NativeOptions)) -> eframe::R
             let log_setting = cc.storage.and_then(|s| s.get_string("log_volume"));
             let log_volume = log_setting.as_deref().is_none_or(|v| v == "1");
             let volume = if log_setting.is_none() { volume.cbrt() } else { volume };
+            let volume = platform::app_volume(volume, cfg!(target_os = "android"));
             // Dev hook: YTM_MUTE starts silent and never persists the volume.
             let volume = if std::env::var_os("YTM_MUTE").is_some() { 0.0 } else { volume };
 
