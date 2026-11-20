@@ -1,11 +1,9 @@
 name: Tests
 
-# Runs the tests and clippy on every pull request and on main. The app is built for
-# Android; its tests run on the host, and one host is enough.
+# Runs the tests and clippy when asked to: from the Actions tab ("Run workflow"), or with
+# `gh workflow run tests.yml`. A push does not start it, and a release does not wait for it.
+# The app is built for Android; its tests run on the host, and one host is enough.
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:

@@ -16,6 +16,11 @@ on:
 permissions:
   contents: write
 
+# One release at a time: a newer push replaces a build still going.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 jobs:
   # Decides whether this push is a release.
   plan:
