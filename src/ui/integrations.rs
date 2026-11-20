@@ -73,6 +73,9 @@ impl App {
     /// only offered as a notice; nothing installs until the user restarts for it.
     pub(super) fn tick_updates(&mut self, ctx: &egui::Context, now: f64) {
         use crate::update::{State, Updater};
+        if !crate::update::CONFIGURED {
+            return;
+        }
         if self.updater.is_none() {
             let c = ctx.clone();
             self.updater = Some(Updater::new(self.backend.data_dir(), move || c.request_repaint()));

@@ -136,7 +136,7 @@ impl App {
         }
     }
 
-    /// Asked for by voice ("play … on BitChord"): the first song YouTube Music finds for
+    /// Asked for by voice ("play … on Aoto"): the first song YouTube Music finds for
     /// the words, and the other songs found after it. With no words: anything.
     fn auto_search(&mut self, query: &str) {
         log::info!("android auto: asked for {query:?}");

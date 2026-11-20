@@ -34,7 +34,8 @@
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
-        android:theme="@style/Theme.BitChord"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Aoto"
         android:allowBackup="false">
 
         <!-- configChanges: rotation, font size, language and the like reach the app as
@@ -49,12 +50,12 @@
             android:windowSoftInputMode="adjustResize">
             <meta-data
                 android:name="android.app.lib_name"
-                android:value="bitchord_android" />
+                android:value="aoto_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- "Play … on BitChord", said to the Assistant: with a car connected that goes
+            <!-- "Play … on Aoto", said to the Assistant: with a car connected that goes
                  to the media session; without one Android opens the app with it. Android
                  Auto expects a media app to declare it. -->
             <intent-filter>

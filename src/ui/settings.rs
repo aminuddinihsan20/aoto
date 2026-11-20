@@ -134,10 +134,11 @@ pub enum Row {
     SpotifyAccount,
     Version,
     Updates,
+    Thanks,
 }
 
 impl Row {
-    pub const ALL: [Row; 41] = [
+    pub const ALL: [Row; 42] = [
         Row::Account,
         Row::Channel,
         Row::ListenTogether,
@@ -179,6 +180,7 @@ impl Row {
         Row::SpotifyAccount,
         Row::Version,
         Row::Updates,
+        Row::Thanks,
     ];
 
     /// Where the row lives: its category, and the group of that category's page it is
@@ -203,7 +205,7 @@ impl Row {
             Row::ListeningStats => (C::Stats, ""),
             Row::LastFm => (C::Connections, ""),
             Row::TransferFromSpotify | Row::SpotifyAccount => (C::Transfer, ""),
-            Row::Version | Row::Updates => (C::About, ""),
+            Row::Version | Row::Updates | Row::Thanks => (C::About, ""),
         }
     }
 }
@@ -391,7 +393,7 @@ mod tests {
         assert_eq!(rows(C::Stats), [Row::ListeningStats]);
         assert_eq!(rows(C::Connections), [Row::LastFm]);
         assert_eq!(rows(C::Transfer), [Row::TransferFromSpotify, Row::SpotifyAccount]);
-        assert_eq!(rows(C::About), [Row::Version, Row::Updates]);
+        assert_eq!(rows(C::About), [Row::Version, Row::Updates, Row::Thanks]);
     }
 
     #[test]

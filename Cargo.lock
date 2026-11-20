@@ -239,6 +239,70 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "aoto"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytes",
+ "crossbeam-channel",
+ "directories",
+ "eframe",
+ "egui",
+ "egui_extras",
+ "env_logger",
+ "filmcraft-ac3",
+ "futures-util",
+ "gtk",
+ "hmac",
+ "image",
+ "keyring",
+ "libc",
+ "localzone",
+ "log",
+ "md-5",
+ "memmap2",
+ "mp4ameta",
+ "raw-window-handle",
+ "reqwest",
+ "rfd",
+ "rodio",
+ "roxmltree",
+ "rquickjs",
+ "rusty-opus",
+ "serde",
+ "serde_json",
+ "sha1 0.10.7",
+ "sha2",
+ "skrifa",
+ "souvlaki",
+ "symphonia",
+ "tao",
+ "tokio",
+ "tokio-tungstenite",
+ "tray-icon",
+ "unicode-bidi",
+ "unicode-normalization",
+ "url",
+ "wgpu",
+ "windows 0.62.2",
+ "winresource",
+ "wry",
+]
+
+[[package]]
+name = "aoto-android"
+version = "1.0.0"
+dependencies = [
+ "android_logger",
+ "aoto",
+ "eframe",
+ "jni 0.21.1",
+ "log",
+ "winit",
+]
+
+[[package]]
 name = "arboard"
 version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -556,70 +620,6 @@ name = "bit-vec"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
-
-[[package]]
-name = "bitchord"
-version = "2.1.1"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "bytes",
- "crossbeam-channel",
- "directories",
- "eframe",
- "egui",
- "egui_extras",
- "env_logger",
- "filmcraft-ac3",
- "futures-util",
- "gtk",
- "hmac",
- "image",
- "keyring",
- "libc",
- "localzone",
- "log",
- "md-5",
- "memmap2",
- "mp4ameta",
- "raw-window-handle",
- "reqwest",
- "rfd",
- "rodio",
- "roxmltree",
- "rquickjs",
- "rusty-opus",
- "serde",
- "serde_json",
- "sha1 0.10.7",
- "sha2",
- "skrifa",
- "souvlaki",
- "symphonia",
- "tao",
- "tokio",
- "tokio-tungstenite",
- "tray-icon",
- "unicode-bidi",
- "unicode-normalization",
- "url",
- "wgpu",
- "windows 0.62.2",
- "winresource",
- "wry",
-]
-
-[[package]]
-name = "bitchord-android"
-version = "2.1.1"
-dependencies = [
- "android_logger",
- "bitchord",
- "eframe",
- "jni 0.21.1",
- "log",
- "winit",
-]
 
 [[package]]
 name = "bitflags"

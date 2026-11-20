@@ -23,6 +23,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+/// Whether this copy has a repository to look for newer releases in. Aoto has none yet:
+/// when it does, set `repo!` below and this to true.
+pub const CONFIGURED: bool = false;
+
 /// The GitHub repository whose releases this copy updates from.
 macro_rules! repo {
     () => {
@@ -112,7 +116,7 @@ fn apk_offer(release: &serde_json::Value, current: &str) -> Option<(String, Stri
         return None;
     }
     let version = tag.trim_start_matches('v');
-    let want = format!("bitchord-{version}-android-arm64.apk");
+    let want = format!("aoto-{version}-android-arm64.apk");
     let asset = release["assets"].as_array()?.iter().find(|a| a["name"] == want.as_str())?;
     // Only a download from GitHub over HTTPS is handed to the browser.
     let url = asset["browser_download_url"].as_str().filter(|u| u.starts_with("https://"))?;
@@ -567,8 +571,8 @@ mod tests {
 
     #[test]
     fn a_phone_is_offered_the_apk_of_a_newer_release() {
-        let r = release("v2.1.2", &["bitchord-setup-2.1.2-macos-aarch64.dmg", "bitchord-2.1.2-android-arm64.apk"]);
-        assert_eq!(apk_offer(&r, "2.1.1"), Some(("2.1.2".to_owned(), "https://example.test/bitchord-2.1.2-android-arm64.apk".to_owned())));
+        let r = release("v2.1.2", &["bitchord-setup-2.1.2-macos-aarch64.dmg", "aoto-2.1.2-android-arm64.apk"]);
+        assert_eq!(apk_offer(&r, "2.1.1"), Some(("2.1.2".to_owned(), "https://example.test/aoto-2.1.2-android-arm64.apk".to_owned())));
     }
 
     #[test]
@@ -580,7 +584,7 @@ mod tests {
 
     #[test]
     fn the_release_a_phone_already_runs_is_not_offered() {
-        let r = release("v2.1.1", &["bitchord-2.1.1-android-arm64.apk"]);
+        let r = release("v2.1.1", &["aoto-2.1.1-android-arm64.apk"]);
         assert_eq!(apk_offer(&r, "2.1.1"), None);
         assert_eq!(apk_offer(&r, "2.2.0"), None);
     }

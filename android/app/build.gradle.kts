@@ -3,16 +3,16 @@ plugins {
 }
 
 android {
-    namespace = "io.github.aminuddinihsan20.bitchord"
+    namespace = "io.github.aminuddinihsan20.aoto"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "io.github.aminuddinihsan20.bitchord"
+        applicationId = "io.github.aminuddinihsan20.aoto"
         // AAudio, which cpal plays through, needs API 26.
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "2.1.1"
+        versionCode = 1
+        versionName = "1.0.0"
         // The Rust library is built for arm64 only (phones, and the emulator on Apple silicon).
         ndk {
             abiFilters += "arm64-v8a"

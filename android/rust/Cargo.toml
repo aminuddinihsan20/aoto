@@ -1,18 +1,18 @@
 [package]
-name = "bitchord-android"
-version = "2.1.1"
+name = "aoto-android"
+version = "1.0.0"
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
-description = "BitChord's Android activity: a cdylib that GameActivity loads"
+description = "Aoto's Android activity: a cdylib that GameActivity loads"
 
 [lib]
-name = "bitchord_android"
+name = "aoto_android"
 crate-type = ["cdylib"]
 path = "src/lib.rs"
 
 [target.'cfg(target_os = "android")'.dependencies]
-bitchord = { path = "../.." }
+aoto = { path = "../.." }
 eframe = { version = "0.37", default-features = false, features = ["android-game-activity"] }
 # AndroidApp's type; the same winit eframe draws with (eframe doesn't re-export it).
 winit = { version = "0.30", default-features = false }

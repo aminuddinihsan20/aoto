@@ -557,7 +557,7 @@ fn stand_in(ui: &Ui, rect: Rect, card: &Card, thumbs: &[Thumb], tint: egui::Text
     }
     let cover = Rect::from_min_size(pos2(rect.left() + side, rect.bottom() - side - 148.0 * k), Vec2::splat(148.0 * k));
     widgets::paint_cover(ui, cover, thumbs, 28.0 * k, 1.0);
-    let mark = widgets::galley(ui, "BitChord", theme::regular(38.0 * k), ink, rect.width());
+    let mark = widgets::galley(ui, "Aoto", theme::regular(38.0 * k), ink, rect.width());
     let mark_left = rect.right() - side - mark.size().x;
     painter.galley(pos2(mark_left, cover.center().y - mark.size().y / 2.0), mark, theme::with_alpha(ink, 0.85));
     let left = cover.right() + 28.0 * k;

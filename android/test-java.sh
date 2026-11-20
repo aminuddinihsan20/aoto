@@ -6,7 +6,7 @@
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 export JAVA_HOME="${JAVA_HOME:-/Applications/Android Studio.app/Contents/jbr/Contents/Home}"
-package=io/github/aminuddinihsan20/bitchord
+package=io/github/aminuddinihsan20/aoto
 out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 "$JAVA_HOME/bin/javac" -Xlint:all -Werror -d "$out" \
@@ -16,6 +16,6 @@ failed=0
 for test in "$here"/app/src/test/java/$package/*LogicTest.java; do
     name=$(basename "$test" .java)
     printf '%s: ' "$name"
-    "$JAVA_HOME/bin/java" -cp "$out" "io.github.aminuddinihsan20.bitchord.$name" || failed=1
+    "$JAVA_HOME/bin/java" -cp "$out" "io.github.aminuddinihsan20.aoto.$name" || failed=1
 done
 exit $failed

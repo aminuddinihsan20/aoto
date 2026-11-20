@@ -191,7 +191,7 @@ pub fn export(path: &Path) -> Result<String, String> {
     Ok(crate::local::folder_name(&label))
 }
 
-/// Music\BitChord.
+/// Music\Aoto.
 pub fn default_folder() -> PathBuf {
     // Android: the app's own storage, where it can write and play from; the listener's
     // chosen folder gets a copy of each download (see `export`).
@@ -203,7 +203,7 @@ pub fn default_folder() -> PathBuf {
     let base = directories::UserDirs::new()
         .and_then(|u| u.audio_dir().map(Path::to_path_buf).or_else(|| Some(u.home_dir().join("Music"))))
         .unwrap_or_else(|| PathBuf::from("."));
-    base.join("BitChord")
+    base.join("Aoto")
 }
 
 /// Load the index; `folder` is the saved setting (empty for the default).
@@ -406,8 +406,8 @@ mod tests {
 
     #[test]
     fn the_chosen_download_folder_is_saved_as_two_lines_and_read_back() {
-        let text = format_tree("content://x/tree/primary%3AMusic%2FBitChord", "primary:Music/BitChord");
-        assert_eq!(parse_tree(&text), Some(("content://x/tree/primary%3AMusic%2FBitChord".to_owned(), "primary:Music/BitChord".to_owned())));
+        let text = format_tree("content://x/tree/primary%3AMusic%2FAoto", "primary:Music/Aoto");
+        assert_eq!(parse_tree(&text), Some(("content://x/tree/primary%3AMusic%2FAoto".to_owned(), "primary:Music/Aoto".to_owned())));
         assert_eq!(parse_tree(""), None);
         assert_eq!(parse_tree("only-one-line"), None);
         assert_eq!(parse_tree("\nlabel"), None, "an empty address is no folder");

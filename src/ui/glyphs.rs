@@ -1,4 +1,4 @@
-//! BitChord's own icon set, drawn from `BitChordIcons`' path data.
+//! The icon set, drawn from the path data of BitChord's icons.
 //!
 //! The paths come from the desktop app's shared icon file and are baked to PNG at
 //! 256px (Chromium's own rasteriser, so the arcs and the two-contour outlines are

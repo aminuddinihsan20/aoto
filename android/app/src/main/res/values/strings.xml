@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">BitChord</string>
+    <string name="app_name">Aoto</string>
 
     <!-- The home-screen widgets: their names and descriptions in the widget picker, what
          they say with no song, and what a screen reader calls their buttons. -->
@@ -10,7 +10,7 @@
     <string name="widget_cover_description">The cover of what plays, with play and pause.</string>
     <string name="widget_pill_label">Mini player</string>
     <string name="widget_pill_description">One row: the song, play and next.</string>
-    <string name="widget_empty_title">BitChord</string>
+    <string name="widget_empty_title">Aoto</string>
     <string name="widget_empty_text">Play something</string>
     <string name="widget_play">Play</string>
     <string name="widget_pause">Pause</string>

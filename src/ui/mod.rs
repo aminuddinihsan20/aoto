@@ -2006,7 +2006,7 @@ pub fn shuffle<T>(v: &mut [T]) {
 /// can't change while running, and the check touches the disk, so it runs once.
 fn updatable() -> bool {
     static UPDATABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *UPDATABLE.get_or_init(|| cfg!(target_os = "android") || crate::update::installed() || crate::update::portable_dir().is_some())
+    *UPDATABLE.get_or_init(|| crate::update::CONFIGURED && (cfg!(target_os = "android") || crate::update::installed() || crate::update::portable_dir().is_some()))
 }
 
 /// Go to `to`: the page left is kept to come back to, and what was ahead is forgotten.

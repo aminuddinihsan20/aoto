@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "BitChord"
+rootProject.name = "Aoto"
 include(":app")

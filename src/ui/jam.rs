@@ -797,7 +797,7 @@ fn lobby(app: &mut App, ui: &mut Ui) {
             settings_field(ui, &mut app.jam.name, &hint, 32);
         });
         divider(ui);
-        setting_row(ui, "Party server", Some("Empty uses BitChord's. Whoever joins your party goes to the server it's on."), |ui| {
+        setting_row(ui, "Party server", Some("Empty uses the default server. Whoever joins your party goes to the server it's on."), |ui| {
             settings_field(ui, &mut app.jam_server, "jam.example.com", 96);
         });
     });

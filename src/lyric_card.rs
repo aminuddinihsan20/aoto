@@ -311,7 +311,7 @@ pub fn file_name(title: &str) -> String {
     let plain: String = title.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { ' ' } else { c }).collect();
     let short: String = one_line(&plain).chars().take(60).collect();
     let name = short.trim_matches([' ', '.']);
-    if name.is_empty() { "BitChord lyrics.png".to_owned() } else { format!("BitChord lyrics - {name}.png") }
+    if name.is_empty() { "Aoto lyrics.png".to_owned() } else { format!("Aoto lyrics - {name}.png") }
 }
 
 /// What `save-image` is asked: the picture's file and the name to save it under.
@@ -592,21 +592,21 @@ mod tests {
 
     #[test]
     fn a_saved_card_is_named_after_the_song() {
-        assert_eq!(file_name("Hujan di Kemang"), "BitChord lyrics - Hujan di Kemang.png");
-        assert_eq!(file_name("夜に駆ける"), "BitChord lyrics - 夜に駆ける.png");
+        assert_eq!(file_name("Hujan di Kemang"), "Aoto lyrics - Hujan di Kemang.png");
+        assert_eq!(file_name("夜に駆ける"), "Aoto lyrics - 夜に駆ける.png");
     }
 
     #[test]
     fn a_file_name_has_nothing_a_file_system_refuses() {
-        assert_eq!(file_name("AC/DC: \"Back\\in*Black?\" <live>|\n\u{1e}"), "BitChord lyrics - AC DC Back in Black live.png");
-        assert_eq!(file_name("  ...  "), "BitChord lyrics.png", "a name of dots alone is none");
-        assert_eq!(file_name(""), "BitChord lyrics.png");
+        assert_eq!(file_name("AC/DC: \"Back\\in*Black?\" <live>|\n\u{1e}"), "Aoto lyrics - AC DC Back in Black live.png");
+        assert_eq!(file_name("  ...  "), "Aoto lyrics.png", "a name of dots alone is none");
+        assert_eq!(file_name(""), "Aoto lyrics.png");
         let long = file_name(&"あ".repeat(300));
         assert!(long.chars().count() <= 90 && long.ends_with(".png"), "{long}");
     }
 
     #[test]
     fn saving_names_the_picture_and_what_to_call_it() {
-        assert_eq!(save_request(Path::new("/cache/share/lyrics-1f.png"), "BitChord lyrics - Tabun.png"), "/cache/share/lyrics-1f.png\u{1e}BitChord lyrics - Tabun.png");
+        assert_eq!(save_request(Path::new("/cache/share/lyrics-1f.png"), "Aoto lyrics - Tabun.png"), "/cache/share/lyrics-1f.png\u{1e}Aoto lyrics - Tabun.png");
     }
 }

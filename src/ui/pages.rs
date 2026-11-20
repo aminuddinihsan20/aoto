@@ -507,7 +507,7 @@ fn update_card(app: &mut App, ui: &mut Ui) {
     widgets::icon_at(ui, pos2(rect.left() + 28.0, rect.center().y), icon::DOWNLOAD, 20.0, accent);
     let x = rect.left() + 54.0;
     let text_w = rect.right() - 48.0 - x;
-    widgets::text_at(ui, pos2(x, rect.center().y - 19.0), &format!("BitChord {version} is available"), theme::semibold(15.0), theme::text(), text_w);
+    widgets::text_at(ui, pos2(x, rect.center().y - 19.0), &format!("Aoto {version} is available"), theme::semibold(15.0), theme::text(), text_w);
     widgets::text_at(ui, pos2(x, rect.center().y + 3.0), "Tap to download it, then open it to install.", theme::regular(12.5), theme::text_dim(), text_w);
     // Its own, thumb-sized target over the card's right end.
     let close = Rect::from_center_size(pos2(rect.right() - 26.0, rect.center().y), Vec2::splat(44.0));
@@ -2477,7 +2477,7 @@ fn local_folder(app: &mut App, ui: &mut Ui, uri: &str, now: f64) {
         }
         if pill(ui, "Remove folder", Some(icon::X), false).clicked() {
             crate::local::remove_folder(uri);
-            app.toast(format!("{name} removed from BitChord. Its files stay on your phone."));
+            app.toast(format!("{name} removed from Aoto. Its files stay on your phone."));
             app.nav_back();
         }
     });
@@ -2516,11 +2516,11 @@ struct SettingsSearch {
 struct SettingsRows(Vec<(String, String, String)>);
 
 fn search_key() -> egui::Id {
-    egui::Id::new("bitchord-settings-search")
+    egui::Id::new("aoto-settings-search")
 }
 
 fn rows_key() -> egui::Id {
-    egui::Id::new("bitchord-settings-rows")
+    egui::Id::new("aoto-settings-rows")
 }
 
 /// The heading `section_label` was given on the Material phone, kept for the card that
@@ -2529,7 +2529,7 @@ fn rows_key() -> egui::Id {
 struct PendingLabel(Option<(String, Option<String>)>);
 
 fn label_key() -> egui::Id {
-    egui::Id::new("bitchord-settings-label")
+    egui::Id::new("aoto-settings-label")
 }
 
 fn search_of(ui: &Ui) -> SettingsSearch {
@@ -2724,8 +2724,8 @@ fn update_offer(app: &App) -> Option<(String, String)> {
     }
 }
 
-/// Hand a release's APK to the browser, which downloads it; opening the download
-/// installs it over this one.
+/// Open a web page in the browser: a release's APK, which it downloads (opening the
+/// download installs it over this one), or a project's page.
 fn open_update(ui: &Ui, url: &str) {
     #[cfg(target_os = "android")]
     {
@@ -3084,7 +3084,7 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
             let busy = app.lastfm_busy.load(Ordering::Relaxed);
             let desc = match &app.lastfm_user {
                 Some(name) => format!("Scrobbling what you play to {name}'s profile."),
-                None if busy => "Allow BitChord on the Last.fm page that opened in your browser.".to_owned(),
+                None if busy => "Allow Aoto on the Last.fm page that opened in your browser.".to_owned(),
                 None => "Scrobble what you play to your Last.fm profile.".to_owned(),
             };
             let (mut connect, mut disconnect) = (false, false);
@@ -3104,10 +3104,17 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 app.lastfm_sign_out();
             }
         }
+        Row::Thanks => {
+            setting_row(ui, "Built on BitChord", Some("Aoto comes from BitChord and its Rust rewrite, BitChord PC Official. Thank you to both."), |ui| {
+                if pill(ui, "Open", None, false).clicked() {
+                    open_update(ui, "https://github.com/kushagrasinghx/BitChord");
+                }
+            });
+        }
         Row::TransferFromSpotify => super::transfer::open_row(app, ui),
         Row::SpotifyAccount => super::transfer::account_row(app, ui),
         Row::Version => {
-            setting_row(ui, "BitChord", Some(&format!("Version {}", crate::update::current_version())), |_| {});
+            setting_row(ui, "Aoto", Some(&format!("Version {}", crate::update::current_version())), |_| {});
         }
         // Where the app can update itself: the check it runs by itself, on demand.
         Row::Updates => {
@@ -3119,11 +3126,11 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
             let state = app.updater.as_ref().map(|u| u.state());
             let checking = matches!(state, Some(State::Checking));
             let desc = match (&offer, &state) {
-                (Some((version, _)), _) => format!("BitChord {version} is available. Download it, then open it to install."),
+                (Some((version, _)), _) => format!("Aoto {version} is available. Download it, then open it to install."),
                 (None, Some(State::Checking)) => "Looking for a newer version…".to_owned(),
                 (None, Some(State::UpToDate)) => "This is the newest version.".to_owned(),
                 (None, Some(State::Failed(e))) => format!("Couldn't look for a newer version: {e}"),
-                (None, _) => "BitChord looks for a newer version by itself, now and then.".to_owned(),
+                (None, _) => "Aoto looks for a newer version by itself, now and then.".to_owned(),
             };
             let (mut check, mut download) = (false, false);
             setting_row(ui, "Updates", Some(&desc), |ui| {
@@ -3314,7 +3321,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
 
 /// The hi-res source list: one line per addon, and "+ Add a source" below it that
 /// opens a fresh line for the next one. Each settled link is tested against the addon
-/// and its verdict shown underneath, the way the old BitChord did.
+/// and its verdict shown underneath, the way the old app did.
 fn hires_sources_editor(app: &mut App, ui: &mut Ui) {
     let mut edited = false;
     let mut remove = None;
@@ -3598,7 +3605,7 @@ fn network(app: &mut App, ui: &mut Ui) {
     use crate::proxy::{self, Setting};
     let same = |a: &Setting, b: &Setting| std::mem::discriminant(a) == std::mem::discriminant(b);
     let mut pick = None;
-    setting_row(ui, "Proxy", Some("Send everything BitChord fetches through a proxy: songs, lyrics, sign-in and Listen together."), |ui| {
+    setting_row(ui, "Proxy", Some("Send everything Aoto fetches through a proxy: songs, lyrics, sign-in and Listen together."), |ui| {
         let btn = dropdown_button(ui, app.proxy_mode.label(), 220.0, "Proxy");
         egui::Popup::menu(&btn).show(|ui| {
             ui.set_width(220.0);
@@ -3630,7 +3637,7 @@ fn network(app: &mut App, ui: &mut Ui) {
             divider(ui);
             let desc = match proxy::system() {
                 Some(p) => format!("{SYSTEM} is set to use {}.", proxy::redact(&p)),
-                None => format!("{SYSTEM} isn't set to use a proxy, so BitChord connects directly."),
+                None => format!("{SYSTEM} isn't set to use a proxy, so Aoto connects directly."),
             };
             setting_row(ui, if cfg!(windows) { "Windows proxy" } else { "System proxy" }, Some(&desc), |_| {});
         }

@@ -1,4 +1,4 @@
-//! BitChord: the app, run by the desktop binary (`main.rs`) or the Android activity
+//! Aoto: the app, run by the desktop binary (`main.rs`) or the Android activity
 //! (`android/rust`).
 
 
@@ -121,8 +121,8 @@ pub fn run_with(configure: impl FnOnce(&mut eframe::NativeOptions)) -> eframe::R
     // taskbar, so automated test runs don't pop up over whatever the user is doing.
     let background = std::env::var_os("YTM_BACKGROUND").is_some();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("BitChord")
-        .with_app_id("bitchord")
+        .with_title("Aoto")
+        .with_app_id("aoto")
         .with_inner_size(DEFAULT_SIZE)
         // The phone layout (forced on a desktop to preview it) fits narrow windows.
         .with_min_inner_size(if platform::phone() { [240.0, 320.0] } else { MIN_SIZE })
@@ -155,7 +155,7 @@ pub fn run_with(configure: impl FnOnce(&mut eframe::NativeOptions)) -> eframe::R
     configure(&mut options);
 
     let run = eframe::run_native(
-        "BitChord",
+        "Aoto",
         options,
         Box::new(|cc| {
             let ctx = cc.egui_ctx.clone();
@@ -272,8 +272,8 @@ fn hwnd(_: &eframe::CreationContext) -> Option<*mut std::ffi::c_void> {
 #[cfg(not(target_os = "android"))]
 fn init_logging() {
     let mut builder = env_logger::Builder::from_env(
-        // A test build can be made more talkative: YTM_DEFAULT_LOG=warn,bitchord=debug cargo build.
-        env_logger::Env::default().default_filter_or(option_env!("YTM_DEFAULT_LOG").unwrap_or("warn,bitchord=info")),
+        // A test build can be made more talkative: YTM_DEFAULT_LOG=warn,aoto=debug cargo build.
+        env_logger::Env::default().default_filter_or(option_env!("YTM_DEFAULT_LOG").unwrap_or("warn,aoto=info")),
     );
     // Dev hook: YTM_LOG=<path> logs there (test runs beside a running copy).
     if let Some(path) = std::env::var_os("YTM_LOG") {

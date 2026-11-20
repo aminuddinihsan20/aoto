@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn the_library_is_saved_and_loaded_again() {
-        let dir = std::env::temp_dir().join(format!("bitchord-local-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aoto-local-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut lib = Library { folders: Vec::new(), file: dir.join("local.json") };
         lib.add("content://t/jp", "primary:Music/Japanese");

@@ -18,7 +18,7 @@ const BG_LIGHT: Color32 = Color32::from_rgb(246, 244, 248);
 const TEXT_LIGHT: Color32 = Color32::from_rgb(22, 20, 26);
 const TEXT_DIM_LIGHT: Color32 = Color32::from_rgb(86, 82, 94);
 const TEXT_FAINT_LIGHT: Color32 = Color32::from_rgb(124, 118, 132);
-/// Default accent until a cover provides one (BitChord pink).
+/// Default accent until a cover provides one (pink).
 pub const RED: Color32 = Color32::from_rgb(0xFA, 0x58, 0x6A);
 
 /// Light or dark, as the app picked it for what's being drawn (see `set_mode`): the

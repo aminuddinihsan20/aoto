@@ -1778,7 +1778,7 @@ mod tests {
 
     /// A folder of its own for a test's file.
     fn folder(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bitchord-stats-test-{}-{name}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aoto-stats-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir

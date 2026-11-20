@@ -884,7 +884,7 @@ mod tests {
 
     #[test]
     fn the_queue_is_written_to_its_file_and_read_back() {
-        let dir = std::env::temp_dir().join(format!("bitchord-dlq-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("aoto-dlq-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("download_queue.json");
         let q = under_way(Network::Unmetered);
