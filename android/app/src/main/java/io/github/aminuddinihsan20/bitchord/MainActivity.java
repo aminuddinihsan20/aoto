@@ -1,6 +1,7 @@
 package io.github.aminuddinihsan20.bitchord;
 
 import android.Manifest;
+import android.app.SearchManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioManager;
@@ -140,13 +141,20 @@ public class MainActivity extends GameActivity {
 
     /**
      * A widget's Play with no player to tell opens the app to play: as Play in the app,
-     * which starts last time's song. (Not when Android reopens the app from the recent
-     * apps with the intent it was first started with.)
+     * which starts last time's song. "Play … on BitChord", said to the Assistant, opens
+     * it to search for that and play what is found. (Neither when Android reopens the
+     * app from the recent apps with the intent it was first started with.)
      */
     private static void playIfAsked(Intent intent) {
-        if (intent != null && NowPlayingWidget.ACTION_PLAY.equals(intent.getAction())
-                && (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+        if (intent == null) {
+            return;
+        }
+        boolean fromHistory = (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+        int asked = AutoLogic.opening(intent.getAction(), NowPlayingWidget.ACTION_PLAY, fromHistory);
+        if (asked == AutoLogic.OPENED_TO_PLAY) {
             PlaybackService.play();
+        } else if (asked == AutoLogic.OPENED_TO_SEARCH) {
+            PlayerSession.search(intent.getStringExtra(SearchManager.QUERY));
         }
     }
 

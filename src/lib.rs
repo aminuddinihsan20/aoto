@@ -11,6 +11,7 @@ mod proxy;
 mod renderer;
 mod art;
 mod audio;
+pub mod auto;
 mod backend;
 mod bidi;
 mod deeplink;

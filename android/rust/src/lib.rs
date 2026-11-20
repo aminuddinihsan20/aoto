@@ -145,6 +145,39 @@ extern "system" fn Java_io_github_aminuddinihsan20_bitchord_AudioOutput_nativeOu
     bitchord::playon::set_output_line(&line);
 }
 
+/// A car (Android Auto) connected, or the last one left (AutoBrowserService.java).
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_AutoBrowserService_nativeConnected(_env: Jni, _class: Jni, on: u8) {
+    bitchord::auto::set_wanted(on != 0);
+}
+
+/// The nodes of the tree a car browses, each with a count of its changes.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_AutoBrowserService_nativeVersions(env: jni::JNIEnv, _class: Jni) -> jni::sys::jstring {
+    env.new_string(bitchord::auto::versions()).map_or(std::ptr::null_mut(), |s| s.into_raw())
+}
+
+/// The rows of one node of that tree.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_AutoBrowserService_nativeRows(mut env: jni::JNIEnv, _class: jni::objects::JClass, node: jni::objects::JString) -> jni::sys::jstring {
+    let node: String = env.get_string(&node).map(Into::into).unwrap_or_default();
+    env.new_string(bitchord::auto::rows(&node)).map_or(std::ptr::null_mut(), |s| s.into_raw())
+}
+
+/// A row tapped in the car (PlayerSession.java).
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_PlayerSession_nativePlay(mut env: jni::JNIEnv, _class: jni::objects::JClass, id: jni::objects::JString) {
+    let id: String = env.get_string(&id).map(Into::into).unwrap_or_default();
+    bitchord::auto::push_play(&id);
+}
+
+/// Asked for by voice in the car (PlayerSession.java); empty: for anything.
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_bitchord_PlayerSession_nativeSearch(mut env: jni::JNIEnv, _class: jni::objects::JClass, query: jni::objects::JString) {
+    let query: String = env.get_string(&query).map(Into::into).unwrap_or_default();
+    bitchord::auto::push_search(&query);
+}
+
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_aminuddinihsan20_bitchord_MainActivity_nativeTakeCall(env: jni::JNIEnv, _class: Jni) -> jni::sys::jstring {
     let line = bitchord::platform::take_call().map(|c| c.to_line()).unwrap_or_default();

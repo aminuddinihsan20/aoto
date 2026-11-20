@@ -5,6 +5,7 @@
 
 mod account;
 mod actions;
+mod auto;
 mod collections;
 mod dev;
 mod dialogs;
@@ -425,6 +426,8 @@ pub struct App {
     speed_sheet: bool,
     /// "Play on": the sheet over Now Playing that says where the sound goes.
     playon: playon::View,
+    /// Android Auto: what was last told to a connected car (`crate::auto`).
+    auto: auto::State,
     /// No silence between a song and the next (`crate::gapless`).
     gapless: bool,
     /// The song asked to stand by behind the playing one, to follow it without a gap.
@@ -834,6 +837,7 @@ impl App {
             keep_pitch: get("keep_pitch").is_none_or(|v| v == "1"),
             speed_sheet: false,
             playon: Default::default(),
+            auto: Default::default(),
             gapless: get("gapless").is_none_or(|v| v == "1"),
             standby: None,
             carry: false,
@@ -1389,6 +1393,9 @@ impl eframe::App for App {
             ctx.request_repaint_after(wait);
         }
         if let Some(wait) = self.downloads_wake() {
+            ctx.request_repaint_after(wait);
+        }
+        if let Some(wait) = self.auto_wake() {
             ctx.request_repaint_after(wait);
         }
         let np = widgets::NowPlaying {

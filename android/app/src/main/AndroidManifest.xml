@@ -49,12 +49,37 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Play … on BitChord", said to the Assistant: with a car connected that goes
+                 to the media session; without one Android opens the app with it. Android
+                 Auto expects a media app to declare it. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
             android:name=".PlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Android Auto: the app is a media app (automotive_app_desc), and this is the
+             service a car connects to, to browse and to get the media session. Exported
+             for that; the service itself lets only the system, system apps and Android
+             Auto in (AutoLogic.allowed). -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <meta-data
+            android:name="com.google.android.gms.car.notification.SmallIcon"
+            android:resource="@drawable/ic_stat_music" />
+        <service
+            android:name=".AutoBrowserService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
 
         <!-- The home-screen widgets (4×2, 2×2, 4×1): one receiver each, since each has its
              own sizes; the label is the widget's name in the widget picker. -->

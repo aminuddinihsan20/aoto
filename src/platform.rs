@@ -290,6 +290,10 @@ pub struct NowPlaying {
     pub position_ms: i64,
     /// How fast the position moves while playing, in hundredths: 100 as recorded.
     pub speed_pct: i64,
+    /// How the queue repeats: 0 not, 1 all of it, 2 this song.
+    pub repeat: i64,
+    /// The song's place in the queue (what a car shows as up next), or -1.
+    pub queue_index: i64,
 }
 
 const FIELD: char = '\u{1f}';
@@ -302,13 +306,34 @@ impl NowPlaying {
             return String::new();
         }
         let clean = |t: &str| t.replace([FIELD, '\n', '\r'], " ");
-        [clean(&self.title), clean(&self.artist), clean(&self.cover), u8::from(self.playing).to_string(), self.duration_ms.to_string(), self.position_ms.to_string(), self.speed_pct.to_string()].join(&FIELD.to_string())
+        [
+            clean(&self.title),
+            clean(&self.artist),
+            clean(&self.cover),
+            u8::from(self.playing).to_string(),
+            self.duration_ms.to_string(),
+            self.position_ms.to_string(),
+            self.speed_pct.to_string(),
+            self.repeat.to_string(),
+            self.queue_index.to_string(),
+        ]
+        .join(&FIELD.to_string())
     }
 
     pub fn from_line(line: &str) -> Option<NowPlaying> {
         let mut f = line.split(FIELD);
-        let (title, artist, cover, playing, duration, position, speed) = (f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?);
-        Some(NowPlaying { title: title.to_owned(), artist: artist.to_owned(), cover: cover.to_owned(), playing: playing == "1", duration_ms: duration.parse().ok()?, position_ms: position.parse().ok()?, speed_pct: speed.parse().ok()? })
+        let (title, artist, cover, playing, duration, position, speed, repeat, place) = (f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next()?);
+        Some(NowPlaying {
+            title: title.to_owned(),
+            artist: artist.to_owned(),
+            cover: cover.to_owned(),
+            playing: playing == "1",
+            duration_ms: duration.parse().ok()?,
+            position_ms: position.parse().ok()?,
+            speed_pct: speed.parse().ok()?,
+            repeat: repeat.parse().ok()?,
+            queue_index: place.parse().ok()?,
+        })
     }
 }
 
@@ -338,6 +363,10 @@ pub enum MediaCommand {
     Previous,
     /// To this position, in milliseconds.
     Seek(i64),
+    /// Shuffle what is still to come (a car's button).
+    Shuffle,
+    /// On to the next way of repeating: all, one song, not at all (a car's button).
+    Repeat,
 }
 
 impl MediaCommand {
@@ -350,6 +379,8 @@ impl MediaCommand {
             MediaCommand::Next => (4, 0),
             MediaCommand::Previous => (5, 0),
             MediaCommand::Seek(ms) => (6, ms),
+            MediaCommand::Shuffle => (7, 0),
+            MediaCommand::Repeat => (8, 0),
         }
     }
 
@@ -361,6 +392,8 @@ impl MediaCommand {
             4 => MediaCommand::Next,
             5 => MediaCommand::Previous,
             6 => MediaCommand::Seek(arg),
+            7 => MediaCommand::Shuffle,
+            8 => MediaCommand::Repeat,
             _ => return None,
         })
     }
@@ -674,10 +707,17 @@ mod tests {
 
     #[test]
     fn what_is_playing_is_told_to_the_notification_as_one_line() {
-        let now = NowPlaying { title: "Tabun".into(), artist: "YOASOBI".into(), cover: "https://x/y.jpg".into(), playing: true, duration_ms: 261_000, position_ms: 15_500, speed_pct: 125 };
+        let now = NowPlaying { title: "Tabun".into(), artist: "YOASOBI".into(), cover: "https://x/y.jpg".into(), playing: true, duration_ms: 261_000, position_ms: 15_500, speed_pct: 125, repeat: 2, queue_index: 4 };
         let line = now.to_line();
-        assert!(line.ends_with("\u{1f}15500\u{1f}125"), "the speed is its seventh field, after the position");
+        assert!(line.ends_with("\u{1f}15500\u{1f}125\u{1f}2\u{1f}4"), "after the position: the speed, how the queue repeats, and the song's place in it");
         assert_eq!(NowPlaying::from_line(&line), Some(now));
+    }
+
+    #[test]
+    fn a_song_outside_any_queue_has_no_place_in_one() {
+        let now = NowPlaying { title: "Tabun".into(), queue_index: -1, ..NowPlaying::default() };
+        assert!(now.to_line().ends_with("\u{1f}0\u{1f}-1"));
+        assert_eq!(NowPlaying::from_line(&now.to_line()).unwrap().queue_index, -1);
     }
 
     #[test]
@@ -696,16 +736,14 @@ mod tests {
     #[test]
     fn media_commands_cross_the_activity_as_numbers_and_back_in_order() {
         assert!(take_media_commands().is_empty());
-        for c in [MediaCommand::Toggle, MediaCommand::Next, MediaCommand::Seek(42_000), MediaCommand::Previous, MediaCommand::Play, MediaCommand::Pause] {
+        let all = [MediaCommand::Toggle, MediaCommand::Next, MediaCommand::Seek(42_000), MediaCommand::Previous, MediaCommand::Play, MediaCommand::Pause, MediaCommand::Shuffle, MediaCommand::Repeat];
+        for c in all {
             let (code, arg) = c.to_code();
             push_media_command(code, arg);
         }
         push_media_command(99, 0);
-        assert_eq!(
-            take_media_commands(),
-            [MediaCommand::Toggle, MediaCommand::Next, MediaCommand::Seek(42_000), MediaCommand::Previous, MediaCommand::Play, MediaCommand::Pause],
-            "an unknown code is dropped"
-        );
+        assert_eq!(take_media_commands(), all, "an unknown code is dropped");
+        assert_eq!((MediaCommand::Shuffle.to_code().0, MediaCommand::Repeat.to_code().0), (7, 8), "PlaybackService.java sends these numbers");
         assert!(take_media_commands().is_empty());
     }
 
