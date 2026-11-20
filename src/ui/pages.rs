@@ -2218,11 +2218,17 @@ fn storage_card(app: &mut App, ui: &mut Ui, count: usize) {
     let size_w = g.count_right.x - songs.size().x - 12.0 - g.size.x;
     m3::text(ui, g.size, &crate::downloads::human_size(used), Type::DisplaySmall, m.on_surface, size_w);
     ui.painter().galley(pos2(g.count_right.x - songs.size().x, g.count_right.y - songs.size().y / 2.0), songs, m.primary);
+    let line_w = card.right() - 24.0 - g.line.x;
     let line = match disk {
-        Some((free, _)) => format!("used by downloads \u{00b7} {} free on this phone", crate::downloads::human_size(free)),
+        Some((free, _)) => {
+            let free = format!("{} free on this phone", crate::downloads::human_size(free));
+            let whole = format!("used by downloads \u{00b7} {free}");
+            // A narrow phone has no room for both halves: the size above says whose it is.
+            if m3::galley(ui, &whole, Type::BodyMedium, m.on_surface_variant, f32::INFINITY).size().x <= line_w { whole } else { free }
+        }
         None => "used by downloads".to_owned(),
     };
-    m3::text(ui, g.line, &line, Type::BodyMedium, m.on_surface_variant, card.right() - 24.0 - g.line.x);
+    m3::text(ui, g.line, &line, Type::BodyMedium, m.on_surface_variant, line_w);
     if let (Some(bar), Some((free, total))) = (g.bar, disk) {
         super::downloading::disk_bar(ui, bar, used, free, total);
     }

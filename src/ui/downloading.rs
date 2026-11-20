@@ -544,7 +544,14 @@ pub(super) fn wifi_row(app: &mut App, ui: &mut Ui) {
     m3::drawn::wifi(ui, badge, 20.0, m.on_secondary_container);
     let switch = Rect::from_center_size(pos2(r.right() - pages::toggle_size().x / 2.0, r.center().y), pages::toggle_size());
     let text_l = badge.x + 20.0 + 16.0;
-    m3::two_lines(ui, text_l, r.center().y, (switch.left() - 12.0 - text_l).max(40.0), NAME, Type::BodyLarge, m.on_surface, "Waits for Wi-Fi, saves mobile data", Type::BodyMedium, m.on_surface_variant);
+    // On a narrow phone the line under the name takes two.
+    let text_w = (switch.left() - 12.0 - text_l).max(40.0);
+    let name = m3::galley(ui, NAME, Type::BodyLarge, m.on_surface, text_w);
+    let note = m3::galley_wrapped(ui, "Waits for Wi-Fi, saves mobile data", Type::BodyMedium, m.on_surface_variant, text_w, 2);
+    let top = r.center().y - (name.size().y + note.size().y) / 2.0;
+    let note_top = top + name.size().y;
+    ui.painter().galley(pos2(text_l, top), name, m.on_surface);
+    ui.painter().galley(pos2(text_l, note_top), note, m.on_surface_variant);
     let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
     pages::toggle(&mut sui, &mut on, NAME);
     if on != was {
