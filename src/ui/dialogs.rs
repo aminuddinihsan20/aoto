@@ -6,7 +6,7 @@ use crate::backend::Req;
 use crate::model::Target;
 use crate::theme;
 
-use super::{Action, App, Dialog, notes, pages, widgets};
+use super::{Action, App, Dialog, m3, notes, pages, widgets};
 
 impl App {
     pub(super) fn draw_dialog(&mut self, ctx: &egui::Context) {
@@ -37,7 +37,11 @@ impl App {
             ui.set_width(440.0_f32.min(ctx.content_rect().width() - 48.0));
             egui::Frame::new().inner_margin(egui::Margin { left: 26, right: 26, top: 24, bottom: 22 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                ui.label(egui::RichText::new(heading).font(theme::bold(22.0)).color(theme::text()));
+                if m3::on() {
+                    m3::dialog_title(ui, heading);
+                } else {
+                    ui.label(egui::RichText::new(heading).font(theme::bold(22.0)).color(theme::text()));
+                }
                 ui.add_space(18.0);
                 match &mut dialog {
                     Dialog::PickPlaylist(tracks) => {
@@ -176,7 +180,25 @@ impl App {
     }
 }
 
+/// Dev hook: YTM_DIALOG=pick|new|edit|delete opens that dialog, for screenshots.
+pub(super) fn dev_hooks(app: &mut App) {
+    app.dialog = match super::dev_var("YTM_DIALOG") {
+        Some("pick") => Some(Dialog::PickPlaylist(Vec::new())),
+        Some("new") => Some(Dialog::NewPlaylist { title: String::new(), tracks: Vec::new() }),
+        Some("edit") => Some(Dialog::EditPlaylist { id: "dev".into(), title: "Pop Indonesia 90an".into(), description: String::new(), privacy: Some("PRIVATE".into()) }),
+        Some("delete") => Some(Dialog::ConfirmDelete { id: "dev".into(), title: "Pop Indonesia 90an".into() }),
+        _ => return,
+    };
+}
+
 fn field_label(ui: &mut Ui, label: &str) {
+    if m3::on() {
+        let m = crate::material::scheme();
+        let g = m3::galley(ui, label, crate::material::Type::LabelLarge, m.on_surface_variant, ui.available_width());
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), g.size().y + 8.0), egui::Sense::hover());
+        ui.painter().galley(rect.min, g, m.on_surface_variant);
+        return;
+    }
     ui.label(egui::RichText::new(label).font(theme::semibold(13.0)).color(theme::text_dim()));
     ui.add_space(8.0);
 }
@@ -186,6 +208,9 @@ pub(super) fn text_field(ui: &mut Ui, label: &str, text: &mut String, multiline:
     use egui::{Sense, vec2};
     if !label.is_empty() {
         field_label(ui, label);
+    }
+    if m3::on() {
+        return m3::text_field(ui, text, hint, multiline);
     }
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), if multiline { 96.0 } else { 42.0 }), Sense::hover());
     // Painted first, so the text box draws over it.
@@ -207,6 +232,18 @@ pub(super) fn text_field(ui: &mut Ui, label: &str, text: &mut String, multiline:
 /// Private / Unlisted / Public as one segmented control; nothing picked keeps the current setting.
 fn privacy_picker(ui: &mut Ui, privacy: &mut Option<String>) {
     use egui::{Sense, vec2};
+    if m3::on() {
+        let values = ["PRIVATE", "UNLISTED", "PUBLIC"];
+        let chosen = values.iter().position(|v| privacy.as_deref() == Some(v));
+        if let Some(i) = m3::segmented_any(ui, &["Private", "Unlisted", "Public"], chosen, crate::material::scheme().surface_container_highest) {
+            *privacy = if chosen == Some(i) { None } else { Some(values[i].to_owned()) };
+        }
+        if privacy.is_none() {
+            ui.add_space(8.0);
+            m3::dialog_text(ui, "Unchanged. Pick one to change who can see it.");
+        }
+        return;
+    }
     let (track, _) = ui.allocate_exact_size(vec2(ui.available_width(), 38.0), Sense::hover());
     ui.painter().rect_filled(track, 10.0, theme::glass(0.08));
     let options = [("PRIVATE", "Private"), ("UNLISTED", "Unlisted"), ("PUBLIC", "Public")];
@@ -235,6 +272,15 @@ fn privacy_picker(ui: &mut Ui, privacy: &mut Option<String>) {
 fn dialog_buttons(ui: &mut Ui, primary: &str, enabled: bool, accent: Color32) -> (bool, bool) {
     use egui::{Sense, vec2};
     let (mut ok, mut cancel) = (false, false);
+    if m3::on() {
+        // Material: the main action filled, the way out a text button before it.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            ok = ui.add_enabled_ui(enabled, |ui| m3::button(ui, primary, None, m3::ButtonStyle::Filled).clicked()).inner;
+            cancel = m3::button(ui, "Cancel", None, m3::ButtonStyle::Text).clicked();
+        });
+        return (ok, cancel);
+    }
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         let fg = if accent.r() as u32 + accent.g() as u32 + accent.b() as u32 > 480 { Color32::from_gray(15) } else { Color32::WHITE };
@@ -260,6 +306,9 @@ fn done_button(ui: &mut Ui) -> bool {
 /// A playlist (or "New playlist") row in the Add to playlist dialog.
 fn dialog_row(ui: &mut Ui, thumbs: Option<&[crate::model::Thumb]>, glyph: Option<char>, label: &str) -> bool {
     use egui::{Sense, pos2, vec2};
+    if m3::on() {
+        return dialog_row_material(ui, thumbs, glyph, label);
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::click());
     let resp = widgets::named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
     let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), 0.12);
@@ -278,6 +327,31 @@ fn dialog_row(ui: &mut Ui, thumbs: Option<&[crate::model::Thumb]>, glyph: Option
     resp.clicked()
 }
 
+/// The same row on the Material phone: a finger tall, its cover (or an icon on a
+/// tonal tile) before its name.
+fn dialog_row_material(ui: &mut Ui, thumbs: Option<&[crate::model::Thumb]>, glyph: Option<char>, label: &str) -> bool {
+    use egui::{Sense, pos2, vec2};
+    let m = crate::material::scheme();
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::click());
+    let resp = widgets::named(resp, label);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect.expand2(vec2(8.0, 0.0)), crate::material::shape::TILE_SMALL, m.on_surface.gamma_multiply(0.1));
+    }
+    let art = egui::Rect::from_center_size(pos2(rect.left() + 20.0, rect.center().y), vec2(40.0, 40.0));
+    match (thumbs, glyph) {
+        (Some(t), _) => widgets::paint_cover(ui, art, t, crate::material::shape::CHIP, 1.0),
+        (None, Some(g)) => {
+            ui.painter().rect_filled(art, crate::material::shape::CHIP, m.primary_container);
+            m3::paint_icon(ui, art.center(), 20.0, g.into(), m.primary);
+        }
+        _ => {}
+    }
+    let x = art.right() + 16.0;
+    let g = m3::galley(ui, label, crate::material::Type::BodyLarge, m.on_surface, rect.right() - x);
+    ui.painter().galley(pos2(x, rect.center().y - g.size().y / 2.0), g, m.on_surface);
+    resp.clicked()
+}
+
 /// "Delete playlist?" as a modal card: Some(true) delete, Some(false) cancel, None still open.
 fn confirm_delete(ctx: &egui::Context, title: &str, _accent: Color32) -> Option<bool> {
     let mut answer = None;
@@ -285,9 +359,25 @@ fn confirm_delete(ctx: &egui::Context, title: &str, _accent: Color32) -> Option<
         ui.set_width(400.0_f32.min(ctx.content_rect().width() - 48.0));
         egui::Frame::new().inner_margin(egui::Margin { left: 26, right: 26, top: 24, bottom: 22 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+            let body = format!("\u{201c}{title}\u{201d} will be removed from your YouTube Music library. This can't be undone.");
+            if m3::on() {
+                m3::dialog_title(ui, "Delete playlist?");
+                ui.add_space(16.0);
+                m3::dialog_text(ui, &body);
+                ui.add_space(24.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
+                    if m3::button(ui, "Delete", None, m3::ButtonStyle::Danger).clicked() {
+                        answer = Some(true);
+                    }
+                    if m3::button(ui, "Cancel", None, m3::ButtonStyle::Text).clicked() {
+                        answer = Some(false);
+                    }
+                });
+                return;
+            }
             ui.label(egui::RichText::new("Delete playlist?").font(theme::bold(22.0)).color(theme::text()));
             ui.add_space(10.0);
-            let body = format!("\u{201c}{title}\u{201d} will be removed from your YouTube Music library. This can't be undone.");
             ui.add(egui::Label::new(egui::RichText::new(body).font(theme::regular(14.0)).color(theme::text_dim())).wrap());
             ui.add_space(22.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

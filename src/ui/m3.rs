@@ -316,6 +316,10 @@ pub fn section_header(ui: &mut Ui, h: &SectionHeader) -> bool {
 pub enum ButtonStyle {
     Filled,
     Tonal,
+    /// Only its label, in the primary colour: a dialog's way out.
+    Text,
+    /// Filled with the error colour: an action that destroys something.
+    Danger,
 }
 
 /// A labelled button, 40 points tall in a touch target of 48, with an optional icon
@@ -325,10 +329,14 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
     let (fill, ink) = match style {
         ButtonStyle::Filled => (m.primary, m.on_primary),
         ButtonStyle::Tonal => (m.secondary_container, m.on_secondary_container),
+        ButtonStyle::Text => (Color32::TRANSPARENT, m.primary),
+        ButtonStyle::Danger => (m.error, m.on_error),
     };
     let g = galley(ui, label, Type::LabelLarge, ink, 280.0);
-    let lead = if glyph.is_some() { 16.0 + 18.0 + 8.0 } else { 24.0 };
-    let (rect, resp) = ui.allocate_exact_size(vec2(lead + g.size().x + 24.0, TOUCH), Sense::click());
+    // A text button has less room round its label: there is no container to fill.
+    let pad = if style == ButtonStyle::Text { 12.0 } else { 24.0 };
+    let lead = if glyph.is_some() { pad - 8.0 + 18.0 + 8.0 } else { pad };
+    let (rect, resp) = ui.allocate_exact_size(vec2((lead + g.size().x + pad).max(TOUCH), TOUCH), Sense::click());
     let resp = named(resp, label);
     let body = Rect::from_center_size(rect.center(), vec2(rect.width(), 40.0));
     let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
@@ -338,7 +346,7 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
     }
     let ink = ink.gamma_multiply(fade);
     if let Some(glyph) = glyph {
-        widgets::icon_at(ui, pos2(body.left() + 16.0 + 9.0, body.center().y), glyph, 17.0, ink);
+        widgets::icon_at(ui, pos2(body.left() + lead - 8.0 - 9.0, body.center().y), glyph, 17.0, ink);
     }
     ui.painter().galley(pos2(body.left() + lead, body.center().y - g.size().y / 2.0), g, ink);
     resp
@@ -781,13 +789,20 @@ pub fn segments(rect: Rect, count: usize) -> Vec<Rect> {
 /// A row of connected buttons, one of them chosen: a choice among a few (Light, Dark).
 /// Returns the one tapped.
 pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize> {
+    segmented_any(ui, labels, Some(selected), material::scheme().surface_container_high).filter(|i| *i != selected)
+}
+
+/// The same row where none need be chosen: returns the one tapped, the chosen one
+/// too, so a second tap on it can let it go. `rest` fills the ones not chosen (a
+/// step above the surface the row stands on).
+pub fn segmented_any(ui: &mut Ui, labels: &[&str], selected: Option<usize>, rest: Color32) -> Option<usize> {
     let m = material::scheme();
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), TOUCH), Sense::hover());
     let mut tapped = None;
     let last = labels.len().saturating_sub(1);
     for (i, (label, rect)) in labels.iter().zip(segments(row, labels.len())).enumerate() {
         let resp = named(ui.interact(rect, ui.scope_id().with(("segment", *label, row.min.y as i32)), Sense::click()), label);
-        let on = i == selected;
+        let on = Some(i) == selected;
         let body = Rect::from_center_size(rect.center(), vec2(rect.width(), 44.0));
         // The chosen one is a pill; the others keep their round ends at the row's ends only.
         let (round, flat) = (22_u8, 8_u8);
@@ -797,18 +812,59 @@ pub fn segmented(ui: &mut Ui, labels: &[&str], selected: usize) -> Option<usize>
             let (l, r) = (if i == 0 { round } else { flat }, if i == last { round } else { flat });
             CornerRadius { nw: l, sw: l, ne: r, se: r }
         };
-        let (fill, ink) = if on { (m.primary, m.on_primary) } else { (m.surface_container_high, m.on_surface) };
+        let (fill, ink) = if on { (m.primary, m.on_primary) } else { (rest, m.on_surface) };
         ui.painter().rect_filled(body, corners, fill);
         if resp.is_pointer_button_down_on() {
             ui.painter().rect_filled(body, corners, ink.gamma_multiply(PRESSED));
         }
         let g = galley(ui, label, Type::LabelLarge, ink, rect.width() - 8.0);
         ui.painter().galley(body.center() - g.size() / 2.0, g, ink);
-        if resp.clicked() && !on {
+        if resp.clicked() {
             tapped = Some(i);
         }
     }
     tapped
+}
+
+// ------------------------------------------------------------------ dialog
+
+/// The card a dialog stands on.
+pub fn dialog_frame() -> egui::Frame {
+    egui::Frame::new()
+        .fill(material::scheme().surface_container_high)
+        .corner_radius(shape::CARD as u8)
+        .shadow(egui::epaint::Shadow { offset: [0, 12], blur: 40, spread: 0, color: theme::shade(0.5) })
+}
+
+/// A dialog's heading.
+pub fn dialog_title(ui: &mut Ui, title: &str) {
+    let m = material::scheme();
+    let g = galley_wrapped(ui, title, Type::HeadlineSmall, m.on_surface, ui.available_width(), 2);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), g.size().y), Sense::hover());
+    ui.painter().galley(rect.min, g, m.on_surface);
+}
+
+/// What a dialog says under its heading.
+pub fn dialog_text(ui: &mut Ui, body: &str) {
+    let m = material::scheme();
+    let g = galley_wrapped(ui, body, Type::BodyMedium, m.on_surface_variant, ui.available_width(), 12);
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), g.size().y), Sense::hover());
+    ui.painter().galley(rect.min, g, m.on_surface_variant);
+}
+
+/// A text field across the layout's width: an outline that takes the primary colour
+/// while it is typed in. `multiline`: a few rows tall.
+pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, multiline: bool) -> Response {
+    let m = material::scheme();
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), if multiline { 112.0 } else { 56.0 }), Sense::hover());
+    // Painted first, so the text draws over it.
+    let outline = ui.painter().add(egui::Shape::Noop);
+    let inner = rect.shrink2(vec2(16.0, if multiline { 12.0 } else { 4.0 }));
+    let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER) };
+    let resp = ui.put(inner, edit.hint_text(egui::RichText::new(hint).color(m.on_surface_variant)).font(Type::BodyLarge.font()).text_color(m.on_surface).frame(egui::Frame::NONE).desired_width(inner.width()));
+    let focus = theme::anim_bool(ui.ctx(), resp.id.with("focus"), resp.has_focus(), 0.15);
+    ui.painter().set(outline, egui::Shape::rect_stroke(rect, shape::TILE_SMALL, Stroke::new(1.0 + focus, theme::lerp_color(m.outline, m.primary, focus)), StrokeKind::Inside));
+    resp
 }
 
 // ------------------------------------------------------------------ slider, stepper, dropdown

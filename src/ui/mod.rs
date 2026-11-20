@@ -1011,6 +1011,7 @@ impl App {
             app.queue_open = true;
         }
         jam::dev_hooks(&mut app);
+        dialogs::dev_hooks(&mut app);
         app.audio.set_normalize(app.normalize);
         app.audio.set_equalizer(&app.eq.settings());
         app.set_crossfade();

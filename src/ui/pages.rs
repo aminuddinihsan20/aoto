@@ -1139,7 +1139,7 @@ impl CollectionMenu<'_> {
     /// turned on (`Some(true)`) or off.
     fn show(&self, ui: &mut Ui, buttons: bool, acts: &mut Vec<Action>) -> Option<bool> {
         let mut select = None;
-        ui.set_width(226.0);
+        widgets::menu_begin(ui);
         ui.add_space(3.0);
         if let Some(first) = self.tracks.first()
             && widgets::menu_action(ui, Some(icon::RADIO), "Start radio")

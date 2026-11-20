@@ -157,6 +157,9 @@ fn rule_color() -> Color32 {
 }
 
 pub(super) fn surface() -> egui::Frame {
+    if super::m3::on() {
+        return super::m3::dialog_frame();
+    }
     egui::Frame::new()
         .fill(if theme::light() { theme::surface_fill() } else { Color32::from_gray(28) })
         .stroke(Stroke::new(1.0, rule_color()))

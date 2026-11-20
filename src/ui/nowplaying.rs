@@ -891,60 +891,72 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
 /// The menu itself, under the button `resp`.
 pub(super) fn options_popup(app: &mut App, resp: &egui::Response, track: &crate::model::Track, lyrics: bool) {
     egui::Popup::menu(resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
-        ui.set_width(270.0);
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        ui.add_space(4.0);
-        // Lyrics first: the source, translation and timing are what the menu is for
-        // while the lyrics are up.
-        let liked = app.liked.contains(&track.id);
-        if lyrics {
-            lyric_options(app, ui);
-            menu_divider(ui);
-            if crate::platform::phone() {
-                if widgets::menu_action_drawn(ui, "Share lyrics", |ui, at, color| super::lyric_share::share_mark(ui, at, 16.0, color)) {
-                    super::lyric_share::start(app);
-                }
-                menu_divider(ui);
-            }
+        if super::m3::on() {
+            // The phone's items are a finger tall: on a short screen the menu scrolls.
+            ui.set_width(296.0);
+            let insets = crate::platform::insets(ui.ctx());
+            let room = ui.ctx().content_rect().height() - insets.top - insets.bottom - 32.0;
+            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| options_contents(app, ui, track, lyrics));
+        } else {
+            ui.set_width(270.0);
+            options_contents(app, ui, track, lyrics);
         }
-        // Spatial audio on or off, right where the music is, and the way to the equalizer.
-        let mut spatial = app.spatial;
-        switch_row(ui, "Spatial audio", &mut spatial);
-        if spatial != app.spatial {
-            app.spatial = spatial;
-            app.set_crossfade();
-        }
-        if widgets::menu_action_drawn(ui, "Equalizer", |ui, at, color| super::equalizer::sliders(ui, at, 16.0, color)) {
-            app.actions.push(Action::Go(Page::Equalizer));
-        }
-        if widgets::menu_action_drawn(ui, &super::speed::menu_label(app), |ui, at, color| super::speed::gauge(ui, at, 16.0, color)) {
-            app.speed_sheet = true;
-            ui.close();
-        }
-        menu_divider(ui);
-        widgets::song_actions(ui, track, liked, None, false, &mut app.actions);
-        menu_divider(ui);
-        let queue = app.np_tab == NpTab::UpNext;
-        if widgets::menu_action(ui, Some(icon::LIST_MUSIC), if queue { "View lyrics" } else { "View queue" }) {
-            app.np_tab = if queue { NpTab::Lyrics } else { NpTab::UpNext };
-        }
-        if widgets::menu_action(ui, Some(icon::RADIO), "Start radio") {
-            app.actions.push(Action::Radio(track.clone()));
-        }
-        // Quality toggle at the bottom: revert when hi-res is playing, upgrade when not.
-        let hires_playing = app.audio_info.as_ref().is_some_and(|(_, i)| i.lossless() || i.atmos);
-        if hires_playing || !app.hires_sources.is_empty() {
-            menu_divider(ui);
-            if hires_playing {
-                if widgets::menu_action(ui, Some(icon::MUSIC), "Revert quality") {
-                    app.actions.push(Action::RevertQuality);
-                }
-            } else if widgets::menu_action(ui, Some(icon::MUSIC), "Upgrade quality") {
-                app.actions.push(Action::UpgradeQuality);
-            }
-        }
-        ui.add_space(4.0);
     });
+}
+
+fn options_contents(app: &mut App, ui: &mut Ui, track: &crate::model::Track, lyrics: bool) {
+    ui.add_space(4.0);
+    // Lyrics first: the source, translation and timing are what the menu is for
+    // while the lyrics are up.
+    let liked = app.liked.contains(&track.id);
+    if lyrics {
+        lyric_options(app, ui);
+        menu_divider(ui);
+        if crate::platform::phone() {
+            if widgets::menu_action_drawn(ui, "Share lyrics", |ui, at, color| super::lyric_share::share_mark(ui, at, widgets::menu_icon(), color)) {
+                super::lyric_share::start(app);
+            }
+            menu_divider(ui);
+        }
+    }
+    // Spatial audio on or off, right where the music is, and the way to the equalizer.
+    let mut spatial = app.spatial;
+    switch_row(ui, "Spatial audio", &mut spatial);
+    if spatial != app.spatial {
+        app.spatial = spatial;
+        app.set_crossfade();
+    }
+    if widgets::menu_action_drawn(ui, "Equalizer", |ui, at, color| super::equalizer::sliders(ui, at, widgets::menu_icon(), color)) {
+        app.actions.push(Action::Go(Page::Equalizer));
+    }
+    if widgets::menu_action_drawn(ui, &super::speed::menu_label(app), |ui, at, color| super::speed::gauge(ui, at, widgets::menu_icon(), color)) {
+        app.speed_sheet = true;
+        ui.close();
+    }
+    menu_divider(ui);
+    widgets::song_actions(ui, track, liked, None, false, &mut app.actions);
+    menu_divider(ui);
+    let queue = app.np_tab == NpTab::UpNext;
+    if widgets::menu_action(ui, Some(icon::LIST_MUSIC), if queue { "View lyrics" } else { "View queue" }) {
+        app.np_tab = if queue { NpTab::Lyrics } else { NpTab::UpNext };
+    }
+    if widgets::menu_action(ui, Some(icon::RADIO), "Start radio") {
+        app.actions.push(Action::Radio(track.clone()));
+    }
+    // Quality toggle at the bottom: revert when hi-res is playing, upgrade when not.
+    let hires_playing = app.audio_info.as_ref().is_some_and(|(_, i)| i.lossless() || i.atmos);
+    if hires_playing || !app.hires_sources.is_empty() {
+        menu_divider(ui);
+        if hires_playing {
+            if widgets::menu_action(ui, Some(icon::MUSIC), "Revert quality") {
+                app.actions.push(Action::RevertQuality);
+            }
+        } else if widgets::menu_action(ui, Some(icon::MUSIC), "Upgrade quality") {
+            app.actions.push(Action::UpgradeQuality);
+        }
+    }
+    ui.add_space(4.0);
 }
 
 fn lyric_options(app: &mut App, ui: &mut Ui) {
@@ -966,19 +978,25 @@ fn lyric_options(app: &mut App, ui: &mut Ui) {
     switch_row(ui, "Romanization", &mut app.show_roman);
     // This song's timing for the shown source: ‹ +0.0s ›
     let off = app.lyric_prefs.song_offset(&id, shown);
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
-    ui.painter().text(pos2(row.left() + 12.0, row.center().y), egui::Align2::LEFT_CENTER, "Timing", theme::regular(14.0), theme::text());
-    let mut sub = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(vec2(8.0, 0.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
-    sub.spacing_mut().item_spacing.x = 2.0;
-    if mini_icon(&mut sub, icon::CHEVRON_RIGHT, "Lyrics later (+0.1 s)", true).clicked() {
-        app.lyric_prefs.set_song_offset(&id, shown, off + 0.1);
-    }
-    let label = format!("{off:+.1}s").replace("+0.0", "0.0");
-    if mini_text(&mut sub, &label, false, "This song's lyrics timing. Double-click to reset.").double_clicked() {
-        app.lyric_prefs.set_song_offset(&id, shown, 0.0);
-    }
-    if mini_icon(&mut sub, icon::CHEVRON_LEFT, "Lyrics earlier (−0.1 s)", true).clicked() {
-        app.lyric_prefs.set_song_offset(&id, shown, off - 0.1);
+    if super::m3::on() {
+        // Material: the value between a "less" and a "more" button a finger can hit.
+        let m = crate::material::scheme();
+        let label = format!("{off:+.1}s").replace("+0.0", "0.0");
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), super::m3::MENU_ITEM_H), Sense::hover());
+        let g = super::m3::galley(ui, "Timing", crate::material::Type::BodyLarge, m.on_surface, 90.0);
+        ui.painter().galley(pos2(row.left() + 12.0, row.center().y - g.size().y / 2.0), g, m.on_surface);
+        let mut sub = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(vec2(4.0, 0.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let step = super::m3::stepper(&mut sub, &label, true, true, ("Lyrics earlier (−0.1 s)", "Lyrics later (+0.1 s)"));
+        // Its value, tapped twice, goes back to none: as the desktop's does.
+        let value = Rect::from_center_size(sub.min_rect().center(), vec2(76.0, super::m3::TOUCH));
+        let reset = named(ui.interact(value, ui.scope_id().with("lyr-timing-reset"), Sense::click()), "This song's lyrics timing. Double-tap to reset.").double_clicked();
+        if reset {
+            app.lyric_prefs.set_song_offset(&id, shown, 0.0);
+        } else if step != 0 {
+            app.lyric_prefs.set_song_offset(&id, shown, off + 0.1 * step as f32);
+        }
+    } else {
+        timing_row(&mut app.lyric_prefs, ui, &id, shown, off);
     }
     if let Some(p) = pick.filter(|p| *p != shown) {
         app.lyric_prefs.pick(&id, set, p);
@@ -987,12 +1005,40 @@ fn lyric_options(app: &mut App, ui: &mut Ui) {
     }
 }
 
+/// The desktop's timing row: ‹ +0.0s ›, the value double-clicked to reset it.
+fn timing_row(prefs: &mut super::lyric_prefs::Prefs, ui: &mut Ui, id: &str, shown: crate::lyrics::Provider, off: f32) {
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
+    ui.painter().text(pos2(row.left() + 12.0, row.center().y), egui::Align2::LEFT_CENTER, "Timing", theme::regular(14.0), theme::text());
+    let mut sub = ui.new_child(egui::UiBuilder::new().max_rect(row.shrink2(vec2(8.0, 0.0))).layout(egui::Layout::right_to_left(egui::Align::Center)));
+    sub.spacing_mut().item_spacing.x = 2.0;
+    if mini_icon(&mut sub, icon::CHEVRON_RIGHT, "Lyrics later (+0.1 s)", true).clicked() {
+        prefs.set_song_offset(id, shown, off + 0.1);
+    }
+    let label = format!("{off:+.1}s").replace("+0.0", "0.0");
+    if mini_text(&mut sub, &label, false, "This song's lyrics timing. Double-click to reset.").double_clicked() {
+        prefs.set_song_offset(id, shown, 0.0);
+    }
+    if mini_icon(&mut sub, icon::CHEVRON_LEFT, "Lyrics earlier (−0.1 s)", true).clicked() {
+        prefs.set_song_offset(id, shown, off - 0.1);
+    }
+}
+
 fn menu_caption(ui: &mut Ui, text: &str) {
+    if super::m3::on() {
+        let m = crate::material::scheme();
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
+        let g = super::m3::galley(ui, text, crate::material::Type::LabelMedium, m.on_surface_variant, r.width() - 24.0);
+        ui.painter().galley(pos2(r.left() + 12.0, r.center().y - g.size().y / 2.0), g, m.on_surface_variant);
+        return;
+    }
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::hover());
     ui.painter().text(pos2(r.left() + 12.0, r.center().y + 2.0), egui::Align2::LEFT_CENTER, text, theme::semibold(11.0), theme::text_faint());
 }
 
 fn menu_divider(ui: &mut Ui) {
+    if super::m3::on() {
+        return super::m3::menu_divider(ui);
+    }
     ui.add_space(5.0);
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
     ui.painter().rect_filled(r.shrink2(vec2(8.0, 0.0)), 0.0, theme::glass(0.08));
@@ -1270,6 +1316,16 @@ fn channels_text(n: u16) -> String {
 }
 
 fn info_row(ui: &mut Ui, label: &str, value: &str) {
+    if super::m3::on() {
+        use crate::material::Type;
+        let m = crate::material::scheme();
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 36.0), Sense::hover());
+        let v = super::m3::galley(ui, value, Type::TitleSmall, m.on_surface, 190.0);
+        let l = super::m3::galley(ui, label, Type::BodyMedium, m.on_surface_variant, r.width() - 36.0 - v.size().x);
+        ui.painter().galley(pos2(r.left() + 12.0, r.center().y - l.size().y / 2.0), l, m.on_surface_variant);
+        ui.painter().galley(pos2(r.right() - 12.0 - v.size().x, r.center().y - v.size().y / 2.0), v, m.on_surface);
+        return;
+    }
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     ui.painter().text(pos2(r.left() + 12.0, r.center().y), egui::Align2::LEFT_CENTER, label, theme::regular(13.0), theme::text_dim());
     let g = widgets::galley(ui, value, theme::semibold(13.0), theme::text(), 190.0);
@@ -1305,6 +1361,23 @@ fn size_text(bytes: u64) -> String {
 
 /// A lyrics source: its sync type's dot, name and sync type, with a check on the one shown.
 fn source_row(ui: &mut Ui, name: &str, sync: SyncKind, current: bool) -> bool {
+    if super::m3::on() {
+        use crate::material::Type;
+        let m = crate::material::scheme();
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::click());
+        let resp = named(resp, &format!("Lyrics source {name}"));
+        if current || resp.is_pointer_button_down_on() {
+            ui.painter().rect_filled(rect, crate::material::shape::TILE_SMALL, if current { m.secondary_container } else { m.on_surface.gamma_multiply(0.1) });
+        }
+        ui.painter().circle_filled(pos2(rect.left() + 24.0, rect.center().y), 4.0, sync_color(sync));
+        let (ink, dim) = if current { (m.on_secondary_container, m.on_secondary_container.gamma_multiply(0.8)) } else { (m.on_surface, m.on_surface_variant) };
+        let x = rect.left() + 48.0;
+        super::m3::two_lines(ui, x, rect.center().y, rect.right() - x - 44.0, name, Type::BodyLarge, ink, sync_label(sync), Type::BodySmall, dim);
+        if current {
+            widgets::icon_at(ui, pos2(rect.right() - 22.0, rect.center().y), icon::CHECK, 18.0, ink);
+        }
+        return resp.clicked();
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 44.0), Sense::click());
     let resp = named(resp, &format!("Lyrics source {name}")).on_hover_cursor(egui::CursorIcon::PointingHand);
     let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), 0.12);
@@ -1323,6 +1396,19 @@ fn source_row(ui: &mut Ui, name: &str, sync: SyncKind, current: bool) -> bool {
 
 /// A label with an on/off switch; the whole row toggles.
 fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) {
+    if super::m3::on() {
+        let m = crate::material::scheme();
+        let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), super::m3::MENU_ITEM_H), Sense::click());
+        if named(resp, label).clicked() {
+            *on = !*on;
+        }
+        let switch = Rect::from_center_size(pos2(rect.right() - 12.0 - super::m3::SWITCH_TARGET.x / 2.0, rect.center().y), super::m3::SWITCH_TARGET);
+        let g = super::m3::galley(ui, label, crate::material::Type::BodyLarge, m.on_surface, switch.left() - rect.left() - 24.0);
+        ui.painter().galley(pos2(rect.left() + 12.0, rect.center().y - g.size().y / 2.0), g, m.on_surface);
+        let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(switch));
+        super::m3::switch(&mut sui, on, label);
+        return;
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     let resp = named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
     if resp.clicked() {

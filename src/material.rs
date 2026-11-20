@@ -32,6 +32,9 @@ pub struct Scheme {
     pub on_surface_variant: Color32,
     pub outline: Color32,
     pub outline_variant: Color32,
+    /// An action that destroys something (delete a playlist), and what is written on it.
+    pub error: Color32,
+    pub on_error: Color32,
 }
 
 const fn rgb(hex: u32) -> Color32 {
@@ -63,6 +66,8 @@ impl Scheme {
         on_surface_variant: rgb(0xD8C2BC),
         outline: rgb(0xA08C87),
         outline_variant: rgb(0x53433F),
+        error: rgb(0xFFB4AB),
+        on_error: rgb(0x690005),
     };
 
     /// What one of the app's older colour names (`theme::text()` and the like) is in
@@ -302,6 +307,8 @@ mod tests {
             (s.on_surface_variant, "#D8C2BC"),
             (s.outline, "#A08C87"),
             (s.outline_variant, "#53433F"),
+            (s.error, "#FFB4AB"),
+            (s.on_error, "#690005"),
         ];
         for (color, want) in roles {
             assert_eq!(color, hex(want), "{want}");

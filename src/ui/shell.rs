@@ -1180,6 +1180,16 @@ pub fn toast(app: &mut App, ctx: &egui::Context, now: f64) {
         .fixed_pos(Pos2::new(screen.center().x, if screen.height() < 200.0 { screen.center().y + 22.0 } else { screen.bottom() - if crate::platform::phone() { app.bar_height() + crate::platform::insets(ctx).bottom + 8.0 } else { 104.0 } } + 14.0 * (1.0 - t)))
         .show(ctx, |ui| {
             ui.set_opacity(t);
+            if super::m3::on() {
+                // Material's snackbar: the surface's colours the other way round.
+                let m = crate::material::scheme();
+                egui::Frame::new().fill(m.on_surface).corner_radius(crate::material::shape::CHIP as u8).inner_margin(egui::Margin::symmetric(16, 14)).shadow(egui::epaint::Shadow { offset: [0, 4], blur: 12, spread: 0, color: theme::shade(0.35) }).show(ui, |ui| {
+                    let g = super::m3::galley_wrapped(ui, msg.as_str(), crate::material::Type::BodyMedium, m.surface, (screen.width() - 32.0 - 32.0).clamp(120.0, 520.0), 6);
+                    let (rect, _) = ui.allocate_exact_size(g.size(), Sense::hover());
+                    ui.painter().galley(rect.min, g, m.surface);
+                });
+                return;
+            }
             egui::Frame::new()
                 .fill(theme::menu_fill())
                 .corner_radius(12)

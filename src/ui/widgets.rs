@@ -594,7 +594,7 @@ pub(crate) fn card_menu_contents(ui: &mut Ui, c: &Card, liked: bool, acts: &mut 
     match &c.target {
         Target::Song(t) => song_menu(ui, t, liked, None, None, acts),
         t => {
-            ui.set_width(226.0);
+            menu_begin(ui);
             ui.add_space(3.0);
             if menu_action(ui, Some(icon::PLAY), "Play") {
                 acts.push(Action::PlayCollection(t.clone(), false));
@@ -625,7 +625,26 @@ fn more_button(ui: &mut Ui, rect: Rect, id: egui::Id, label: &str) -> Response {
     response
 }
 
+/// Start a menu of actions: its width (wider on the Material phone, whose items are
+/// larger and follow each other without a gap).
+pub fn menu_begin(ui: &mut Ui) {
+    if super::m3::on() {
+        ui.set_width(252.0);
+        ui.spacing_mut().item_spacing.y = 0.0;
+    } else {
+        ui.set_width(226.0);
+    }
+}
+
+/// How large a menu row's icon is drawn.
+pub fn menu_icon() -> f32 {
+    if super::m3::on() { super::m3::MENU_ICON } else { 16.0 }
+}
+
 fn menu_row(ui: &mut Ui, label: &str, draw: impl FnOnce(&Ui, Pos2, Color32)) -> bool {
+    if super::m3::on() {
+        return super::m3::menu_item(ui, label, draw).clicked();
+    }
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
     let response = named(response, label).on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.hovered() {
@@ -640,7 +659,7 @@ fn menu_row(ui: &mut Ui, label: &str, draw: impl FnOnce(&Ui, Pos2, Color32)) -> 
 
 pub fn menu_action(ui: &mut Ui, glyph: Option<char>, label: &str) -> bool {
     menu_row(ui, label, |ui, at, color| match glyph {
-        Some(glyph) => icon_at(ui, at, glyph, 16.0, color),
+        Some(glyph) => icon_at(ui, at, glyph, menu_icon(), color),
         None => {
             ui.painter().text(at, Align2::CENTER_CENTER, "↗", theme::semibold(17.0), color);
         }
@@ -656,13 +675,13 @@ pub fn menu_action_drawn(ui: &mut Ui, label: &str, draw: impl FnOnce(&Ui, Pos2, 
 fn menu_action_star(ui: &mut Ui, liked: bool, label: &str) -> bool {
     menu_row(ui, label, |ui, at, color| {
         let glyph = if liked { super::glyphs::STAR_FILLED } else { super::glyphs::STAR };
-        super::glyphs::draw(ui, at, 16.0, glyph, color);
+        super::glyphs::draw(ui, at, menu_icon(), glyph, color);
     })
 }
 
 /// `remove`: the song's row in the open playlist, when it's yours and the song can come out.
 pub fn song_menu(ui: &mut Ui, t: &Track, liked: bool, remove: Option<usize>, queue_move: Option<(usize, bool, bool)>, acts: &mut Vec<Action>) {
-    ui.set_width(226.0);
+    menu_begin(ui);
     ui.add_space(3.0);
     song_actions(ui, t, liked, remove, true, acts);
     ui.separator();
