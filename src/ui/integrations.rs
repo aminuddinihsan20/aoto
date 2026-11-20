@@ -1,72 +1,13 @@
-//! Discord, Last.fm, the system media controls, the app icon, updates and the tray.
+//! Last.fm, the system media controls, the app icon, updates and the tray.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::backend;
-
 use super::{App, dev_var, notes, updatable};
 
 impl App {
-    pub(super) fn set_discord_enabled(&mut self, enabled: bool) {
-        self.discord_enabled = enabled;
-        if enabled {
-            if self.discord.is_none() {
-                self.discord = crate::discord::Discord::spawn();
-                if let Some(d) = &self.discord {
-                    d.set_prefs(self.discord_prefs.clone());
-                }
-            }
-        } else {
-            if let Some(discord) = self.discord.take() {
-                discord.set(None);
-            }
-            self.discord_sent = None;
-        }
-    }
-
-    /// Mirror playback into Discord. Cheap enough to run every frame: it only sends on a
-    /// new song, play/pause, a seek, or a newly learned duration.
-    pub(super) fn sync_discord(&mut self) {
-        let Some(d) = &self.discord else { return };
-        let track = self.playing_track().filter(|_| self.playing() && !self.buffering);
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as i64;
-        // When the song started and how long it takes, by the clock on the wall.
-        let start_ms = now - self.heard(self.audio.status.position()).as_millis() as i64;
-        let dur = self.heard(Duration::from_millis(self.audio.status.duration_ms.load(Ordering::Relaxed))).as_millis() as i64;
-        // The full quality line the player's track-info shows; YouTube's own audio is
-        // the plain compressed one, so it has no detail numbers.
-        let quality = self.audio_info.as_ref().map_or_else(|| "High".to_owned(), |(_, i)| i.rpc_line());
-        // Position ticks every 100 ms; only a jump of 2 s or more is a real seek.
-        let same = match (track, &self.discord_sent) {
-            (Some(t), Some(b)) => {
-                b.video_id == t.id
-                    && (start_ms - b.start_ms).abs() < 2000
-                    && b.end_ms.is_some() == (dur > 0)
-                    && b.quality.as_deref() == Some(quality.as_str())
-            }
-            (None, None) => true,
-            _ => false,
-        };
-        if same {
-            return;
-        }
-        let want = track.map(|t| crate::discord::Presence {
-            video_id: t.id.clone(),
-            title: t.title.clone(),
-            artist: t.artist_line(),
-            album: t.album.as_ref().map(|a| a.name.clone()),
-            art: backend::art_url(t),
-            quality: Some(quality),
-            start_ms,
-            end_ms: (dur > 0).then_some(start_ms + dur),
-        });
-        d.set(want.clone());
-        self.discord_sent = want;
-    }
-
     /// Tell Last.fm what's playing, and scrobble it once it has played half its length
-    /// or 4 minutes (songs under 30 s don't count). Runs every frame, like Discord's.
+    /// or 4 minutes (songs under 30 s don't count). Runs every frame.
     pub(super) fn sync_lastfm(&mut self) {
         let result = self.lastfm_result.lock().unwrap().take();
         if let Some(r) = result {

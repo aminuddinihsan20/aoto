@@ -1,8 +1,10 @@
 package io.github.aminuddinihsan20.bitchord;
 
 import android.Manifest;
+import android.app.SearchManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.os.Build;
@@ -95,6 +97,10 @@ public class MainActivity extends GameActivity {
         Handler main = new Handler(Looper.getMainLooper());
         // Downloads wait for Wi-Fi when asked to: the app hears what the phone is on.
         main.post(() -> Connectivity.watch(getApplicationContext()));
+        // "Play on": the app hears where the music goes and how loud the phone is set, and
+        // the volume keys are the music's whether or not a song plays.
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        main.post(() -> AudioOutput.watch(getApplicationContext()));
         main.post(new Runnable() {
             @Override
             public void run() {
@@ -141,13 +147,20 @@ public class MainActivity extends GameActivity {
 
     /**
      * A widget's Play with no player to tell opens the app to play: as Play in the app,
-     * which starts last time's song. (Not when Android reopens the app from the recent
-     * apps with the intent it was first started with.)
+     * which starts last time's song. "Play … on BitChord", said to the Assistant, opens
+     * it to search for that and play what is found. (Neither when Android reopens the
+     * app from the recent apps with the intent it was first started with.)
      */
     private static void playIfAsked(Intent intent) {
-        if (intent != null && NowPlayingWidget.ACTION_PLAY.equals(intent.getAction())
-                && (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) == 0) {
+        if (intent == null) {
+            return;
+        }
+        boolean fromHistory = (intent.getFlags() & Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0;
+        int asked = AutoLogic.opening(intent.getAction(), NowPlayingWidget.ACTION_PLAY, fromHistory);
+        if (asked == AutoLogic.OPENED_TO_PLAY) {
             PlaybackService.play();
+        } else if (asked == AutoLogic.OPENED_TO_SEARCH) {
+            PlayerSession.search(intent.getStringExtra(SearchManager.QUERY));
         }
     }
 
@@ -183,6 +196,17 @@ public class MainActivity extends GameActivity {
                     done.finish(true, "");
                 } catch (RuntimeException e) {
                     done.finish(false, "no browser to open it with");
+                }
+                break;
+            case "output-switch":
+                done.finish(AudioOutput.openSwitcher(this), "");
+                break;
+            case "output-volume":
+                try {
+                    AudioOutput.setVolume(Integer.parseInt(arg));
+                    done.finish(true, "");
+                } catch (NumberFormatException e) {
+                    done.finish(false, "not a volume");
                 }
                 break;
             case "scan":
@@ -273,6 +297,7 @@ public class MainActivity extends GameActivity {
     protected void onStart() {
         super.onStart();
         nativeSetBackground(false);
+        AudioOutput.refresh();
     }
 
     @Override

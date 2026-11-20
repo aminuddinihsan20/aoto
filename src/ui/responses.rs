@@ -17,6 +17,7 @@ impl App {
     pub(super) fn pump(&mut self, now: f64) {
         self.tick_sleep();
         self.media_notification();
+        self.auto_tick();
         self.apply_storage();
         let cover = self.media_cover.lock().unwrap().take();
         // The listed track's art, with what plays's title, artists and length.
@@ -744,6 +745,8 @@ impl App {
                 MediaCommand::Next => self.next(),
                 MediaCommand::Previous => self.prev(),
                 MediaCommand::Seek(ms) => self.seek_to(std::time::Duration::from_millis(ms.max(0) as u64)),
+                MediaCommand::Shuffle => self.shuffle_upcoming(),
+                MediaCommand::Repeat => self.queue.repeat = self.queue.repeat.next(),
                 MediaCommand::Play | MediaCommand::Pause => {}
             }
         }
@@ -759,6 +762,8 @@ impl App {
                     duration_ms: duration,
                     position_ms: status.position_smooth().as_millis() as i64,
                     speed_pct: (status.speed() * 100.0).round() as i64,
+                    repeat: self.queue.repeat.code(),
+                    queue_index: self.queue.index.map_or(-1, |i| i as i64),
                 }
             }
             None => crate::platform::NowPlaying::default(),

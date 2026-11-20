@@ -11,6 +11,26 @@ pub enum Repeat {
     One,
 }
 
+impl Repeat {
+    /// What the repeat button turns it into: all, then one song, then off again.
+    pub fn next(self) -> Repeat {
+        match self {
+            Repeat::Off => Repeat::All,
+            Repeat::All => Repeat::One,
+            Repeat::One => Repeat::Off,
+        }
+    }
+
+    /// The number the media session (Java) knows it by.
+    pub fn code(self) -> i64 {
+        match self {
+            Repeat::Off => 0,
+            Repeat::All => 1,
+            Repeat::One => 2,
+        }
+    }
+}
+
 /// A playlist's load whose next pages also go to the queue, and whether that queue
 /// is shuffled (they're then mixed into what's still to come). `ran_out`: playback
 /// reached the end of what had come, and carries on when more does (or the load ends).
@@ -225,6 +245,12 @@ impl Queue {
 #[cfg(test)]
 mod tests {
     use super::{Queue, QueueFill, Repeat, Track};
+
+    #[test]
+    fn the_repeat_button_goes_from_off_to_all_to_one_and_back() {
+        assert!(Repeat::Off.next() == Repeat::All && Repeat::All.next() == Repeat::One && Repeat::One.next() == Repeat::Off);
+        assert_eq!([Repeat::Off.code(), Repeat::All.code(), Repeat::One.code()], [0, 1, 2], "PlaybackService.java reads these");
+    }
 
     fn track(id: &str) -> Track {
         Track { id: id.into(), title: id.into(), artists: vec![], album: None, duration: None, thumbs: vec![], track_nr: None, plays: None, music_video: false }
