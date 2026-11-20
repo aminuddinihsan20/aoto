@@ -2,7 +2,8 @@
 //! (`AutoBrowserService`), which has no songs of its own: the app publishes here what
 //! there is to browse (the queue, the downloads, the library's playlists, quick picks),
 //! as lines the service reads, and takes from here what the car asked to play, by a tap
-//! or by voice. Nothing is published unless a car is connected.
+//! or by voice. The home screen's queue widget shows the same "Up next" and plays a
+//! row the same way. Nothing is published unless a car is connected or that widget is there.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -160,6 +161,7 @@ struct Published {
 }
 
 static WANTED: AtomicBool = AtomicBool::new(false);
+static WIDGET: AtomicBool = AtomicBool::new(false);
 static PUBLISHED: Mutex<Option<Published>> = Mutex::new(None);
 static PLAYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -167,18 +169,36 @@ fn with_published<R>(f: impl FnOnce(&mut Published) -> R) -> R {
     f(PUBLISHED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Published::default))
 }
 
-/// The service: a car connected, or the last one left. With none, what was published
-/// is forgotten (the next car starts from a fresh tree).
+/// The service: a car connected, or the last one left. With no one left to read it
+/// (see [`set_widget`]), what was published is forgotten: the next car starts from a
+/// fresh tree.
 pub fn set_wanted(on: bool) {
     WANTED.store(on, Ordering::SeqCst);
-    if !on {
-        with_published(|p| p.nodes.clear());
-    }
+    forget_unread();
     crate::platform::wake_ui();
 }
 
-/// Is a car connected? Only then is the tree kept up to date.
+/// The player service: the home screen has a queue widget, which shows the tree's
+/// "Up next", or the last one is gone.
+pub fn set_widget(on: bool) {
+    WIDGET.store(on, Ordering::SeqCst);
+    forget_unread();
+    crate::platform::wake_ui();
+}
+
+fn forget_unread() {
+    if !wanted() {
+        with_published(|p| p.nodes.clear());
+    }
+}
+
+/// Does anyone read the tree, a car or a queue widget? Only then is it kept up to date.
 pub fn wanted() -> bool {
+    car() || WIDGET.load(Ordering::SeqCst)
+}
+
+/// Is a car connected? It browses all of the tree; a widget only reads the queue.
+pub fn car() -> bool {
     WANTED.load(Ordering::SeqCst)
 }
 
@@ -481,6 +501,41 @@ mod tests {
         set_wanted(false);
         assert!(!wanted());
         assert_eq!(versions(), "");
+    }
+
+    #[test]
+    fn a_queue_widget_on_the_home_screen_has_the_tree_kept_as_a_car_does() {
+        let _one = TREE.lock().unwrap_or_else(|e| e.into_inner());
+        set_wanted(false);
+        set_widget(false);
+        assert!(!wanted());
+        set_widget(true);
+        assert!(wanted(), "the widget shows the queue");
+        assert!(!car(), "but it is no car");
+        let queue = songs(3);
+        publish(&Source { queue: &queue, index: Some(0), ..Source::default() });
+        assert!(rows(QUEUE).starts_with("queue/0/v0\u{1f}"));
+        // A car comes and goes: the widget still has its list.
+        set_wanted(true);
+        assert!(car());
+        set_wanted(false);
+        assert!(wanted());
+        assert_ne!(versions(), "", "the tree stays for the widget");
+        set_widget(false);
+        assert!(!wanted());
+        assert_eq!(versions(), "", "no one reads it any more");
+    }
+
+    #[test]
+    fn a_car_keeps_the_tree_when_the_widget_goes() {
+        let _one = TREE.lock().unwrap_or_else(|e| e.into_inner());
+        set_wanted(true);
+        set_widget(true);
+        publish(&Source::default());
+        set_widget(false);
+        assert!(wanted());
+        assert_ne!(versions(), "");
+        set_wanted(false);
     }
 
     #[test]

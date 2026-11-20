@@ -151,6 +151,13 @@ extern "system" fn Java_io_github_aminuddinihsan20_aoto_AutoBrowserService_nativ
     aoto::auto::set_wanted(on != 0);
 }
 
+/// The home screen has a queue widget, or the last one is gone (PlaybackService.java):
+/// it shows the tree's "Up next".
+#[unsafe(no_mangle)]
+extern "system" fn Java_io_github_aminuddinihsan20_aoto_PlaybackService_nativeQueueWidget(_env: Jni, _class: Jni, on: u8) {
+    aoto::auto::set_widget(on != 0);
+}
+
 /// The nodes of the tree a car browses, each with a count of its changes.
 #[unsafe(no_mangle)]
 extern "system" fn Java_io_github_aminuddinihsan20_aoto_AutoBrowserService_nativeVersions(env: jni::JNIEnv, _class: Jni) -> jni::sys::jstring {

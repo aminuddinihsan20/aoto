@@ -1,6 +1,7 @@
-//! Android Auto's side of the app: while a car is connected it keeps the tree the car
-//! browses (`crate::auto`) up to date, and it plays what the car asks for. It runs from
-//! `pump`, so it works with the activity away, as a phone in a car is.
+//! Android Auto's side of the app: while a car is connected (or the home screen has a
+//! queue widget) it keeps the tree they read (`crate::auto`) up to date, and it plays
+//! what they ask for. It runs from `pump`, so it works with the activity away, as a
+//! phone in a car is.
 
 use std::time::{Duration, Instant};
 
@@ -82,26 +83,37 @@ impl App {
         if self.auto.published.is_some_and(|at| at.elapsed() < EVERY) {
             return;
         }
-        if self.auto.listed.is_none_or(|at| at.elapsed() >= DOWNLOADS_EVERY) {
+        // The home screen's queue widget reads the queue alone: only a car has the
+        // downloads listed and the rest of the tree filled.
+        let car = auto::car();
+        if !car {
+            self.auto.listed = None;
+            self.auto.downloads.clear();
+        } else if self.auto.listed.is_none_or(|at| at.elapsed() >= DOWNLOADS_EVERY) {
             self.auto.downloads = crate::downloads::list();
             self.auto.listed = Some(Instant::now());
         }
         self.auto.published = Some(Instant::now());
-        auto::publish(&Source {
-            queue: &self.queue.tracks,
-            index: self.queue.index,
-            downloads: &self.auto.downloads,
-            // Last launch's playlists until the library has arrived.
-            playlists: self.library.as_ref().map(|l| l.playlists.as_slice()).or(self.sidebar_cache.as_deref()).unwrap_or_default(),
-            signed_in: self.logged_in,
-            picks: self.quick_picks(),
+        let queue = Source { queue: &self.queue.tracks, index: self.queue.index, ..Source::default() };
+        auto::publish(&if car {
+            Source {
+                downloads: &self.auto.downloads,
+                // Last launch's playlists until the library has arrived.
+                playlists: self.library.as_ref().map(|l| l.playlists.as_slice()).or(self.sidebar_cache.as_deref()).unwrap_or_default(),
+                signed_in: self.logged_in,
+                picks: self.quick_picks(),
+                ..queue
+            }
+        } else {
+            queue
         });
     }
 
     /// With a car connected the screen is drawn again this soon, however idle it is: the
-    /// tree is looked over from there. (Away, the background tick does it.)
+    /// tree is looked over from there. (Away, the background tick does it; and a queue
+    /// widget alone needs no drawing, as the home screen shows only with the app away.)
     pub(super) fn auto_wake(&self) -> Option<Duration> {
-        auto::wanted().then_some(EVERY)
+        auto::car().then_some(EVERY)
     }
 
     /// Home's quick picks, once home has loaded.
