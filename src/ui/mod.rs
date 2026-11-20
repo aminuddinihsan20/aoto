@@ -23,6 +23,7 @@ mod phone;
 mod playback;
 mod queue;
 mod responses;
+mod sheet;
 mod shell;
 mod storage;
 #[cfg(target_os = "android")]
@@ -1411,9 +1412,15 @@ impl eframe::App for App {
             // Android's back button: the activity asks whether there is anything to go
             // back to, and sends the press this way.
             crate::platform::set_wake(&ctx);
-            crate::platform::set_can_go_back(self.np_open || !self.back.is_empty());
+            let sheet_open = sheet::is_open(&ctx);
+            crate::platform::set_can_go_back(sheet_open || self.np_open || !self.back.is_empty());
             if crate::platform::take_back_request() {
-                self.nav_back();
+                // An open sheet is the first thing Back closes.
+                if sheet_open {
+                    sheet::dismiss(&ctx);
+                } else {
+                    self.nav_back();
+                }
             }
         }
         if !self.fullscreen && !covered && !phone {
