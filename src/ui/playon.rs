@@ -300,7 +300,7 @@ mod tests {
     fn the_chip_has_words_when_there_is_room_for_them() {
         // A 412-point phone: the sleep chip ends near 134, the lyrics button starts at 299.
         let room = chip_words(142.0, 291.0).expect("room for words");
-        assert!(room >= 90.0 && room <= 149.0 - 51.0, "{room}");
+        assert!((90.0..=149.0 - 51.0).contains(&room), "{room}");
         // A 360-point phone with the timer running: the icon alone.
         assert_eq!(chip_words(160.0, 239.0), None);
         // However wide the screen, a long name doesn't run on for ever.
