@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the share provider may hand to other apps: the lyric cards drawn into the
+     cache's "share" folder (LyricCard.java), and nothing else of the app's storage. -->
+<paths>
+    <cache-path
+        name="share"
+        path="share/" />
+</paths>

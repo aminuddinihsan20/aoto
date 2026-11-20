@@ -27,6 +27,7 @@ mod jsc;
 mod lastfm;
 mod local;
 mod login;
+mod lyric_card;
 mod lyrics;
 mod media;
 mod model;

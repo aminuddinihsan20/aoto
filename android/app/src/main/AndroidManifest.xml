@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Saving a lyric card to Pictures: Android 10 and later take it through the media
+         store with no permission; before that the folder is written to directly. -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:label="@string/app_name"
@@ -76,6 +81,17 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_pill_info" />
         </receiver>
+        <!-- Sharing a lyric card: other apps read the picture through this, and only the
+             pictures in the cache's "share" folder (res/xml/share_paths.xml). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.share"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
 
         <!-- The sign-in page (a WebView), opened by MainActivity when the app asks. -->
         <activity
