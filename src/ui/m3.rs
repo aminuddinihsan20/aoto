@@ -369,6 +369,10 @@ pub enum IconStyle {
     Tonal,
     /// A quieter container, the colour of a card: an action among several.
     Surface,
+    /// A thin container over artwork or a gradient, where a surface colour would stand out.
+    Overlay,
+    /// The same, its icon in the primary colour: a mode that is on (repeat).
+    Lit,
     Filled,
 }
 
@@ -380,11 +384,18 @@ pub struct IconButton<'a> {
     style: IconStyle,
     size: f32,
     radius: Option<f32>,
+    glyph: Option<f32>,
 }
 
 impl<'a> IconButton<'a> {
     pub fn new(icon: impl Into<Icon>, name: &'a str) -> Self {
-        Self { icon: icon.into(), name, style: IconStyle::Standard, size: 40.0, radius: None }
+        Self { icon: icon.into(), name, style: IconStyle::Standard, size: 40.0, radius: None, glyph: None }
+    }
+
+    /// How large its icon is drawn, when not the size that goes with its container.
+    pub fn glyph(mut self, size: f32) -> Self {
+        self.glyph = Some(size);
+        self
     }
 
     pub fn style(mut self, style: IconStyle) -> Self {
@@ -426,6 +437,8 @@ impl<'a> IconButton<'a> {
             IconStyle::Standard => (None, m.on_surface_variant),
             IconStyle::Tonal => (Some(m.secondary_container), m.on_secondary_container),
             IconStyle::Surface => (Some(m.surface_container_high), m.on_surface_variant),
+            IconStyle::Overlay => (Some(m.glass(0.1)), m.on_surface),
+            IconStyle::Lit => (Some(m.glass(0.1)), m.primary),
             IconStyle::Filled => (Some(m.primary), m.on_primary),
         };
         if let Some(fill) = fill {
@@ -434,7 +447,7 @@ impl<'a> IconButton<'a> {
         if resp.is_pointer_button_down_on() {
             ui.painter().rect_filled(body, radius, ink.gamma_multiply(PRESSED));
         }
-        paint_icon(ui, center, (self.size * 0.6).min(28.0), self.icon, ink);
+        paint_icon(ui, center, self.glyph.unwrap_or((self.size * 0.6).min(28.0)), self.icon, ink);
         resp
     }
 }
@@ -966,6 +979,119 @@ pub fn wavy_progress(ui: &Ui, rect: Rect, fraction: f32, phase: f32, wave: f32) 
     p.rect_filled(g.thumb, THUMB_W / 2.0, m.primary);
 }
 
+/// How far along (0..1) a finger at `x` is on the indicator in `rect`: where
+/// `wave_geom` puts the thumb, read the other way, so a held thumb stays under the finger.
+pub fn wave_fraction(rect: Rect, x: f32) -> f32 {
+    let (from, to) = (rect.left() + THUMB_W / 2.0, rect.right() - THUMB_W / 2.0);
+    if to <= from { 0.0 } else { ((x - from) / (to - from)).clamp(0.0, 1.0) }
+}
+
+/// Where a finger takes hold of the indicator in `rect` to seek: its whole length, a
+/// finger tall.
+pub fn wave_target(rect: Rect) -> Rect {
+    Rect::from_center_size(rect.center(), vec2(rect.width(), rect.height().max(TOUCH)))
+}
+
+// ------------------------------------------------------------------ tool chip, option pill
+
+/// How tall a tool chip is drawn (its touch target is `TOUCH`).
+pub const TOOL_H: f32 = 40.0;
+
+/// How wide `tool_chip` is with `label`.
+pub fn tool_chip_width(ui: &Ui, label: &str) -> f32 {
+    16.0 + 20.0 + 8.0 + galley(ui, label, Type::LabelLarge, Color32::PLACEHOLDER, 200.0).size().x + 18.0
+}
+
+/// A tool of the player (Lyrics, Sleep timer): an icon and a label on a round-ended
+/// tonal container, drawn `TOOL_H` tall in the middle of `rect`. `on`: it is at work
+/// (a timer runs), and wears the primary colour.
+pub fn tool_chip(ui: &Ui, rect: Rect, icon: Icon, label: &str, on: bool, id: egui::Id) -> Response {
+    let m = material::scheme();
+    let resp = named(ui.interact(rect, id, Sense::click()), label);
+    let body = Rect::from_center_size(rect.center(), vec2(rect.width(), TOOL_H));
+    ui.painter().rect_filled(body, TOOL_H / 2.0, m.glass(0.1));
+    let ink = if on { m.primary } else { m.on_surface };
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(body, TOOL_H / 2.0, ink.gamma_multiply(PRESSED));
+    }
+    paint_icon(ui, pos2(body.left() + 16.0 + 10.0, body.center().y), 20.0, icon, if on { m.primary } else { m.on_surface_variant });
+    let g = galley(ui, label, Type::LabelLarge, ink, (body.width() - 62.0).max(0.0));
+    ui.painter().galley(pos2(body.left() + 44.0, body.center().y - g.size().y / 2.0), g, ink);
+    resp
+}
+
+/// How tall a sheet's option pills and its main button are.
+pub const OPTION_H: f32 = 56.0;
+
+/// One of a sheet's options in `rect`. Chosen (`on`) it is filled with the primary
+/// colour and its corners are squarer; otherwise it is a round-ended tonal container,
+/// or only an outline when `outlined` (a secondary option). True when tapped.
+pub fn option_pill(ui: &Ui, rect: Rect, id: egui::Id, label: &str, icon: Option<Icon>, on: bool, outlined: bool) -> bool {
+    let m = material::scheme();
+    let resp = named(ui.interact(rect, id, Sense::click()), label);
+    let t = theme::anim_bool(ui.ctx(), id.with("on"), on, 0.15);
+    let radius = egui::lerp(rect.height() / 2.0..=shape::TILE, t);
+    let off = if outlined { Color32::TRANSPARENT } else { m.surface_container_highest };
+    ui.painter().rect_filled(rect, radius, theme::lerp_color(off, m.primary, t));
+    if outlined && t < 1.0 {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, m.outline.gamma_multiply(1.0 - t)), StrokeKind::Inside);
+    }
+    let ink = theme::lerp_color(m.on_surface, m.on_primary, t);
+    if resp.is_pointer_button_down_on() {
+        ui.painter().rect_filled(rect, radius, ink.gamma_multiply(PRESSED));
+    }
+    let lead = if icon.is_some() { 26.0 } else { 0.0 };
+    let g = galley(ui, label, Type::TitleMedium, ink, (rect.width() - 20.0 - lead).max(0.0));
+    let left = rect.center().x - (lead + g.size().x) / 2.0;
+    if let Some(icon) = icon {
+        paint_icon(ui, pos2(left + 9.0, rect.center().y), 20.0, icon, ink);
+    }
+    ui.painter().galley(pos2(left + lead, rect.center().y - g.size().y / 2.0), g, ink);
+    resp.clicked()
+}
+
+/// A sheet's heading: its title over one line that says what it is for.
+pub fn sheet_header(ui: &mut Ui, title: &str, note: &str) {
+    let m = material::scheme();
+    let w = ui.available_width();
+    let (head, _) = ui.allocate_exact_size(vec2(w, 60.0), Sense::hover());
+    text(ui, pos2(head.left() + 8.0, head.top()), title, Type::HeadlineSmall, m.on_surface, w - 16.0);
+    text(ui, pos2(head.left() + 8.0, head.top() + 36.0), note, Type::BodyMedium, m.on_surface_variant, w - 16.0);
+}
+
+// ------------------------------------------------------------------ menu
+
+/// A menu item's height.
+pub const MENU_ITEM_H: f32 = 48.0;
+/// How large a menu item's leading icon is drawn.
+pub const MENU_ICON: f32 = 20.0;
+
+/// One item of a menu: `draw` paints its leading icon at the point and in the colour
+/// it is given, and the label follows. The menu closes when it is tapped.
+pub fn menu_item(ui: &mut Ui, label: &str, draw: impl FnOnce(&Ui, Pos2, Color32)) -> Response {
+    let m = material::scheme();
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), MENU_ITEM_H), Sense::click());
+    let resp = named(resp, label);
+    if resp.is_pointer_button_down_on() || resp.hovered() {
+        ui.painter().rect_filled(rect, shape::CHIP, m.on_surface.gamma_multiply(PRESSED));
+    }
+    draw(ui, pos2(rect.left() + 12.0 + 12.0, rect.center().y), m.on_surface_variant);
+    let g = galley(ui, label, Type::BodyLarge, m.on_surface, rect.width() - 48.0 - 12.0);
+    ui.painter().galley(pos2(rect.left() + 48.0, rect.center().y - g.size().y / 2.0), g, m.on_surface);
+    if resp.clicked() {
+        ui.close();
+    }
+    resp
+}
+
+/// The line between two groups of a menu's items.
+pub fn menu_divider(ui: &mut Ui) {
+    ui.add_space(4.0);
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().rect_filled(r, 0.0, material::scheme().outline_variant);
+    ui.add_space(4.0);
+}
+
 // ------------------------------------------------------------------ carousel
 
 /// A carousel's height, and the room between its items.
@@ -1363,6 +1489,27 @@ mod tests {
     }
 
     #[test]
+    fn a_finger_on_the_thumb_reads_back_what_has_played() {
+        for f in [0.0, 0.1, 0.35, 0.5, 0.8, 1.0] {
+            let x = wave_geom(bar(), f).thumb.center().x;
+            assert!((wave_fraction(bar(), x) - f).abs() < 1e-4, "{f}");
+        }
+        assert_eq!(wave_fraction(bar(), bar().left() - 40.0), 0.0, "left of the bar is the start");
+        assert_eq!(wave_fraction(bar(), bar().right() + 40.0), 1.0, "right of it is the end");
+        assert_eq!(wave_fraction(Rect::from_min_size(pos2(0.0, 0.0), vec2(2.0, 22.0)), 1.0), 0.0, "a bar with no room has no place to seek to");
+        // Halfway along the thumb's run is half the song.
+        assert!((wave_fraction(bar(), bar().center().x) - 0.5).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_seek_bar_is_held_in_a_fingers_height_along_its_whole_length() {
+        let hit = wave_target(bar());
+        assert_eq!(hit.height(), TOUCH);
+        assert_eq!(hit.x_range(), bar().x_range());
+        assert_eq!(hit.center(), bar().center());
+    }
+
+    #[test]
     fn the_thumb_is_upright_and_as_tall_as_the_indicator() {
         let g = wave_geom(bar(), 0.35);
         assert_eq!(g.thumb.height(), 22.0);
@@ -1525,6 +1672,37 @@ mod tests {
         let said = drawn(360.0, |ui| (filter_chip_size(ui, "Relax", false), filter_chip_size(ui, "Relax", true)));
         assert_eq!(said, (off.size(), on.size()), "a row that places chips itself is told the same");
         assert!(CHIP_H < TOUCH);
+    }
+
+    #[test]
+    fn a_tool_chip_is_as_wide_as_it_says_and_a_menu_item_fits_a_finger() {
+        let (said, chip, item) = drawn(360.0, |ui| {
+            let w = tool_chip_width(ui, "Sleep timer");
+            let (rect, _) = ui.allocate_exact_size(vec2(w, TOUCH), Sense::hover());
+            (w, tool_chip(ui, rect, Icon::Font(icon::MUSIC), "Sleep timer", false, ui.id().with("tool")).rect, menu_item(ui, "Add to playlist", |_, _, _| {}).rect)
+        });
+        assert_eq!(chip.width(), said);
+        assert!(said > 100.0 && said < 180.0, "an icon, the label and its padding: {said}");
+        assert_eq!(chip.height(), TOUCH);
+        assert!(TOOL_H < TOUCH);
+        assert_eq!(item.height(), MENU_ITEM_H);
+        assert!(MENU_ITEM_H >= TOUCH);
+    }
+
+    #[test]
+    fn a_tap_on_an_option_pill_picks_it() {
+        let ctx = egui::Context::default();
+        let rect = Rect::from_min_size(pos2(16.0, 100.0), vec2(120.0, OPTION_H));
+        let mut picked = false;
+        let at = rect.center();
+        let frames = [vec![], vec![egui::Event::PointerMoved(at)], vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }], vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }]];
+        for events in frames {
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(360.0, 800.0))), events, ..Default::default() };
+            let run = ctx.run_ui(input, |ui| picked |= option_pill(ui, rect, ui.id().with("opt"), "30 min", None, false, false));
+            run.drop_without_applying_deltas();
+        }
+        assert!(picked);
+        assert!(OPTION_H >= TOUCH);
     }
 
     #[test]
