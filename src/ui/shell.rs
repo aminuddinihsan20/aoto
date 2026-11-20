@@ -469,17 +469,23 @@ pub fn top_bar(app: &mut App, ui: &mut Ui) {
 
 /// The search pill: typeahead, suggestions and Enter to search. The Search page draws
 /// it; `app.search_rect` anchors the suggestions under it.
-pub fn search_field(app: &mut App, ui: &mut Ui, width: f32) {
+pub fn search_field(app: &mut App, ui: &mut Ui, width: f32, trailing: f32) {
+    const HINT: &str = "Search songs, albums, artists, podcasts";
+    // The phone's is a Material search bar; `trailing` is the room its right end keeps
+    // for the account's picture.
+    let material = super::m3::on();
     // Anywhere on the pill focuses the box, not just on the text area inside it.
-    let (rect, field) = ui.allocate_exact_size(vec2(width, 42.0), Sense::click());
+    let (rect, field) = ui.allocate_exact_size(vec2(width, if material { super::m3::SEARCH_BAR_H } else { 42.0 }), Sense::click());
     let field = field.on_hover_cursor(egui::CursorIcon::Text);
-    let focus = theme::anim_bool(ui.ctx(), "search-focus", app.search_focused, 0.2);
-    ui.painter().rect_filled(rect, 21.0, theme::glass(0.09 + 0.05 * focus));
-    if focus > 0.0 {
-        ui.painter().rect_stroke(rect, 21.0, egui::Stroke::new(1.0, theme::glass(0.25 * focus)), egui::StrokeKind::Inside);
+    if !material {
+        let focus = theme::anim_bool(ui.ctx(), "search-focus", app.search_focused, 0.2);
+        ui.painter().rect_filled(rect, 21.0, theme::glass(0.09 + 0.05 * focus));
+        if focus > 0.0 {
+            ui.painter().rect_stroke(rect, 21.0, egui::Stroke::new(1.0, theme::glass(0.25 * focus)), egui::StrokeKind::Inside);
+        }
+        icon_at(ui, pos2(rect.left() + 22.0, rect.center().y), icon::SEARCH, 17.0, theme::text_dim());
     }
-    icon_at(ui, pos2(rect.left() + 22.0, rect.center().y), icon::SEARCH, 17.0, theme::text_dim());
-    let clearable = !app.search_text.is_empty();
+    let clearable = !material && !app.search_text.is_empty();
     let inner = Rect::from_min_max(pos2(rect.left() + 42.0, rect.top() + 4.0), pos2(rect.right() - if clearable { 46.0 } else { 16.0 }, rect.bottom() - 4.0));
     // Up and Down walk the suggestions (past either end back to what was typed). Taken
     // before the box sees them, where they'd move the caret. Only bare arrows (Shift
@@ -504,21 +510,26 @@ pub fn search_field(app: &mut App, ui: &mut Ui, width: f32) {
             }
         });
     }
-    let edit = ui.put(
-        inner,
-        egui::TextEdit::singleline(&mut app.search_text)
-            .hint_text(egui::RichText::new("Search songs, albums, artists, podcasts").color(theme::text_faint()))
-            .font(theme::regular(15.0))
-            .frame(egui::Frame::NONE)
-            .align(egui::Align2::LEFT_CENTER)
-            .desired_width(inner.width()),
-    );
+    let (edit, mut cleared) = if material {
+        let out = super::m3::search_bar(ui, rect, &mut app.search_text, HINT, trailing);
+        (out.edit, out.cleared)
+    } else {
+        let edit = ui.put(
+            inner,
+            egui::TextEdit::singleline(&mut app.search_text)
+                .hint_text(egui::RichText::new(HINT).color(theme::text_faint()))
+                .font(theme::regular(15.0))
+                .frame(egui::Frame::NONE)
+                .align(egui::Align2::LEFT_CENTER)
+                .desired_width(inner.width()),
+        );
+        (edit, false)
+    };
     app.search_rect = Some(rect);
     if std::mem::take(&mut app.search_refocus) {
         edit.request_focus();
     }
     app.search_focused = edit.has_focus();
-    let mut cleared = false;
     if clearable {
         let x = Rect::from_center_size(pos2(rect.right() - 25.0, rect.center().y), Vec2::splat(30.0));
         let resp = named(ui.interact(x, ui.scope_id().with("search-clear"), Sense::click()), "Clear search").on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -527,16 +538,16 @@ pub fn search_field(app: &mut App, ui: &mut Ui, width: f32) {
             ui.painter().circle_filled(x.center(), 15.0, theme::glass(0.10 * h));
         }
         icon_at(ui, x.center(), icon::X, 16.0, theme::lerp_color(theme::text_dim(), theme::text(), h));
-        if resp.clicked() {
-            // Back to the empty search page: the old results go with the text.
-            app.search_text.clear();
-            app.search_synced = String::new();
-            app.suggestions = Default::default();
-            app.suggest_sel = None;
-            cleared = true;
-            app.actions.push(Action::Go(Page::Search(String::new())));
-            edit.request_focus();
-        }
+        cleared = resp.clicked();
+    }
+    if cleared {
+        // Back to the empty search page: the old results go with the text.
+        app.search_text.clear();
+        app.search_synced = String::new();
+        app.suggestions = Default::default();
+        app.suggest_sel = None;
+        app.actions.push(Action::Go(Page::Search(String::new())));
+        edit.request_focus();
     }
     // The search shortcut from Settings › Keyboard shortcuts; the box keeps its own focus.
     let find = super::keys::hit(ui.ctx(), &app.keys, super::keys::Cmd::Search);

@@ -715,9 +715,15 @@ pub fn refused(app: &App, a: &Action) -> bool {
 /// Settings › Account › Listen together: the party controls as a section of their own,
 /// with one line back to Account. Returns true when that line is pressed.
 pub fn subpage(app: &mut App, ui: &mut Ui) -> bool {
-    ui.add_space(12.0);
-    let back = pill(ui, "Account", Some(icon::CHEVRON_LEFT), false).clicked();
-    page_title(ui, "Listen together");
+    // The Material phone names the page in its top bar, whose arrow goes back.
+    let back = if super::m3::on() {
+        false
+    } else {
+        ui.add_space(12.0);
+        let back = pill(ui, "Account", Some(icon::CHEVRON_LEFT), false).clicked();
+        page_title(ui, "Listen together");
+        back
+    };
     if app.jam.active() {
         room(app, ui);
     } else {

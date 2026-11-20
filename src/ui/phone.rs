@@ -32,7 +32,7 @@ impl Tab {
             Page::Search(_) => Tab::Search,
             Page::Library(_) => Tab::Library,
             Page::Downloads | Page::LocalFolder(_) | Page::LocalAlbum(_) | Page::LocalSongs | Page::Downloaded(_) => Tab::Downloads,
-            Page::Album(_) | Page::Playlist(_) | Page::Artist(_) | Page::Settings | Page::Transfer | Page::Equalizer | Page::Stats => last,
+            Page::Album(_) | Page::Playlist(_) | Page::Artist(_) | Page::Settings | Page::SettingsCategory(_) | Page::Transfer | Page::Equalizer | Page::Stats => last,
         }
     }
 
@@ -89,15 +89,16 @@ pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
     // While typing the keyboard takes the bottom (its height is in `insets.bottom`): the
     // navigation and the mini player give way to it.
     let typing = ctx.egui_wants_keyboard_input();
+    let nav = has_nav(&app.page) && !typing;
     // Always added, only emptied: a panel that comes and goes shifts the automatic ids
     // of the widgets after it, and the text field being typed in would lose its focus.
     egui::Panel::bottom("phone-nav")
         .resizable(false)
-        .exact_size(if typing { 0.0 } else { NAV_H + insets.bottom })
+        .exact_size(if nav { NAV_H + insets.bottom } else { 0.0 })
         .frame(egui::Frame::new().fill(material::scheme().surface_container))
         .show_separator_line(false)
         .show(ui, |ui| {
-            if !typing {
+            if nav {
                 nav_bar(app, ui, insets);
             }
         });
@@ -107,7 +108,7 @@ pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
             left: (SIDE + insets.left) as i8,
             right: (SIDE + insets.right) as i8,
             top: (insets.top as i8).max(0),
-            bottom: if typing { insets.bottom as i8 } else { 0 },
+            bottom: if nav { 0 } else { insets.bottom as i8 },
         }))
         .show(ui, |ui| {
             top_row(app, ui);
@@ -115,7 +116,7 @@ pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
         });
 
     if app.current().is_some() && !typing {
-        let nav_top = screen.bottom() - NAV_H - insets.bottom;
+        let nav_top = screen.bottom() - insets.bottom - if nav { NAV_H } else { 0.0 };
         let strip = Rect::from_min_size(
             pos2(screen.left() + MINI_GAP + insets.left, nav_top - MINI_H - MINI_GAP),
             vec2(screen.width() - 2.0 * MINI_GAP - insets.left - insets.right, MINI_H),
@@ -127,6 +128,12 @@ pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(strip), |ui| mini_player(app, ui, strip));
             });
     }
+}
+
+/// Does `page` stand over the navigation bar? Settings take the whole screen, as a
+/// phone's settings do: Back leaves them.
+fn has_nav(page: &Page) -> bool {
+    !matches!(page, Page::Settings | Page::SettingsCategory(_))
 }
 
 /// The words a phone greets with at `hour` (0..24) of the day.
@@ -149,60 +156,102 @@ fn local_hour() -> u32 {
     hour_of(unix, crate::ytmapi::utc_offset_minutes())
 }
 
-/// What the top bar says on a tab's own page: Home greets, the others are named.
+/// What the top bar says on a tab's own page: Home greets, the others are named
+/// (Search has its search bar there instead).
 fn bar_title(page: &Page, hour: u32) -> Option<&'static str> {
     match page {
         Page::Home => Some(greeting(hour)),
-        Page::Search(_) => Some(Tab::Search.label()),
         Page::Library(_) => Some(Tab::Library.label()),
         Page::Downloads => Some(Tab::Downloads.label()),
         _ => None,
     }
 }
 
+/// What stands at the right end of the top bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Ends {
+    /// The account's picture and, when `action`, one action of the page before it.
+    Account { action: bool },
+    /// Two actions the page draws itself (an album's search and its menu).
+    Page,
+    /// Nothing: Settings, which the account's picture is the way to.
+    Nothing,
+}
+
+fn bar_ends(page: &Page) -> Ends {
+    match page {
+        Page::Home | Page::Library(_) | Page::Downloads => Ends::Account { action: true },
+        Page::Album(_) | Page::Playlist(_) => Ends::Page,
+        Page::Settings | Page::SettingsCategory(_) => Ends::Nothing,
+        _ => Ends::Account { action: false },
+    }
+}
+
 /// Where the top bar's parts are: back at the left (a page opened from another), then
-/// the title; at the right the account's picture, an action before it, and before
-/// those the spinner of a page that is loading.
+/// the title; at the right the end slot (the account's picture), an action before it,
+/// and before those the spinner of a page that is loading.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TopGeom {
     back: Option<Rect>,
     title: Rect,
     busy: Option<Rect>,
     action: Option<Rect>,
-    avatar: Rect,
+    end: Option<Rect>,
 }
 
-fn top_geom(bar: Rect, back: bool, action: bool, busy: bool) -> TopGeom {
+fn top_geom(bar: Rect, back: bool, ends: Ends, busy: bool) -> TopGeom {
     let cy = bar.center().y;
     let target = |right: f32| Rect::from_min_max(pos2(right - m3::TOUCH, cy - m3::TOUCH / 2.0), pos2(right, cy + m3::TOUCH / 2.0));
-    let avatar = target(bar.right());
-    let action = action.then(|| target(avatar.left() - 2.0));
-    let mut right = action.map_or(avatar.left(), |a| a.left());
+    let end = (ends != Ends::Nothing).then(|| target(bar.right()));
+    let action = end.filter(|_| matches!(ends, Ends::Page | Ends::Account { action: true })).map(|e| target(e.left() - 2.0));
+    let mut right = action.or(end).map_or(bar.right(), |a| a.left());
     let busy = busy.then(|| Rect::from_center_size(pos2(right - 16.0, cy), Vec2::splat(20.0)));
     right = busy.map_or(right, |b| b.left());
     // The arrow's ink, not its target, lines up with the page's side.
     let back = back.then(|| Rect::from_min_size(pos2(bar.left() - 12.0, cy - m3::TOUCH / 2.0), Vec2::splat(m3::TOUCH)));
     let left = back.map_or(bar.left(), |b| b.right());
-    TopGeom { back, title: Rect::from_min_max(pos2(left, bar.top()), pos2((right - 8.0).max(left), bar.bottom())), busy, action, avatar }
+    TopGeom { back, title: Rect::from_min_max(pos2(left, bar.top()), pos2((right - 8.0).max(left), bar.bottom())), busy, action, end }
 }
 
-/// The top bar: back when the page isn't a tab's own, else its title; the account on the right.
+fn slots_id() -> egui::Id {
+    egui::Id::unique("phone-top-slots")
+}
+
+/// The top bar's two right-hand slots on a page that fills them itself (an album, a
+/// playlist): the action's, then the end's. Their page draws its buttons there.
+pub(super) fn page_slots(ctx: &egui::Context) -> Option<(Rect, Rect)> {
+    ctx.data(|d| d.get_temp::<Option<(Rect, Rect)>>(slots_id())).flatten()
+}
+
+/// The top bar: back when the page isn't a tab's own, then its title (Search has its
+/// search bar there); the page's action and the account on the right.
 fn top_row(app: &mut App, ui: &mut Ui) {
     let m = material::scheme();
     let panel = ui.max_rect();
     let bar = Rect::from_min_size(panel.min, vec2(panel.width(), TOP_H));
-    let home = app.page == Page::Home;
-    let g = top_geom(bar, !Tab::is_root(&app.page), home, app.loading);
+    let ends = bar_ends(&app.page);
+    let g = top_geom(bar, !Tab::is_root(&app.page), ends, app.loading);
+    ui.ctx().data_mut(|d| d.insert_temp(slots_id(), g.action.zip(g.end).filter(|_| ends == Ends::Page)));
     if let Some(r) = g.back
         && m3::IconButton::new(icon::CHEVRON_LEFT, "Back").show_at(ui, r.center(), ui.scope_id().with("phone-back")).clicked()
     {
         app.nav_back();
     }
-    if let Some(title) = bar_title(&app.page, local_hour()) {
+    account(app, ui, &g, ends);
+    let page = app.page.clone();
+    if let Page::Search(q) = &page {
+        // The search bar is the title; the account's picture stands in its right end.
+        super::pages::sync_search(app, q);
+        let field = Rect::from_center_size(bar.center(), vec2(bar.width(), m3::SEARCH_BAR_H));
+        let trailing = bar.right() - g.title.right() - 8.0;
+        ui.scope_builder(egui::UiBuilder::new().max_rect(field), |ui| super::shell::search_field(app, ui, field.width(), trailing));
+    } else if let Some(title) = super::settings::bar_title(app.jam_open, &page) {
+        let galley = m3::galley(ui, title, Type::TitleLarge, m.on_surface, g.title.width() - 4.0);
+        ui.painter().galley(pos2(g.title.left() + 4.0, g.title.center().y - galley.size().y / 2.0), galley, m.on_surface);
+    } else if let Some(title) = bar_title(&page, local_hour()) {
         let galley = m3::galley(ui, title, Type::HeadlineMedium, m.on_surface, g.title.width());
         ui.painter().galley(pos2(g.title.left(), g.title.center().y - galley.size().y / 2.0), galley, m.on_surface);
     }
-    account(app, ui, &g);
     if let Some(r) = g.busy {
         let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(r));
         cui.spinner();
@@ -210,8 +259,20 @@ fn top_row(app: &mut App, ui: &mut Ui) {
     ui.add_space(TOP_H);
 }
 
+/// The action a tab's own page has in the top bar, before the account: its icon, its
+/// name, and whether it is what the page shows now.
+fn bar_action(page: &Page) -> Option<(m3::Icon, &'static str, bool)> {
+    match page {
+        // The new releases have no tab of their own.
+        Page::Home => Some((icon::SPARKLES.into(), "New releases", false)),
+        Page::Library(tab) => Some((icon::HISTORY.into(), "History", *tab == LibTab::History)),
+        Page::Downloads => Some((m3::Icon::Drawn(m3::drawn::tune), "Download settings", false)),
+        _ => None,
+    }
+}
+
 /// A scalloped disc, Material's "cookie": the shape of an account with no picture.
-fn cookie(ui: &Ui, center: Pos2, radius: f32, color: Color32) {
+pub(super) fn cookie(ui: &Ui, center: Pos2, radius: f32, color: Color32) {
     const LOBES: f32 = 12.0;
     let points: Vec<Pos2> = (0..96)
         .map(|i| {
@@ -234,11 +295,12 @@ fn cookie(ui: &Ui, center: Pos2, radius: f32, color: Color32) {
 }
 
 /// The right of the top bar: the signed-in person's picture (their initial without
-/// one, a figure when signed out), which opens Settings, where the account is; on
-/// Home, before it, the way to the new releases, which have no tab of their own.
-fn account(app: &mut App, ui: &mut Ui, g: &TopGeom) {
-    // The search field lives on the Search page: nothing here to anchor suggestions to.
+/// one, a figure when signed out), which opens Settings, where the account is; and
+/// before it the page's action (`bar_action`).
+fn account(app: &mut App, ui: &mut Ui, g: &TopGeom, ends: Ends) {
+    // The search field anchors its suggestions where it is drawn; elsewhere there is none.
     app.search_rect = None;
+    let Some(avatar) = g.end.filter(|_| matches!(ends, Ends::Account { .. })) else { return };
     let m = material::scheme();
     // Dev hook: YTM_FAKE_ACCOUNT=<name> shows the signed-in look in screenshots.
     let fake = super::dev_var("YTM_FAKE_ACCOUNT");
@@ -249,15 +311,18 @@ fn account(app: &mut App, ui: &mut Ui, g: &TopGeom) {
         _ => None,
     };
     let avatar_url = app.account_avatar.clone();
-    let (avatar, action) = (g.avatar, g.action);
-    let cluster = action.map_or(avatar, |a| a.union(avatar));
+    let action = g.action.zip(bar_action(&app.page));
+    let cluster = action.map_or(avatar, |(a, _)| a.union(avatar));
     // Its own layer, above the pages: a page's header art scrolls up into this corner.
-    let (to_account, to_new) = egui::Area::new(ui.scope_id().with("account"))
+    let (to_account, acted) = egui::Area::new(ui.scope_id().with("account"))
         .order(egui::Order::Middle)
         .fixed_pos(cluster.min)
         .show(ui.ctx(), |ui| {
             ui.allocate_exact_size(cluster.size(), Sense::hover());
-            let to_new = action.is_some_and(|r| m3::IconButton::new(icon::SPARKLES, "New releases").show_at(ui, r.center(), ui.scope_id().with("new-releases")).clicked());
+            let acted = action.is_some_and(|(r, (glyph, name, on))| {
+                let style = if on { m3::IconStyle::Tonal } else { m3::IconStyle::Standard };
+                m3::IconButton::new(glyph, name).style(style).show_at(ui, r.center(), ui.scope_id().with("bar-action")).clicked()
+            });
             let resp = named(ui.interact(avatar, ui.scope_id().with("account-chip"), Sense::click()), if signed_in { "Account" } else { "Sign in" });
             let pic = Rect::from_center_size(avatar.center(), Vec2::splat(36.0));
             match (&avatar_url, signed_in) {
@@ -278,13 +343,23 @@ fn account(app: &mut App, ui: &mut Ui, g: &TopGeom) {
             if resp.is_pointer_button_down_on() {
                 ui.painter().circle_filled(pic.center(), 20.0, m.on_surface.gamma_multiply(0.1));
             }
-            (resp.clicked(), to_new)
+            (resp.clicked(), acted)
         })
         .inner;
     if to_account {
         app.actions.push(Action::Go(Page::Settings));
-    } else if to_new {
-        app.actions.push(Action::Go(Page::New));
+    } else if acted {
+        match app.page.clone() {
+            Page::Home => app.actions.push(Action::Go(Page::New)),
+            // The library's views swap in place (no history entry); the one shown refreshes.
+            Page::Library(LibTab::History) => app.refresh(),
+            Page::Library(_) => {
+                app.page = Page::Library(LibTab::History);
+                app.page_loaded();
+            }
+            Page::Downloads => app.actions.push(Action::Go(super::settings::Category::Downloads.page())),
+            _ => {}
+        }
     }
 }
 
@@ -484,7 +559,7 @@ mod tests {
     fn home_greets_and_the_other_tabs_are_named_in_the_top_bar() {
         assert_eq!(bar_title(&Page::Home, 9), Some("Good morning"));
         assert_eq!(bar_title(&Page::Library(LibTab::Albums), 9), Some("Library"));
-        assert_eq!(bar_title(&Page::Search("x".into()), 9), Some("Search"));
+        assert_eq!(bar_title(&Page::Search("x".into()), 9), None, "the search bar stands there instead");
         assert_eq!(bar_title(&Page::Downloads, 9), Some("Downloads"));
         assert_eq!(bar_title(&Page::Settings, 9), None, "a page with a back button names itself below it");
         assert_eq!(bar_title(&Page::Album("a".into()), 9), None);
@@ -532,24 +607,32 @@ mod tests {
     fn the_top_bars_parts_do_not_overlap_and_fit_a_finger() {
         for screen in SCREENS {
             let bar = Rect::from_min_size(pos2(SIDE, 36.0), vec2(screen - 2.0 * SIDE, TOP_H));
-            for (back, action, busy) in [(false, true, false), (false, true, true), (true, false, true), (false, false, false)] {
-                let g = top_geom(bar, back, action, busy);
-                let mut parts = vec![g.title, g.avatar];
+            let with_action = Ends::Account { action: true };
+            let plain = Ends::Account { action: false };
+            for (back, ends, busy) in [(false, with_action, false), (false, with_action, true), (true, plain, true), (false, plain, false), (true, Ends::Page, true), (true, Ends::Nothing, false)] {
+                let g = top_geom(bar, back, ends, busy);
+                let mut parts = vec![g.title];
+                parts.extend(g.end);
                 parts.extend(g.back);
                 parts.extend(g.action);
                 parts.extend(g.busy);
                 for (i, a) in parts.iter().enumerate() {
                     for b in &parts[i + 1..] {
-                        assert!(apart(*a, *b), "{screen} {back} {action} {busy}: {a:?} and {b:?}");
+                        assert!(apart(*a, *b), "{screen} {back} {ends:?} {busy}: {a:?} and {b:?}");
                     }
                 }
-                for target in [Some(g.avatar), g.back, g.action].into_iter().flatten() {
+                for target in [g.end, g.back, g.action].into_iter().flatten() {
                     assert!(target.width() >= m3::TOUCH && target.height() >= m3::TOUCH);
                     assert!(target.left() >= 0.0 && target.right() <= screen, "on the screen: {target:?}");
                 }
-                assert_eq!(g.avatar.right(), bar.right());
+                assert_eq!(g.end.is_some(), ends != Ends::Nothing);
+                assert_eq!(g.end.map(|e| e.right()), g.end.map(|_| bar.right()));
+                assert_eq!(g.action.is_some(), matches!(ends, Ends::Page | Ends::Account { action: true }));
                 assert_eq!(g.back.is_some(), back);
-                assert!(g.title.width() >= 180.0, "{screen}: the title keeps {}", g.title.width());
+                // (A page that fills both slots itself, an album, has no title up here.)
+                if ends != Ends::Page {
+                    assert!(g.title.width() >= 180.0, "{screen}: the title keeps {}", g.title.width());
+                }
             }
         }
     }
@@ -557,9 +640,51 @@ mod tests {
     #[test]
     fn a_loading_page_takes_its_spinners_room_from_the_title() {
         let bar = Rect::from_min_size(pos2(SIDE, 36.0), vec2(380.0, TOP_H));
-        let (idle, busy) = (top_geom(bar, false, true, false), top_geom(bar, false, true, true));
+        let ends = Ends::Account { action: true };
+        let (idle, busy) = (top_geom(bar, false, ends, false), top_geom(bar, false, ends, true));
         assert!(idle.busy.is_none());
         assert!(busy.title.right() < idle.title.right());
-        assert_eq!(busy.avatar, idle.avatar);
+        assert_eq!(busy.end, idle.end);
+    }
+
+    #[test]
+    fn settings_take_the_whole_screen_and_every_other_page_keeps_the_navigation() {
+        assert!(!has_nav(&Page::Settings));
+        assert!(!has_nav(&Page::SettingsCategory(crate::ui::settings::Category::Lyrics)));
+        for page in [Page::Home, Page::Search(String::new()), Page::Library(LibTab::Playlists), Page::Downloads, Page::Album("a".into()), Page::Stats, Page::Equalizer, Page::Transfer] {
+            assert!(has_nav(&page), "{page:?}");
+        }
+    }
+
+    #[test]
+    fn each_page_has_the_right_end_of_the_top_bar_it_needs() {
+        assert_eq!(bar_ends(&Page::Home), Ends::Account { action: true });
+        assert_eq!(bar_ends(&Page::Library(LibTab::Albums)), Ends::Account { action: true });
+        assert_eq!(bar_ends(&Page::Downloads), Ends::Account { action: true });
+        assert_eq!(bar_ends(&Page::Search(String::new())), Ends::Account { action: false }, "the picture stands in the search bar's end");
+        assert_eq!(bar_ends(&Page::Playlist("p".into())), Ends::Page, "its search and its menu");
+        assert_eq!(bar_ends(&Page::Album("a".into())), Ends::Page);
+        assert_eq!(bar_ends(&Page::Artist("a".into())), Ends::Account { action: false });
+        assert_eq!(bar_ends(&Page::Settings), Ends::Nothing, "the picture is the way to Settings");
+        assert_eq!(bar_ends(&Page::SettingsCategory(crate::ui::settings::Category::Sound)), Ends::Nothing);
+    }
+
+    #[test]
+    fn a_tabs_action_is_named_and_lit_when_it_is_what_shows() {
+        assert_eq!(bar_action(&Page::Home).map(|a| a.1), Some("New releases"));
+        assert_eq!(bar_action(&Page::Library(LibTab::Playlists)).map(|a| (a.1, a.2)), Some(("History", false)));
+        assert_eq!(bar_action(&Page::Library(LibTab::History)).map(|a| (a.1, a.2)), Some(("History", true)));
+        assert_eq!(bar_action(&Page::Downloads).map(|a| a.1), Some("Download settings"));
+        assert!(bar_action(&Page::Search(String::new())).is_none());
+    }
+
+    #[test]
+    fn a_settings_page_is_named_in_the_top_bar_beside_its_back_arrow() {
+        use crate::ui::settings::{Category, bar_title};
+        assert_eq!(bar_title(false, &Page::Settings), Some("Settings"));
+        assert_eq!(bar_title(false, &Page::SettingsCategory(Category::Sound)), Some("Sound & quality"));
+        assert_eq!(bar_title(true, &Page::SettingsCategory(Category::Account)), Some("Listen together"), "the section opened inside it");
+        assert_eq!(bar_title(true, &Page::Home), None);
+        assert_eq!(bar_title(false, &Page::Stats), None);
     }
 }

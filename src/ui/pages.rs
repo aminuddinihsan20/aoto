@@ -6,6 +6,7 @@ use std::sync::atomic::Ordering;
 use egui::{Align2, Color32, Rect, RichText, Sense, Ui, Vec2, pos2, vec2};
 
 use super::widgets::{self, RowOpts, card, chip, h_scroll, named, paint_cover, pill, shelf_header, track_row};
+use super::settings::Row;
 use super::{Action, App, LibTab, Page, Selection, m3};
 use crate::backend::compact;
 use crate::model::{Card, ShelfKind, Target, Track};
@@ -72,7 +73,8 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
             Page::Artist(id) => artist(app, ui, id, now),
             Page::Library(tab) => library(app, ui, *tab, now),
             Page::Downloads => downloads(app, ui, now),
-            Page::Settings => settings(app, ui),
+            Page::SettingsCategory(category) if m3::on() => super::settings::category_page(app, ui, *category),
+            Page::Settings | Page::SettingsCategory(_) => settings(app, ui),
             Page::Transfer => super::transfer::page(app, ui, now),
             Page::LocalFolder(uri) => local_folder(app, ui, uri, now),
             Page::LocalAlbum(key) => local_album(app, ui, key, now),
@@ -662,17 +664,21 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
 
 // ------------------------------------------------------------------ search
 
-fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
-    let pick = super::transfer::pick_banner(app, ui);
-    root_title(ui, "Search");
-    ui.add_space(10.0);
-    // Coming from a suggestion, the sidebar or a link, the field says what's shown.
-    // Only when the route changed: clearing the box leaves the route alone until Enter.
+/// Coming from a suggestion, the sidebar or a link, the search field says what's shown.
+/// Only when the route changed: clearing the box leaves the route alone until Enter.
+pub(super) fn sync_search(app: &mut App, q: &str) {
     if app.search_synced != q {
         app.search_synced = q.to_owned();
         app.search_text = q.trim().to_owned();
     }
-    super::shell::search_field(app, ui, ui.available_width().min(560.0));
+}
+
+fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
+    let pick = super::transfer::pick_banner(app, ui);
+    root_title(ui, "Search");
+    ui.add_space(10.0);
+    sync_search(app, q);
+    super::shell::search_field(app, ui, ui.available_width().min(560.0), 0.0);
     if q.trim().is_empty() {
         ui.add_space(26.0);
         recent_searches(ui, app);
@@ -1717,6 +1723,15 @@ fn rows_key() -> egui::Id {
     egui::Id::new("bitchord-settings-rows")
 }
 
+/// The heading `section_label` was given on the Material phone, kept for the card that
+/// follows: the two are drawn as one, and only when the card holds a row.
+#[derive(Clone, Default)]
+struct PendingLabel(Option<(String, Option<String>)>);
+
+fn label_key() -> egui::Id {
+    egui::Id::new("bitchord-settings-label")
+}
+
 fn search_of(ui: &Ui) -> SettingsSearch {
     ui.data(|d| d.get_temp::<SettingsSearch>(search_key())).unwrap_or_default()
 }
@@ -1742,6 +1757,10 @@ fn settings_group_shown(ui: &Ui) -> bool {
 /// to draw it, and what the box has to search through while the page is drawn whole.
 pub(super) fn settings_row_shown(ui: &mut Ui, title: &str, desc: &str) -> bool {
     let s = search_of(ui);
+    // (The phone's categories are searched as they are drawn, and keep no list.)
+    if s.words.is_empty() && m3::on() {
+        return true;
+    }
     if s.words.is_empty() {
         let section = s.section.clone();
         ui.data_mut(|d| {
@@ -1755,6 +1774,9 @@ pub(super) fn settings_row_shown(ui: &mut Ui, title: &str, desc: &str) -> bool {
 }
 
 fn settings(app: &mut App, ui: &mut Ui) {
+    if m3::on() {
+        return super::settings::first_page(app, ui);
+    }
     let words: Vec<String> = app.settings_search.split_whitespace().map(str::to_lowercase).collect();
     // The page drawn whole is what the box searches; a filtered one leaves that list alone.
     if words.is_empty() {
@@ -1779,6 +1801,31 @@ fn settings(app: &mut App, ui: &mut Ui) {
     });
     // Only Settings is filtered; the rest of the app draws every row it has.
     put_search(ui, &SettingsSearch::default());
+}
+
+/// The phone's Settings look for what is typed among the rows of every category.
+/// True when something is typed: then only the rows that say it are drawn.
+pub(super) fn begin_settings_search(ui: &Ui, query: &str) -> bool {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    let searching = !words.is_empty();
+    put_search(ui, &SettingsSearch { words, ..Default::default() });
+    searching
+}
+
+/// The phone's Settings are drawn: the rest of the app draws every row it has.
+pub(super) fn end_settings_search(ui: &Ui) {
+    put_search(ui, &SettingsSearch::default());
+}
+
+/// The heading of the next group of a searched Settings: a row of it is in when the
+/// words are all in the row, or all in this heading.
+pub(super) fn search_group(ui: &Ui, title: &str) {
+    let mut s = search_of(ui);
+    s.shown = true;
+    s.all = settings_hit(title, &s.words);
+    s.section = title.to_owned();
+    put_search(ui, &s);
+    ui.data_mut(|d| d.insert_temp(label_key(), PendingLabel(Some((title.to_owned(), None)))));
 }
 
 fn settings_body(app: &mut App, ui: &mut Ui) {
@@ -1846,56 +1893,505 @@ fn settings_search_bar(ui: &mut Ui, query: &mut String) {
     ui.add_space(4.0);
 }
 
-/// Settings › Account: signing in and out, and which channel to use.
-fn settings_account(app: &mut App, ui: &mut Ui) {
-    section_label(ui, "Account", None);
-    let busy = app.signing_in.load(Ordering::Relaxed);
-    let (mut sign_in, mut sign_out) = (false, false);
-    // Asked again now and then while Settings shows: a failed ask, or a channel made since.
+/// Asked again now and then while Settings shows: a failed ask, or a channel made since.
+pub(super) fn ask_channels(app: &mut App, ui: &Ui) {
     let now = ui.input(|i| i.time);
     if app.logged_in && app.channels_asked.is_none_or(|at| now - at > 60.0) {
         app.channels_asked = Some(now);
         app.backend.request(crate::backend::Req::Channels);
     }
-    settings_card(ui, |ui| {
-        if app.logged_in {
-            let name = app.account_name.clone().unwrap_or_else(|| "YouTube Music".to_owned());
-            let desc = format!("Signed in with Google. Your home feed, library and likes come from this account. {}", crate::platform::KEPT);
-            setting_row(ui, &name, Some(&desc), |ui| {
-                sign_out = pill(ui, "Sign out", Some(icon::LOG_OUT), false).clicked();
-            });
-            // Also with one, when the one in use isn't it (a brand channel since deleted).
-            if app.channels.as_ref().is_some_and(|c| c.list.len() > 1 || !c.list.iter().any(|l| l.page_id == c.current)) {
-                divider(ui);
+}
+
+/// Is there a channel to choose? Also with one, when the one in use isn't it (a brand
+/// channel since deleted).
+fn has_channels(app: &App) -> bool {
+    app.logged_in && app.channels.as_ref().is_some_and(|c| c.list.len() > 1 || !c.list.iter().any(|l| l.page_id == c.current))
+}
+
+/// A newer version that can be had: Android's, which the phone downloads itself.
+fn update_offer(app: &App) -> Option<(String, String)> {
+    match super::dev_var("YTM_FAKE_UPDATE") {
+        Some(v) => Some((v.to_owned(), crate::update::RELEASES.to_owned())),
+        None => app.updater.as_ref().and_then(|u| match u.state() {
+            crate::update::State::Available { version, url } => Some((version, url)),
+            _ => None,
+        }),
+    }
+}
+
+/// Hand a release's APK to the browser, which downloads it; opening the download
+/// installs it over this one.
+fn open_update(ui: &Ui, url: &str) {
+    #[cfg(target_os = "android")]
+    {
+        let _ = ui;
+        crate::platform::open_url(url);
+    }
+    #[cfg(not(target_os = "android"))]
+    ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+}
+
+/// A value with a button either side to step it down or up (named `names`).
+/// Returns the step asked for (-1, 0 or 1).
+fn step_buttons(ui: &mut Ui, text: &str, less: bool, more: bool, names: (&str, &str)) -> i32 {
+    if m3::on() {
+        return m3::stepper(ui, text, less, more, names);
+    }
+    // The row's control slot fills from the right.
+    let mut step = 0;
+    if ui.add_enabled(more, egui::Button::new("+").min_size(vec2(28.0, 26.0))).on_hover_text(names.1).clicked() {
+        step = 1;
+    }
+    ui.label(egui::RichText::new(text).font(theme::semibold(13.0)));
+    if ui.add_enabled(less, egui::Button::new("−").min_size(vec2(28.0, 26.0))).on_hover_text(names.0).clicked() {
+        step = -1;
+    }
+    step
+}
+
+/// One of Settings' rows: its text, its control and what the control does. The desktop's
+/// one page and the phone's category pages are both made of these.
+pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
+    match row {
+        Row::Account => {
+            let busy = app.signing_in.load(Ordering::Relaxed);
+            let (mut sign_in, mut sign_out) = (false, false);
+            let shown = if app.logged_in {
+                let name = app.account_name.clone().unwrap_or_else(|| "YouTube Music".to_owned());
+                let desc = format!("Signed in with Google. Your home feed, library and likes come from this account. {}", crate::platform::KEPT);
+                setting_row(ui, &name, Some(&desc), |ui| {
+                    sign_out = pill(ui, "Sign out", Some(icon::LOG_OUT), false).clicked();
+                })
+            } else {
+                setting_row(ui, "Not signed in", Some("Sign in to get your home feed, library and likes."), |ui| {
+                    if busy {
+                        ui.spinner();
+                    } else {
+                        sign_in = pill(ui, "Sign in with Google", Some(icon::CIRCLE_USER), true).clicked();
+                    }
+                })
+            };
+            // The desktop says this under the card.
+            if busy && shown && m3::on() {
+                ui.label(RichText::new("Finish signing in on the page that opened.").font(crate::material::Type::BodySmall.font()).color(theme::text_dim()));
+                ui.add_space(12.0);
+            }
+            if sign_in {
+                app.start_sign_in(ui.ctx());
+            }
+            if sign_out {
+                app.backend.request(crate::backend::Req::Logout);
+            }
+        }
+        Row::Channel => {
+            if has_channels(app) {
                 setting_row(ui, "Channel", Some("Your Google account and each YouTube channel it manages have their own library, likes, history and recommendations."), |ui| {
                     channel_picker(app, ui);
                 });
             }
-        } else {
-            setting_row(ui, "Not signed in", Some("Sign in to get your home feed, library and likes."), |ui| {
-                if busy {
-                    ui.spinner();
-                } else {
-                    sign_in = pill(ui, "Sign in with Google", Some(icon::CIRCLE_USER), true).clicked();
+        }
+        // Listen together opens as its own section, under the account it borrows its name from.
+        Row::ListenTogether => {
+            if open_row(ui, "Listen together", &format!("Play the same music at the same moment, on up to {} devices.", crate::jam::DEFAULT_MEMBERS)) {
+                app.jam_open = true;
+            }
+        }
+        Row::ListeningStats => super::stats::stats_row(app, ui),
+        Row::ClearHistory => super::stats::clear_row(app, ui),
+        Row::Autoplay => {
+            setting_row(ui, "Autoplay", Some("Keep playing similar songs when the queue ends."), |ui| {
+                toggle(ui, &mut app.autoplay, "Autoplay");
+            });
+        }
+        Row::Normalize => {
+            setting_row(ui, "Volume normalization", Some("Turn loud songs down to the same level, like YouTube Music does."), |ui| {
+                if toggle(ui, &mut app.normalize, "Volume normalization").changed() {
+                    app.audio.set_normalize(app.normalize);
                 }
             });
         }
-        divider(ui);
-        // Listen together opens as its own section, under the account it borrows its name from.
-        if open_row(ui, "Listen together", &format!("Play the same music at the same moment, on up to {} devices.", crate::jam::DEFAULT_MEMBERS)) {
-            app.jam_open = true;
+        Row::LogVolume => {
+            setting_row(ui, "Logarithmic volume", Some("Space the volume slider out the way ears hear loudness, so quiet levels aren't squeezed into its first few pixels."), |ui| {
+                if toggle(ui, &mut app.log_volume, "Logarithmic volume").changed() {
+                    app.audio.set_log_volume(app.log_volume);
+                }
+            });
         }
+        Row::PlaySongs => {
+            setting_row(ui, "Play songs, not music videos", Some("An official music video plays as its song, the album recording, when YouTube Music has one: no intros, skits or video-only edits. Lists still show what they hold."), |ui| {
+                toggle(ui, &mut app.play_songs, "Play songs, not music videos");
+            });
+        }
+        Row::Equalizer => {
+            if open_row(ui, "Equalizer", &super::equalizer::settings_note(&app.eq)) {
+                app.actions.push(Action::Go(Page::Equalizer));
+            }
+        }
+        Row::SpatialAudio => {
+            setting_row(ui, "Spatial audio", Some("Makes stereo songs sound like they surround you, for headphones: a wider stage, a little room around it and the way your head shades each ear. Voices stay in the middle. Not head-tracked, and not Dolby Atmos (that plays as it is when a song has it)."), |ui| {
+                if toggle(ui, &mut app.spatial, "Spatial audio").changed() {
+                    app.set_crossfade();
+                }
+            });
+        }
+        Row::Automix => {
+            setting_row(ui, "Automix", Some("Slide from one song into the next the way a DJ would: both hold their level for a moment, then swap in one smooth move, instead of a straight fade. The mix picks its own length, in phrases of 8 or 16 bars (16 on long songs), following the beat it hears."), |ui| {
+                if toggle(ui, &mut app.automix, "Automix").changed() {
+                    app.set_crossfade();
+                }
+            });
+        }
+        // Automix mixes in its own way: the plain fade is for when it is off.
+        Row::Crossfade => {
+            if !app.automix {
+                setting_row(ui, "Crossfade songs", Some("Blend the end of each song into the start of the next."), |ui| {
+                    if toggle(ui, &mut app.crossfade, "Crossfade songs").changed() {
+                        app.set_crossfade();
+                    }
+                });
+            }
+        }
+        Row::CrossfadeLength => {
+            if !app.automix && app.crossfade {
+                // The phone's slider has no room for its value beside it: the row says it.
+                let said = format!("{} s", app.crossfade_secs);
+                setting_row(ui, "Crossfade length", m3::on().then_some(said.as_str()), |ui| {
+                    if seconds_slider(ui, &mut app.crossfade_secs, 1..=super::CROSSFADE_MAX, "Crossfade length").changed() {
+                        app.set_crossfade();
+                    }
+                });
+            }
+        }
+        Row::SkipNonMusic => {
+            setting_row(ui, "Skip non-music parts", Some("Jump over talking, skits and sponsor breaks in music videos, as marked by the SponsorBlock community. Album songs don't have any."), |ui| {
+                if toggle(ui, &mut app.sponsorblock, "Skip non-music parts").changed() {
+                    app.request_segments();
+                }
+            });
+        }
+        Row::HiRes => {
+            let shown = setting_row(ui, "Hi-Res audio", Some("Addon servers that serve hi-res copies of songs. When one has the song, its copy plays instead of YouTube's, and its quality shows in the player."), |_| {});
+            // The desktop's one page keeps the list under its row whatever is searched.
+            if shown || !m3::on() {
+                ui.add_space(12.0);
+                hires_sources_editor(app, ui);
+                ui.add_space(10.0);
+            }
+        }
+        Row::PreferAtmos => {
+            setting_row(ui, "Prefer Dolby Atmos", Some("Ask the hi-res sources for a Dolby Atmos copy when they offer one. Falls back to the best stereo copy when the stream's codec can't be decoded."), |ui| {
+                if toggle(ui, &mut app.prefer_atmos, "Prefer Dolby Atmos").changed() {
+                    app.backend.set_prefer_atmos(app.prefer_atmos);
+                }
+            });
+        }
+        Row::DisableDirect => {
+            setting_row(ui, "Disable direct source stream", Some("Play YouTube audio immediately and upgrade to hi-res in the background, instead of waiting for the addon to answer first."), |ui| {
+                if toggle(ui, &mut app.disable_direct_stream, "Disable direct source stream").changed() {
+                    app.backend.set_disable_direct_stream(app.disable_direct_stream);
+                }
+            });
+        }
+        Row::DownloadFolder => {
+            if crate::platform::HAS_SAF {
+                // Android: a folder chosen once; every download is copied into it.
+                let desc = match crate::downloads::tree() {
+                    Some((_, label)) => format!("Downloads are saved to {}. Change it to save new ones elsewhere.", crate::local::folder_name(&label)),
+                    None => "Not chosen yet: you're asked at your first download, once.".to_owned(),
+                };
+                setting_row(ui, "Download folder", Some(&desc), |ui| {
+                    if pill(ui, "Change", Some(icon::FOLDER_OPEN), false).clicked() {
+                        app.ask_folder(super::storage::Purpose::Downloads);
+                    }
+                });
+                return;
+            }
+            let folder = crate::downloads::folder().display().to_string();
+            setting_row(ui, "Download folder", Some(&folder), |ui| {
+                if crate::platform::HAS_FILE_DIALOG {
+                    if pill(ui, "Change", None, false).clicked() {
+                        crate::downloads::pick_folder(ui.ctx());
+                    }
+                    ui.add_space(6.0);
+                }
+                if pill(ui, "Open", Some(icon::FOLDER_OPEN), false).clicked() {
+                    crate::downloads::open_folder();
+                }
+            });
+        }
+        Row::Romanization => {
+            setting_row(ui, "Romanization", Some("Japanese, Korean, Chinese, Cyrillic and other scripts in Latin letters. Timed with the lyrics when the source has it."), |ui| {
+                toggle(ui, &mut app.show_roman, "Romanization");
+            });
+        }
+        Row::Translation => {
+            setting_row(ui, "Translation", Some("Translated by Unison, or Google when it can't. Lyrics that ship their own translation use it."), |ui| {
+                toggle(ui, &mut app.show_trans, "Translation");
+            });
+        }
+        Row::TranslateInto => {
+            setting_row(ui, "Translate into", None, |ui| {
+                let current = super::lyric_prefs::LANGUAGES.iter().find(|(c, _)| *c == app.lyric_prefs.target).map_or(app.lyric_prefs.target.as_str(), |(_, n)| n);
+                let btn = dropdown_button(ui, current, 200.0, "Translate into");
+                let just_opened = btn.clicked();
+                egui::Popup::menu(&btn).show(|ui| {
+                    ui.set_width(200.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                        ui.add_space(4.0);
+                        for (code, name) in super::lyric_prefs::LANGUAGES {
+                            let on = app.lyric_prefs.target == *code;
+                            let row = option_row(ui, name, on);
+                            if on && just_opened {
+                                row.scroll_to_me(Some(egui::Align::Center));
+                            }
+                            if row.clicked() {
+                                app.lyric_prefs.target = (*code).to_owned();
+                                ui.close();
+                            }
+                        }
+                        ui.add_space(4.0);
+                    });
+                });
+            });
+        }
+        Row::TextSize => {
+            setting_row(ui, "Text size", Some("Make the lyrics larger or smaller. Works on top of the theme's own size."), |ui| {
+                let (min, max, step) = super::lyric_prefs::TEXT_SCALE;
+                let v = &mut app.lyric_prefs.text_scale;
+                let by = step_buttons(ui, &format!("{:.0}%", *v * 100.0), *v > min + 0.01, *v < max - 0.01, ("Smaller", "Larger"));
+                if by != 0 {
+                    *v = ((*v + by as f32 * step) * 10.0).round() / 10.0;
+                }
+            });
+        }
+        // Offsets: seconds taken off the lyrics clock, as the extension's dock sets them.
+        Row::TimingOffset | Row::WordTrim | Row::LineTrim => {
+            let (title, desc) = match row {
+                Row::TimingOffset => ("Timing offset", "Shift all lyrics later (+) or earlier (−)."),
+                Row::WordTrim => ("Word-synced trim", "Extra shift for syllable and word-synced lyrics."),
+                _ => ("Line-synced trim", "Extra shift for line-synced lyrics."),
+            };
+            setting_row(ui, title, Some(desc), |ui| {
+                let v = match row {
+                    Row::TimingOffset => &mut app.lyric_prefs.global_offset,
+                    Row::WordTrim => &mut app.lyric_prefs.word_trim,
+                    _ => &mut app.lyric_prefs.line_trim,
+                };
+                let by = step_buttons(ui, &format!("{:+.1} s", *v).replace("+0.0", "0.0"), true, true, ("Earlier", "Later"));
+                if by != 0 {
+                    *v = ((*v + by as f32 * 0.1) * 10.0).round() / 10.0;
+                }
+            });
+        }
+        // Source order: the first enabled source with lyrics for a song is shown; the
+        // lyrics toolbar can pick another for that song.
+        Row::LyricsSources => {
+            let shown = setting_row(ui, "Lyrics sources", Some("Tried in this order. Switch one off to skip it; the toolbar under the lyrics picks a different one for a single song."), |_| {});
+            if shown || !m3::on() {
+                lyrics_sources(app, ui);
+            }
+        }
+        Row::Mode => {
+            let desc = if cfg!(windows) {
+                "Light or dark pages. System follows Windows' app mode. Now playing stays dark, over the album art."
+            } else {
+                "Light or dark pages. System follows your system's setting. Now playing stays dark, over the album art."
+            };
+            let mut pick = None;
+            setting_row(ui, "Mode", Some(desc), |ui| {
+                if m3::on() {
+                    let labels = theme::Appearance::ALL.map(|a| a.label());
+                    let chosen = theme::Appearance::ALL.iter().position(|a| *a == app.appearance).unwrap_or(0);
+                    pick = m3::segmented(ui, &labels, chosen).map(|i| theme::Appearance::ALL[i]);
+                    return;
+                }
+                let btn = dropdown_button(ui, app.appearance.label(), 160.0, "Mode");
+                egui::Popup::menu(&btn).show(|ui| {
+                    ui.set_width(160.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    ui.add_space(4.0);
+                    for a in theme::Appearance::ALL {
+                        if option_row(ui, a.label(), a == app.appearance).clicked() {
+                            pick = Some(a);
+                            ui.close();
+                        }
+                    }
+                    ui.add_space(4.0);
+                });
+            });
+            if let Some(a) = pick {
+                app.appearance = a;
+            }
+        }
+        Row::AnimatedBackground => {
+            setting_row(ui, "Animated background", Some("The album art slowly drifts behind everything."), |ui| {
+                toggle(ui, &mut app.anim_bg, "Animated background");
+            });
+        }
+        Row::PulseWithMusic => {
+            setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
+                toggle(ui, &mut app.reactive_bg, "Pulse with the music");
+            });
+        }
+        Row::AnimatedArtwork => {
+            setting_row(ui, "Animated artwork", Some("Apple's moving album covers in Now Playing, the player and the tiles you hover. Costs memory while a song plays, and gives it back when the song ends."), |ui| {
+                if toggle(ui, &mut app.animated_artwork, "Animated artwork").changed() && !app.animated_artwork {
+                    app.deload_motion();
+                }
+            });
+        }
+        Row::StatsForNerds => {
+            setting_row(ui, "Stats for nerds", Some("Show the codec, sample rate and bitrate of what's playing at the foot of the cover in Now Playing, whatever the source."), |ui| {
+                toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
+            });
+        }
+        Row::SignatureService => {
+            let shown = setting_row(ui, "Signature service", Some("A link to your own signature API. Artists get their handwritten signature, with “Signed by …” above it — beside About when Apple also letters them a wordmark; without a signature, their name is set in type."), |_| {});
+            if shown || !m3::on() {
+                divider(ui);
+                ui.add_space(12.0);
+                if super::text_field(ui, "Link", &mut app.signature_api, false, "https://your-signature-service.example").changed() {
+                    app.signature_reset();
+                }
+                ui.add_space(12.0);
+            }
+        }
+        Row::LastFm => {
+            let busy = app.lastfm_busy.load(Ordering::Relaxed);
+            let desc = match &app.lastfm_user {
+                Some(name) => format!("Scrobbling what you play to {name}'s profile."),
+                None if busy => "Allow BitChord on the Last.fm page that opened in your browser.".to_owned(),
+                None => "Scrobble what you play to your Last.fm profile.".to_owned(),
+            };
+            let (mut connect, mut disconnect) = (false, false);
+            setting_row(ui, "Last.fm", Some(&desc), |ui| {
+                if app.lastfm_user.is_some() {
+                    disconnect = pill(ui, "Disconnect", None, false).clicked();
+                } else if busy {
+                    ui.spinner();
+                } else {
+                    connect = pill(ui, "Connect", None, false).clicked();
+                }
+            });
+            if connect {
+                app.lastfm_sign_in();
+            }
+            if disconnect {
+                app.lastfm_sign_out();
+            }
+        }
+        Row::TransferFromSpotify => super::transfer::open_row(app, ui),
+        Row::SpotifyAccount => super::transfer::account_row(app, ui),
+        Row::Version => {
+            setting_row(ui, "BitChord", Some(&format!("Version {}", crate::update::current_version())), |_| {});
+        }
+        // Where the app can update itself: the check it runs by itself, on demand.
+        Row::Updates => {
+            if !super::updatable() {
+                return;
+            }
+            use crate::update::State;
+            let offer = update_offer(app);
+            let state = app.updater.as_ref().map(|u| u.state());
+            let checking = matches!(state, Some(State::Checking));
+            let desc = match (&offer, &state) {
+                (Some((version, _)), _) => format!("BitChord {version} is available. Download it, then open it to install."),
+                (None, Some(State::Checking)) => "Looking for a newer version…".to_owned(),
+                (None, Some(State::UpToDate)) => "This is the newest version.".to_owned(),
+                (None, Some(State::Failed(e))) => format!("Couldn't look for a newer version: {e}"),
+                (None, _) => "BitChord looks for a newer version by itself, now and then.".to_owned(),
+            };
+            let (mut check, mut download) = (false, false);
+            setting_row(ui, "Updates", Some(&desc), |ui| {
+                if offer.is_some() {
+                    download = pill(ui, "Download", Some(icon::DOWNLOAD), true).clicked();
+                } else if checking {
+                    ui.spinner();
+                } else {
+                    check = pill(ui, "Check now", None, false).clicked();
+                }
+            });
+            if check && let Some(u) = &app.updater {
+                u.check();
+            }
+            if download && let Some((_, url)) = &offer {
+                open_update(ui, url);
+            }
+        }
+    }
+}
+
+/// The lyric sources under their row: each can be switched off, and moved up or down.
+fn lyrics_sources(app: &mut App, ui: &mut Ui) {
+    let material = m3::on();
+    let n = app.lyric_prefs.order.len();
+    let mut swap: Option<(usize, usize)> = None;
+    for i in 0..n {
+        let (p, on) = app.lyric_prefs.order[i];
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), if material { 56.0 } else { 34.0 }), Sense::hover());
+        let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+        let mut enabled = on;
+        if toggle(&mut row, &mut enabled, p.name()).changed() {
+            app.lyric_prefs.order[i].1 = enabled;
+        }
+        row.add_space(10.0);
+        let kind = match p.sync() {
+            crate::lyrics::SyncKind::Syllable => "syllable",
+            crate::lyrics::SyncKind::Word => "word",
+            crate::lyrics::SyncKind::Line => "line",
+            crate::lyrics::SyncKind::Unsynced => "plain",
+        };
+        if material {
+            use crate::material::Type;
+            let m = crate::material::scheme();
+            let (down, up) = (pos2(rect.right() - m3::TOUCH / 2.0, rect.center().y), pos2(rect.right() - m3::TOUCH * 1.5, rect.center().y));
+            let left = row.cursor().left();
+            m3::two_lines(ui, left, rect.center().y, up.x - m3::TOUCH / 2.0 - 4.0 - left, p.name(), Type::BodyLarge, if on { m.on_surface } else { m.on_surface_variant }, kind, Type::BodySmall, m.on_surface_variant);
+            let id = ui.scope_id().with(("lyric-source", i));
+            if i > 0 && m3::IconButton::new(icon::CHEVRON_UP, &format!("Move {} higher", p.name())).show_at(ui, up, id.with("up")).clicked() {
+                swap = Some((i, i - 1));
+            }
+            if i + 1 < n && m3::IconButton::new(icon::CHEVRON_DOWN, &format!("Move {} lower", p.name())).show_at(ui, down, id.with("down")).clicked() {
+                swap = Some((i, i + 1));
+            }
+            continue;
+        }
+        row.label(egui::RichText::new(p.name()).font(theme::semibold(13.5)).color(if on { theme::text() } else { theme::text_dim() }));
+        row.label(egui::RichText::new(kind).font(theme::regular(12.0)).color(theme::text_dim()));
+        row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add_enabled(i + 1 < n, egui::Button::new("↓").min_size(vec2(28.0, 24.0))).on_hover_text("Lower").clicked() {
+                swap = Some((i, i + 1));
+            }
+            if ui.add_enabled(i > 0, egui::Button::new("↑").min_size(vec2(28.0, 24.0))).on_hover_text("Higher").clicked() {
+                swap = Some((i, i - 1));
+            }
+        });
+    }
+    if let Some((a, b)) = swap {
+        app.lyric_prefs.order.swap(a, b);
+    }
+    ui.add_space(6.0);
+}
+
+/// Settings › Account: signing in and out, and which channel to use.
+fn settings_account(app: &mut App, ui: &mut Ui) {
+    section_label(ui, "Account", None);
+    let busy = app.signing_in.load(Ordering::Relaxed);
+    ask_channels(app, ui);
+    settings_card(ui, |ui| {
+        settings_row(app, ui, Row::Account);
+        if has_channels(app) {
+            divider(ui);
+            settings_row(app, ui, Row::Channel);
+        }
+        divider(ui);
+        settings_row(app, ui, Row::ListenTogether);
         super::stats::account_row(app, ui);
     });
     if busy {
         ui.add_space(6.0);
         ui.label(RichText::new(if crate::platform::phone() { "Finish signing in on the page that opened." } else { "Finish signing in in the window that opened." }).font(theme::regular(12.5)).color(theme::text_dim()));
-    }
-    if sign_in {
-        app.start_sign_in(ui.ctx());
-    }
-    if sign_out {
-        app.backend.request(crate::backend::Req::Logout);
     }
 }
 
@@ -1945,25 +2441,13 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
 fn settings_playback(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Playback", None);
     settings_card(ui, |ui| {
-        setting_row(ui, "Autoplay", Some("Keep playing similar songs when the queue ends."), |ui| {
-            toggle(ui, &mut app.autoplay, "Autoplay");
-        });
+        settings_row(app, ui, Row::Autoplay);
         divider(ui);
-        setting_row(ui, "Volume normalization", Some("Turn loud songs down to the same level, like YouTube Music does."), |ui| {
-            if toggle(ui, &mut app.normalize, "Volume normalization").changed() {
-                app.audio.set_normalize(app.normalize);
-            }
-        });
+        settings_row(app, ui, Row::Normalize);
         divider(ui);
-        setting_row(ui, "Logarithmic volume", Some("Space the volume slider out the way ears hear loudness, so quiet levels aren't squeezed into its first few pixels."), |ui| {
-            if toggle(ui, &mut app.log_volume, "Logarithmic volume").changed() {
-                app.audio.set_log_volume(app.log_volume);
-            }
-        });
+        settings_row(app, ui, Row::LogVolume);
         divider(ui);
-        setting_row(ui, "Play songs, not music videos", Some("An official music video plays as its song, the album recording, when YouTube Music has one: no intros, skits or video-only edits. Lists still show what they hold."), |ui| {
-            toggle(ui, &mut app.play_songs, "Play songs, not music videos");
-        });
+        settings_row(app, ui, Row::PlaySongs);
         divider(ui);
         // On a phone the system routes the sound: speaker, headphones or Bluetooth.
         if !crate::platform::phone() {
@@ -1977,58 +2461,25 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
             });
             divider(ui);
         }
-        if open_row(ui, "Equalizer", &super::equalizer::settings_note(&app.eq)) {
-            app.actions.push(Action::Go(Page::Equalizer));
-        }
+        settings_row(app, ui, Row::Equalizer);
         divider(ui);
-        setting_row(ui, "Spatial audio", Some("Makes stereo songs sound like they surround you, for headphones: a wider stage, a little room around it and the way your head shades each ear. Voices stay in the middle. Not head-tracked, and not Dolby Atmos (that plays as it is when a song has it)."), |ui| {
-            if toggle(ui, &mut app.spatial, "Spatial audio").changed() {
-                app.set_crossfade();
-            }
-        });
+        settings_row(app, ui, Row::SpatialAudio);
         divider(ui);
-        setting_row(ui, "Automix", Some("Slide from one song into the next the way a DJ would: both hold their level for a moment, then swap in one smooth move, instead of a straight fade. The mix picks its own length, in phrases of 8 or 16 bars (16 on long songs), following the beat it hears."), |ui| {
-            if toggle(ui, &mut app.automix, "Automix").changed() {
-                app.set_crossfade();
-            }
-        });
+        settings_row(app, ui, Row::Automix);
         if !app.automix {
             divider(ui);
-            setting_row(ui, "Crossfade songs", Some("Blend the end of each song into the start of the next."), |ui| {
-                if toggle(ui, &mut app.crossfade, "Crossfade songs").changed() {
-                    app.set_crossfade();
-                }
-            });
+            settings_row(app, ui, Row::Crossfade);
             if app.crossfade {
                 divider(ui);
-                setting_row(ui, "Crossfade length", None, |ui| {
-                    if seconds_slider(ui, &mut app.crossfade_secs, 1..=super::CROSSFADE_MAX, "Crossfade length").changed() {
-                        app.set_crossfade();
-                    }
-                });
+                settings_row(app, ui, Row::CrossfadeLength);
             }
         }
         divider(ui);
-        setting_row(ui, "Skip non-music parts", Some("Jump over talking, skits and sponsor breaks in music videos, as marked by the SponsorBlock community. Album songs don't have any."), |ui| {
-            if toggle(ui, &mut app.sponsorblock, "Skip non-music parts").changed() {
-                app.request_segments();
-            }
-        });
+        settings_row(app, ui, Row::SkipNonMusic);
         divider(ui);
-        setting_row(ui, "Hi-Res audio", Some("Addon servers that serve hi-res copies of songs. When one has the song, its copy plays instead of YouTube's, and its quality shows in the player."), |_| {});
-        ui.add_space(12.0);
-        hires_sources_editor(app, ui);
-        ui.add_space(10.0);
-        setting_row(ui, "Prefer Dolby Atmos", Some("Ask the hi-res sources for a Dolby Atmos copy when they offer one. Falls back to the best stereo copy when the stream's codec can't be decoded."), |ui| {
-            if toggle(ui, &mut app.prefer_atmos, "Prefer Dolby Atmos").changed() {
-                app.backend.set_prefer_atmos(app.prefer_atmos);
-            }
-        });
-        setting_row(ui, "Disable direct source stream", Some("Play YouTube audio immediately and upgrade to hi-res in the background, instead of waiting for the addon to answer first."), |ui| {
-            if toggle(ui, &mut app.disable_direct_stream, "Disable direct source stream").changed() {
-                app.backend.set_disable_direct_stream(app.disable_direct_stream);
-            }
-        });
+        settings_row(app, ui, Row::HiRes);
+        settings_row(app, ui, Row::PreferAtmos);
+        settings_row(app, ui, Row::DisableDirect);
     });
 }
 
@@ -2105,212 +2556,45 @@ fn live_sources(app: &App) -> String {
     app.hires_sources.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n")
 }
 
+/// What Settings › Downloads says above its card.
+pub(super) const DOWNLOADS_NOTE: &str = "Download songs from their menu. They're saved at the best quality your account gets, tagged with their cover art, and play from the file, even offline.";
+
 /// Settings › Downloads.
 fn settings_downloads(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Downloads", None);
     if settings_group_shown(ui) {
-        ui.label(
-            RichText::new("Download songs from their menu. They're saved at the best quality your account gets, tagged with their cover art, and play from the file, even offline.")
-                .font(theme::regular(13.0))
-                .color(theme::text_dim()),
-        );
+        ui.label(RichText::new(DOWNLOADS_NOTE).font(theme::regular(13.0)).color(theme::text_dim()));
         ui.add_space(12.0);
     }
-    settings_card(ui, |ui| {
-        if crate::platform::HAS_SAF {
-            // Android: a folder chosen once; every download is copied into it.
-            let desc = match crate::downloads::tree() {
-                Some((_, label)) => format!("Downloads are saved to {}. Change it to save new ones elsewhere.", crate::local::folder_name(&label)),
-                None => "Not chosen yet: you're asked at your first download, once.".to_owned(),
-            };
-            setting_row(ui, "Download folder", Some(&desc), |ui| {
-                if pill(ui, "Change", Some(icon::FOLDER_OPEN), false).clicked() {
-                    app.ask_folder(super::storage::Purpose::Downloads);
-                }
-            });
-            return;
-        }
-        let folder = crate::downloads::folder().display().to_string();
-        setting_row(ui, "Download folder", Some(&folder), |ui| {
-            if crate::platform::HAS_FILE_DIALOG {
-                if pill(ui, "Change", None, false).clicked() {
-                    crate::downloads::pick_folder(ui.ctx());
-                }
-                ui.add_space(6.0);
-            }
-            if pill(ui, "Open", Some(icon::FOLDER_OPEN), false).clicked() {
-                crate::downloads::open_folder();
-            }
-        });
-    });
+    settings_card(ui, |ui| settings_row(app, ui, Row::DownloadFolder));
 }
 
 /// Settings › Lyrics: the better-lyrics extension's options.
 fn settings_lyrics(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Lyrics", None);
     settings_card(ui, |ui| {
-        setting_row(ui, "Romanization", Some("Japanese, Korean, Chinese, Cyrillic and other scripts in Latin letters. Timed with the lyrics when the source has it."), |ui| {
-            toggle(ui, &mut app.show_roman, "Romanization");
-        });
-        divider(ui);
-        setting_row(ui, "Translation", Some("Translated by Unison, or Google when it can't. Lyrics that ship their own translation use it."), |ui| {
-            toggle(ui, &mut app.show_trans, "Translation");
-        });
-        divider(ui);
-        setting_row(ui, "Translate into", None, |ui| {
-            let current = super::lyric_prefs::LANGUAGES.iter().find(|(c, _)| *c == app.lyric_prefs.target).map_or(app.lyric_prefs.target.as_str(), |(_, n)| n);
-            let btn = dropdown_button(ui, current, 200.0, "Translate into");
-            let just_opened = btn.clicked();
-            egui::Popup::menu(&btn).show(|ui| {
-                ui.set_width(200.0);
-                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    ui.add_space(4.0);
-                    for (code, name) in super::lyric_prefs::LANGUAGES {
-                        let on = app.lyric_prefs.target == *code;
-                        let row = option_row(ui, name, on);
-                        if on && just_opened {
-                            row.scroll_to_me(Some(egui::Align::Center));
-                        }
-                        if row.clicked() {
-                            app.lyric_prefs.target = (*code).to_owned();
-                            ui.close();
-                        }
-                    }
-                    ui.add_space(4.0);
-                });
-            });
-        });
-        divider(ui);
-        setting_row(ui, "Text size", Some("Make the lyrics larger or smaller. Works on top of the theme's own size."), |ui| {
-            let (min, max, step) = super::lyric_prefs::TEXT_SCALE;
-            let v = &mut app.lyric_prefs.text_scale;
-            if ui.add_enabled(*v < max - 0.01, egui::Button::new("+").min_size(vec2(28.0, 26.0))).on_hover_text("Larger").clicked() {
-                *v = ((*v + step) * 10.0).round() / 10.0;
-            }
-            ui.label(egui::RichText::new(format!("{:.0}%", *v * 100.0)).font(theme::semibold(13.0)));
-            if ui.add_enabled(*v > min + 0.01, egui::Button::new("−").min_size(vec2(28.0, 26.0))).on_hover_text("Smaller").clicked() {
-                *v = ((*v - step) * 10.0).round() / 10.0;
-            }
-        });
-        divider(ui);
-        // Offsets: seconds taken off the lyrics clock, as the extension's dock sets them.
-        for (title, desc, which) in [
-            ("Timing offset", "Shift all lyrics later (+) or earlier (−).", 0),
-            ("Word-synced trim", "Extra shift for syllable and word-synced lyrics.", 1),
-            ("Line-synced trim", "Extra shift for line-synced lyrics.", 2),
-        ] {
-            setting_row(ui, title, Some(desc), |ui| {
-                let v = match which {
-                    0 => &mut app.lyric_prefs.global_offset,
-                    1 => &mut app.lyric_prefs.word_trim,
-                    _ => &mut app.lyric_prefs.line_trim,
-                };
-                if ui.add(egui::Button::new("+").min_size(vec2(28.0, 26.0))).on_hover_text("Later").clicked() {
-                    *v = ((*v + 0.1) * 10.0).round() / 10.0;
-                }
-                ui.label(egui::RichText::new(format!("{:+.1} s", *v).replace("+0.0", "0.0")).font(theme::semibold(13.0)));
-                if ui.add(egui::Button::new("−").min_size(vec2(28.0, 26.0))).on_hover_text("Earlier").clicked() {
-                    *v = ((*v - 0.1) * 10.0).round() / 10.0;
-                }
-            });
+        for row in [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim] {
+            settings_row(app, ui, row);
             divider(ui);
         }
-        // Source order: the first enabled source with lyrics for a song is shown; the
-        // lyrics toolbar can pick another for that song.
-        setting_row(ui, "Lyrics sources", Some("Tried in this order. Switch one off to skip it; the toolbar under the lyrics picks a different one for a single song."), |_| {});
-        let n = app.lyric_prefs.order.len();
-        let mut swap: Option<(usize, usize)> = None;
-        for i in 0..n {
-            let (p, on) = app.lyric_prefs.order[i];
-            let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::hover());
-            let mut row = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-            let mut enabled = on;
-            if toggle(&mut row, &mut enabled, p.name()).changed() {
-                app.lyric_prefs.order[i].1 = enabled;
-            }
-            row.add_space(10.0);
-            let kind = match p.sync() {
-                crate::lyrics::SyncKind::Syllable => "syllable",
-                crate::lyrics::SyncKind::Word => "word",
-                crate::lyrics::SyncKind::Line => "line",
-                crate::lyrics::SyncKind::Unsynced => "plain",
-            };
-            row.label(egui::RichText::new(p.name()).font(theme::semibold(13.5)).color(if on { theme::text() } else { theme::text_dim() }));
-            row.label(egui::RichText::new(kind).font(theme::regular(12.0)).color(theme::text_dim()));
-            row.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(i + 1 < n, egui::Button::new("↓").min_size(vec2(28.0, 24.0))).on_hover_text("Lower").clicked() {
-                    swap = Some((i, i + 1));
-                }
-                if ui.add_enabled(i > 0, egui::Button::new("↑").min_size(vec2(28.0, 24.0))).on_hover_text("Higher").clicked() {
-                    swap = Some((i, i - 1));
-                }
-            });
-        }
-        if let Some((a, b)) = swap {
-            app.lyric_prefs.order.swap(a, b);
-        }
-        ui.add_space(6.0);
+        settings_row(app, ui, Row::LyricsSources);
     });
 }
 
 /// Settings › Artist pages: the listener's own signature service.
 fn settings_artists(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Artist pages", None);
-    settings_card(ui, |ui| {
-        setting_row(ui, "Signature service", Some("A link to your own signature API. Artists get their handwritten signature, with “Signed by …” above it — beside About when Apple also letters them a wordmark; without a signature, their name is set in type."), |_| {});
-        divider(ui);
-        ui.add_space(12.0);
-        if super::text_field(ui, "Link", &mut app.signature_api, false, "https://your-signature-service.example").changed() {
-            app.signature_reset();
-        }
-        ui.add_space(12.0);
-    });
+    settings_card(ui, |ui| settings_row(app, ui, Row::SignatureService));
 }
 
 /// Settings › Appearance.
 fn settings_appearance(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Appearance", None);
     settings_card(ui, |ui| {
-        let desc = if cfg!(windows) {
-            "Light or dark pages. System follows Windows' app mode. Now playing stays dark, over the album art."
-        } else {
-            "Light or dark pages. System follows your system's setting. Now playing stays dark, over the album art."
-        };
-        let mut pick = None;
-        setting_row(ui, "Mode", Some(desc), |ui| {
-            let btn = dropdown_button(ui, app.appearance.label(), 160.0, "Mode");
-            egui::Popup::menu(&btn).show(|ui| {
-                ui.set_width(160.0);
-                ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-                ui.add_space(4.0);
-                for a in theme::Appearance::ALL {
-                    if option_row(ui, a.label(), a == app.appearance).clicked() {
-                        pick = Some(a);
-                        ui.close();
-                    }
-                }
-                ui.add_space(4.0);
-            });
-        });
-        if let Some(a) = pick {
-            app.appearance = a;
+        for row in [Row::Mode, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork] {
+            settings_row(app, ui, row);
+            divider(ui);
         }
-        divider(ui);
-        setting_row(ui, "Animated background", Some("The album art slowly drifts behind everything."), |ui| {
-            toggle(ui, &mut app.anim_bg, "Animated background");
-        });
-        divider(ui);
-        setting_row(ui, "Pulse with the music", Some("The background swells with the beat."), |ui| {
-            toggle(ui, &mut app.reactive_bg, "Pulse with the music");
-        });
-        divider(ui);
-        setting_row(ui, "Animated artwork", Some("Apple's moving album covers in Now Playing, the player and the tiles you hover. Costs memory while a song plays, and gives it back when the song ends."), |ui| {
-            if toggle(ui, &mut app.animated_artwork, "Animated artwork").changed() && !app.animated_artwork {
-                app.deload_motion();
-            }
-        });
-        divider(ui);
         // A phone draws in its system font, as its other apps do, and has no sidebar to
         // hide playlists from.
         if !crate::platform::phone() {
@@ -2339,9 +2623,7 @@ fn settings_appearance(app: &mut App, ui: &mut Ui) {
             });
             divider(ui);
         }
-        setting_row(ui, "Stats for nerds", Some("Show the codec, sample rate and bitrate of what's playing at the foot of the cover in Now Playing, whatever the source."), |ui| {
-            toggle(ui, &mut app.show_nerd_stats, "Stats for nerds");
-        });
+        settings_row(app, ui, Row::StatsForNerds);
     });
 }
 
@@ -2400,28 +2682,7 @@ fn settings_connections(app: &mut App, ui: &mut Ui) {
             });
             divider(ui);
         }
-        let busy = app.lastfm_busy.load(Ordering::Relaxed);
-        let desc = match &app.lastfm_user {
-            Some(name) => format!("Scrobbling what you play to {name}'s profile."),
-            None if busy => "Allow BitChord on the Last.fm page that opened in your browser.".to_owned(),
-            None => "Scrobble what you play to your Last.fm profile.".to_owned(),
-        };
-        let (mut connect, mut disconnect) = (false, false);
-        setting_row(ui, "Last.fm", Some(&desc), |ui| {
-            if app.lastfm_user.is_some() {
-                disconnect = pill(ui, "Disconnect", None, false).clicked();
-            } else if busy {
-                ui.spinner();
-            } else {
-                connect = pill(ui, "Connect", None, false).clicked();
-            }
-        });
-        if connect {
-            app.lastfm_sign_in();
-        }
-        if disconnect {
-            app.lastfm_sign_out();
-        }
+        settings_row(app, ui, Row::LastFm);
     });
     if discord_enabled != app.discord_enabled {
         app.set_discord_enabled(discord_enabled);
@@ -2781,6 +3042,9 @@ fn output_device_picker(app: &mut App, ui: &mut Ui) {
 
 /// A dropdown's closed state: the chosen value and a chevron on a glass pill.
 fn dropdown_button(ui: &mut Ui, value: &str, width: f32, name: &str) -> egui::Response {
+    if m3::on() {
+        return m3::dropdown(ui, value, width, name);
+    }
     let (rect, resp) = ui.allocate_exact_size(vec2(width, 36.0), Sense::click());
     let resp = widgets::named(resp, name).on_hover_cursor(egui::CursorIcon::PointingHand);
     let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
@@ -2794,7 +3058,8 @@ fn dropdown_button(ui: &mut Ui, value: &str, width: f32, name: &str) -> egui::Re
 
 /// A dropdown option: hover glass, and a check on the chosen one.
 fn option_row(ui: &mut Ui, label: &str, selected: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+    // A finger needs a taller row than a pointer.
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), if m3::on() { m3::TOUCH } else { 34.0 }), Sense::click());
     let resp = widgets::named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
     let h = theme::anim_bool(ui.ctx(), resp.id.with("h"), resp.hovered(), 0.12);
     if h > 0.0 || selected {
@@ -2844,6 +3109,10 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
     if !s.shown {
         return;
     }
+    if m3::on() {
+        ui.data_mut(|d| d.insert_temp(label_key(), PendingLabel(Some((title.to_owned(), value.map(str::to_owned))))));
+        return;
+    }
     ui.add_space(30.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
     ui.painter().text(pos2(rect.left() + 2.0, rect.center().y), Align2::LEFT_CENTER, title, theme::bold(17.0), theme::text());
@@ -2855,6 +3124,20 @@ pub(super) fn section_label(ui: &mut Ui, title: &str, value: Option<&str>) {
 
 pub(super) fn settings_card(ui: &mut Ui, body: impl FnOnce(&mut Ui)) {
     if !settings_group_shown(ui) {
+        return;
+    }
+    if m3::on() {
+        let label = ui.data_mut(|d| d.remove_temp::<PendingLabel>(label_key())).and_then(|l| l.0);
+        let label = label.as_ref().map(|(title, value)| m3::GroupLabel { title, value: value.as_deref() });
+        let top = ui.cursor().top();
+        m3::card(ui, label, crate::material::scheme().surface_container, body);
+        if ui.cursor().top() > top {
+            // A group survived the search box, so the page isn't empty.
+            let mut s = search_of(ui);
+            s.matched = true;
+            put_search(ui, &s);
+            ui.add_space(12.0);
+        }
         return;
     }
     egui::Frame::new()
@@ -2896,9 +3179,15 @@ fn phone_slot(width: Option<f32>) -> Slot {
 /// A settings row: title and description on the left, the control on the right. A phone
 /// is too narrow for most controls beside the text: there only a switch stays at the
 /// right, and the others go underneath, in a line tall enough for a thumb.
-pub(super) fn setting_row(ui: &mut Ui, title: &str, desc: Option<&str>, control: impl FnOnce(&mut Ui)) {
+/// Returns whether the row was drawn (the search box hides the ones that don't say
+/// what is typed).
+pub(super) fn setting_row(ui: &mut Ui, title: &str, desc: Option<&str>, control: impl FnOnce(&mut Ui)) -> bool {
     if !settings_row_shown(ui, title, desc.unwrap_or("")) {
-        return;
+        return false;
+    }
+    if m3::on() {
+        setting_row_material(ui, title, desc, control);
+        return true;
     }
     let w = ui.available_width();
     // How wide this row's control was last frame decides where it goes in this one.
@@ -2944,6 +3233,52 @@ pub(super) fn setting_row(ui: &mut Ui, title: &str, desc: Option<&str>, control:
             ui.ctx().request_discard("a settings row's control changed slot");
         }
     }
+    true
+}
+
+/// The room above and below a Material settings row's text.
+const ROW_PAD: f32 = 14.0;
+/// The line a Material row gives a control that goes under its text.
+const ROW_CONTROL: f32 = 56.0;
+
+/// How tall a Material settings row is for text `text_h` tall, with its control in `slot`.
+fn material_row_height(text_h: f32, slot: Slot) -> f32 {
+    match slot {
+        Slot::Below => ROW_PAD + text_h + 4.0 + ROW_CONTROL,
+        Slot::Beside | Slot::Absent => (text_h + 2.0 * ROW_PAD).max(56.0),
+    }
+}
+
+/// A settings row on the Material phone: the title over its description, a switch at
+/// their right, any other control on a line of its own under them.
+fn setting_row_material(ui: &mut Ui, title: &str, desc: Option<&str>, control: impl FnOnce(&mut Ui)) {
+    let w = ui.available_width();
+    let width_id = ui.make_persistent_id(egui::IdSalt::new(("setting-row-control", title)));
+    let slot = phone_slot(ui.data(|d| d.get_temp::<f32>(width_id)));
+    let text_w = if slot == Slot::Beside { w - BESIDE_MAX - 12.0 } else { w };
+    let (title_g, desc_g) = m3::row_text(ui, title, desc, text_w, 8);
+    let text_h = title_g.size().y + desc_g.as_ref().map_or(0.0, |g| g.size().y);
+    let below = slot == Slot::Below;
+    let (rect, _) = ui.allocate_exact_size(vec2(w, material_row_height(text_h, slot)), Sense::hover());
+    let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
+    let top = if below { rect.top() + ROW_PAD } else { rect.center().y - text_h / 2.0 };
+    let title_h = title_g.size().y;
+    ui.painter().galley(pos2(rect.left(), top), title_g, theme::with_alpha(theme::text(), fade));
+    if let Some(g) = desc_g {
+        ui.painter().galley(pos2(rect.left(), top + title_h), g, theme::with_alpha(theme::text_dim(), fade));
+    }
+    let (ctl, layout) = if below {
+        (Rect::from_min_max(pos2(rect.left(), rect.bottom() - ROW_CONTROL), rect.max), egui::Layout::left_to_right(egui::Align::Center))
+    } else {
+        (Rect::from_min_max(pos2(rect.left() + text_w + 12.0, rect.top()), rect.max), egui::Layout::right_to_left(egui::Align::Center))
+    };
+    let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(ctl).layout(layout));
+    control(&mut cui);
+    let width = cui.min_rect().width();
+    ui.data_mut(|d| d.insert_temp(width_id, width));
+    if phone_slot(Some(width)) != slot {
+        ui.ctx().request_discard("a settings row's control changed slot");
+    }
 }
 
 /// A settings row that opens a section of its own: the same text as `setting_row`, but
@@ -2953,6 +3288,23 @@ pub(super) fn open_row(ui: &mut Ui, title: &str, desc: &str) -> bool {
         return false;
     }
     let w = ui.available_width();
+    if m3::on() {
+        let (title_g, desc_g) = m3::row_text(ui, title, Some(desc), w - 32.0, 8);
+        let text_h = title_g.size().y + desc_g.as_ref().map_or(0.0, |g| g.size().y);
+        let (rect, resp) = ui.allocate_exact_size(vec2(w, material_row_height(text_h, Slot::Absent)), Sense::click());
+        let resp = named(resp, title);
+        if resp.is_pointer_button_down_on() {
+            ui.painter().rect_filled(rect.expand2(vec2(12.0, 0.0)), crate::material::shape::CARD_SMALL, theme::glass(0.1));
+        }
+        let top = rect.center().y - text_h / 2.0;
+        let title_h = title_g.size().y;
+        ui.painter().galley(pos2(rect.left(), top), title_g, theme::text());
+        if let Some(g) = desc_g {
+            ui.painter().galley(pos2(rect.left(), top + title_h), g, theme::text_dim());
+        }
+        widgets::icon_at(ui, pos2(rect.right() - 6.0, rect.center().y), icon::CHEVRON_RIGHT, 20.0, theme::text_dim());
+        return resp.clicked();
+    }
     // The chevron needs only a little room; a phone gives the text the rest.
     let text_w = if crate::platform::phone() { w - 32.0 } else { (w - 230.0).max(200.0) };
     let title_g = widgets::galley(ui, title, theme::semibold(14.5), theme::text(), text_w);
@@ -2970,8 +3322,9 @@ pub(super) fn open_row(ui: &mut Ui, title: &str, desc: &str) -> bool {
 
 pub(super) fn divider(ui: &mut Ui) {
     // Rows the box kept read as one block, so a filtered group draws no lines between them.
+    // A Material card's rows stand apart by their spacing, without lines.
     let s = search_of(ui);
-    if !s.words.is_empty() && !s.all {
+    if (!s.words.is_empty() && !s.all) || m3::on() {
         return;
     }
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -2980,7 +3333,7 @@ pub(super) fn divider(ui: &mut Ui) {
 
 /// The room a switch takes, for a place measured by hand.
 pub(super) fn toggle_size() -> Vec2 {
-    if crate::material::on() { super::m3::SWITCH } else { vec2(44.0, 26.0) }
+    if crate::material::on() { super::m3::SWITCH_TARGET } else { vec2(44.0, 26.0) }
 }
 
 /// On/off switch tinted with the accent.
@@ -3011,6 +3364,9 @@ pub(super) fn toggle(ui: &mut Ui, on: &mut bool, name: &str) -> egui::Response {
 /// Whole seconds on a track like the volume slider's, with the ends labelled and the
 /// value beside it: click or drag to set (scrolling over it scrolls the page).
 fn seconds_slider(ui: &mut Ui, v: &mut u32, range: std::ops::RangeInclusive<u32>, name: &str) -> egui::Response {
+    if m3::on() {
+        return m3::slider(ui, v, range, name);
+    }
     let (lo, hi) = (*range.start(), *range.end());
     let label = |ui: &mut Ui, text: String, w: f32, font: egui::FontId, color: Color32| {
         let (rect, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());

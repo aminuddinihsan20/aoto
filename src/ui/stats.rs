@@ -388,6 +388,11 @@ pub(super) fn page(app: &mut App, ui: &mut Ui) {
 /// The way to the page, a row of Settings › Account's card.
 pub(super) fn account_row(app: &mut App, ui: &mut Ui) {
     pages::divider(ui);
+    stats_row(app, ui);
+}
+
+/// The row that opens the page.
+pub(super) fn stats_row(app: &mut App, ui: &mut Ui) {
     if pages::open_row(ui, "Listening stats", &format!("How long you listened this week, this month and this year, with your top artist and songs. Counted on {}.", place())) {
         app.actions.push(Action::Go(Page::Stats));
     }
@@ -396,14 +401,17 @@ pub(super) fn account_row(app: &mut App, ui: &mut Ui) {
 /// Settings › Listening history: what is kept, and the way to clear it.
 pub(super) fn settings_section(app: &mut App, ui: &mut Ui) {
     pages::section_label(ui, "Listening history", None);
+    pages::settings_card(ui, |ui| clear_row(app, ui));
+}
+
+/// The row that clears the history, and the question it asks first.
+pub(super) fn clear_row(app: &mut App, ui: &mut Ui) {
     let history = app.listening.history();
     let (empty, note) = (history.is_empty(), history_note(history.plays(), history.since().map(Date::of), place()));
-    pages::settings_card(ui, |ui| {
-        pages::setting_row(ui, "Clear listening history", Some(&note), |ui| {
-            if !empty && widgets::pill(ui, "Clear", Some(icon::TRASH_2), false).clicked() {
-                app.stats.clearing = true;
-            }
-        });
+    pages::setting_row(ui, "Clear listening history", Some(&note), |ui| {
+        if !empty && widgets::pill(ui, "Clear", Some(icon::TRASH_2), false).clicked() {
+            app.stats.clearing = true;
+        }
     });
     if app.stats.clearing {
         match confirm_clear(ui.ctx(), &note) {

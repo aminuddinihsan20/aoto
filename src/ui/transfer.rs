@@ -202,7 +202,7 @@ fn setup(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new("Transfer from Spotify").font(theme::bold(30.0)).color(theme::text()));
     });
     ui.add_space(4.0);
-    dim(ui, "Copy your Liked Songs or any playlist into YouTube Music. It runs in the background, so you can keep listening.");
+    dim(ui, INTRO);
     ui.add_space(18.0);
 
     if !app.logged_in {
@@ -1398,12 +1398,22 @@ fn failed(app: &mut App, ui: &mut Ui, e: &str) {
 
 /// Settings › Import.
 pub fn settings_section(app: &mut App, ui: &mut Ui) {
-    let xfer = app.transfer.clone();
-    xfer.ensure_account(&app.backend);
     section_label(ui, "Import", None);
-    let account = xfer.account.lock().unwrap().clone();
-    let mut open = false;
     settings_card(ui, |ui| {
+        open_row(app, ui);
+        super::pages::divider(ui);
+        account_row(app, ui);
+    });
+}
+
+const INTRO: &str = "Copy your Liked Songs or any playlist into YouTube Music. It runs in the background, so you can keep listening.";
+
+/// The row that opens the transfer's page.
+pub(super) fn open_row(app: &mut App, ui: &mut Ui) {
+    let mut open = false;
+    if super::m3::on() {
+        setting_row(ui, "Transfer from Spotify", Some(INTRO), |ui| open = pill(ui, "Open", None, true).clicked());
+    } else {
         let w = ui.available_width();
         let (rect, _) = ui.allocate_exact_size(vec2(w, 78.0), Sense::hover());
         let b = Rect::from_min_size(pos2(rect.left(), rect.center().y - 22.0), vec2(44.0, 44.0));
@@ -1411,16 +1421,22 @@ pub fn settings_section(app: &mut App, ui: &mut Ui) {
         let x = b.right() + 16.0;
         let tw = rect.right() - x - 120.0;
         ui.painter().text(pos2(x, rect.center().y - 10.0), Align2::LEFT_CENTER, "Transfer from Spotify", theme::semibold(14.5), theme::text());
-        let g = widgets::galley_wrapped(ui, "Copy your Liked Songs or any playlist into YouTube Music. It runs in the background, so you can keep listening.", theme::regular(12.5), theme::text_dim(), tw, 2);
+        let g = widgets::galley_wrapped(ui, INTRO, theme::regular(12.5), theme::text_dim(), tw, 2);
         ui.painter().galley(pos2(x, rect.center().y + 2.0), g, theme::text_dim());
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::right_to_left(egui::Align::Center)));
         open = pill(&mut child, "Open", None, true).clicked();
-        super::pages::divider(ui);
-        spotify_account_row(app, ui, &account, false);
-    });
+    }
     if open {
         app.actions.push(Action::Go(Page::Transfer));
     }
+}
+
+/// The row of the Spotify account the songs come from.
+pub(super) fn account_row(app: &mut App, ui: &mut Ui) {
+    let xfer = app.transfer.clone();
+    xfer.ensure_account(&app.backend);
+    let account = xfer.account.lock().unwrap().clone();
+    spotify_account_row(app, ui, &account, false);
 }
 
 /// Whether the sidebar shows the transfer card: while it runs, waits or failed, and for

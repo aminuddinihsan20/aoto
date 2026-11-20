@@ -27,6 +27,7 @@ mod playback;
 mod queue;
 mod responses;
 mod sheet;
+mod settings;
 mod shell;
 mod sleep;
 mod stats;
@@ -77,6 +78,8 @@ pub enum Page {
     Playlist(String),
     Artist(String),
     Settings,
+    /// One category of the phone's Settings, opened from their first page.
+    SettingsCategory(settings::Category),
     /// Transfer from Spotify.
     Transfer,
     /// Music from one folder the listener chose (its address).
@@ -928,6 +931,13 @@ impl App {
             Ok(p) if p.starts_with("downloaded:") => app.go(Page::Downloaded(p[11..].to_owned())),
             Ok(p) if p.starts_with("localalbum:") => app.go(Page::LocalAlbum(p[11..].replace('|', "\u{1f}"))),
             Ok("settings") => app.go(Page::Settings),
+            // "settings:sound" and the like: one category of the phone's Settings.
+            Ok(p) if p.starts_with("settings:") => {
+                if let Some(c) = settings::Category::ALL.into_iter().find(|c| format!("{c:?}").eq_ignore_ascii_case(&p[9..])) {
+                    app.go(Page::Settings);
+                    app.go(Page::SettingsCategory(c));
+                }
+            }
             Ok("transfer") => app.go(Page::Transfer),
             Ok("equalizer") => app.go(Page::Equalizer),
             Ok("stats") => app.go(Page::Stats),
@@ -940,6 +950,10 @@ impl App {
         // YTM_UPLOAD=<file> uploads that file as if it had been picked.
         if let Some(f) = std::env::var_os("YTM_UPLOAD") {
             *app.picked_uploads.lock().unwrap() = Some(vec![f.into()]);
+        }
+        // Dev hook: YTM_SETTINGS_SEARCH=<words> types them into the box above Settings.
+        if let Some(v) = dev_var("YTM_SETTINGS_SEARCH") {
+            app.settings_search = v.to_owned();
         }
         // Dev hook: YTM_PROXY_INPUT=<address> opens Settings › Network on Custom with it typed in.
         if let Some(v) = dev_var("YTM_PROXY_INPUT") {
@@ -978,26 +992,26 @@ impl App {
 
     fn go(&mut self, page: Page) {
         self.np_open = false;
-        if page == self.page {
+        if !visit(&mut self.page, &mut self.back, &mut self.forward, page) {
             // Clicking the page you're on refreshes it.
             self.refresh();
             return;
         }
         // Leaving a page deloads its motion clips: no decoder keeps running unseen.
         self.apple_motion.clear();
-        let prev = std::mem::replace(&mut self.page, page);
-        self.back.push(prev);
-        self.forward.clear();
         self.page_loaded();
     }
 
     fn nav_back(&mut self) {
-        if self.np_open {
-            self.np_open = false;
-        } else if let Some(p) = self.back.pop() {
-            self.apple_motion.clear();
-            self.forward.push(std::mem::replace(&mut self.page, p));
-            self.page_loaded();
+        match back_step(self.np_open, self.jam_open, crate::platform::phone()) {
+            BackStep::NowPlaying => self.np_open = false,
+            BackStep::ListenTogether => self.jam_open = false,
+            BackStep::Page => {
+                if step_back(&mut self.page, &mut self.back, &mut self.forward) {
+                    self.apple_motion.clear();
+                    self.page_loaded();
+                }
+            }
         }
     }
 
@@ -1455,7 +1469,7 @@ impl eframe::App for App {
             // back to, and sends the press this way.
             crate::platform::set_wake(&ctx);
             let sheet_open = sheet::is_open(&ctx);
-            crate::platform::set_can_go_back(sheet_open || self.np_open || !self.back.is_empty());
+            crate::platform::set_can_go_back(sheet_open || self.np_open || self.jam_open || !self.back.is_empty());
             if crate::platform::take_back_request() {
                 // An open sheet is the first thing Back closes.
                 if sheet_open {
@@ -1937,6 +1951,44 @@ pub fn shuffle<T>(v: &mut [T]) {
 fn updatable() -> bool {
     static UPDATABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *UPDATABLE.get_or_init(|| cfg!(target_os = "android") || crate::update::installed() || crate::update::portable_dir().is_some())
+}
+
+/// Go to `to`: the page left is kept to come back to, and what was ahead is forgotten.
+/// False when `to` is the page already shown (nothing moves).
+fn visit(page: &mut Page, back: &mut Vec<Page>, forward: &mut Vec<Page>, to: Page) -> bool {
+    if to == *page {
+        return false;
+    }
+    back.push(std::mem::replace(page, to));
+    forward.clear();
+    true
+}
+
+/// Go back to the page before this one. False when there is none.
+fn step_back(page: &mut Page, back: &mut Vec<Page>, forward: &mut Vec<Page>) -> bool {
+    let Some(to) = back.pop() else { return false };
+    forward.push(std::mem::replace(page, to));
+    true
+}
+
+/// What Back does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackStep {
+    /// Bring Now Playing down.
+    NowPlaying,
+    /// Close Listen together, back to the Settings page it was opened from (the phone,
+    /// where it is a page under Back's arrow).
+    ListenTogether,
+    /// Go back a page.
+    Page,
+}
+
+fn back_step(now_playing: bool, listen_together: bool, phone: bool) -> BackStep {
+    match (now_playing, listen_together && phone) {
+        (true, _) => BackStep::NowPlaying,
+        (false, true) => BackStep::ListenTogether,
+        (false, false) => BackStep::Page,
+    }
 }
 
 pub fn fmt_time(secs: u32) -> String {
