@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use egui::{Align2, Color32, Rect, RichText, Sense, Ui, Vec2, pos2, vec2};
 
 use super::widgets::{self, RowOpts, card, chip, h_scroll, named, paint_cover, pill, shelf_header, track_row};
-use super::{Action, App, LibTab, Page, Selection};
+use super::{Action, App, LibTab, Page, Selection, m3};
 use crate::backend::compact;
 use crate::model::{Card, ShelfKind, Target, Track};
 use crate::theme::{self, icon};
@@ -518,7 +518,23 @@ fn new(app: &mut App, ui: &mut Ui, now: f64) {
     card_row(app, ui, "ex-charts", "Charts", &charts);
 }
 
+/// The title of a tab's own page. On a phone drawn in Material You it stands in the
+/// frame's top bar, beside the account, and is not said again here.
+fn root_title(ui: &mut Ui, title: &str) {
+    if !(crate::platform::phone() && crate::material::on()) {
+        page_title(ui, title);
+    }
+}
+
 pub(super) fn page_title(ui: &mut Ui, title: &str) {
+    if crate::material::on() {
+        let m = crate::material::scheme();
+        ui.add_space(4.0);
+        let g = m3::galley(ui, title, crate::material::Type::HeadlineMedium, m.on_surface, ui.available_width());
+        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), g.size().y), Sense::hover());
+        ui.painter().galley(rect.min, g, m.on_surface);
+        return;
+    }
     // Left-aligned with the page's content, a little below the top edge.
     ui.add_space(18.0);
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 42.0), Sense::hover());
@@ -529,7 +545,7 @@ pub(super) fn page_title(ui: &mut Ui, title: &str) {
 
 fn search(app: &mut App, ui: &mut Ui, q: &str, now: f64) {
     let pick = super::transfer::pick_banner(app, ui);
-    page_title(ui, "Search");
+    root_title(ui, "Search");
     ui.add_space(10.0);
     // Coming from a suggestion, the sidebar or a link, the field says what's shown.
     // Only when the route changed: clearing the box leaves the route alone until Enter.
@@ -1078,7 +1094,7 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
 // ------------------------------------------------------------------ library
 
 fn library(app: &mut App, ui: &mut Ui, tab: LibTab, now: f64) {
-    page_title(ui, "Library");
+    root_title(ui, "Library");
     if !app.logged_in {
         ui.add_space(10.0);
         ui.label(RichText::new("Sign in to see your playlists, liked songs and history.").color(theme::text_dim()));
@@ -1203,7 +1219,7 @@ fn downloads(app: &mut App, ui: &mut Ui, now: f64) {
     if crate::platform::phone() {
         return downloads_phone(app, ui, now);
     }
-    page_title(ui, "Downloads");
+    root_title(ui, "Downloads");
     let songs = crate::downloads::list();
     ui.add_space(4.0);
     ui.label(
@@ -1257,7 +1273,7 @@ fn phone_section(ui: &mut Ui, title: &str, note: &str) {
 /// The phone's Downloads: where songs are saved and how much room they take, the music
 /// folders as a grid of coloured tiles, then the downloaded songs in one rounded group.
 fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
-    page_title(ui, "Downloads");
+    root_title(ui, "Downloads");
     let songs = crate::downloads::list();
     ui.add_space(6.0);
     storage_card(app, ui, songs.len());
