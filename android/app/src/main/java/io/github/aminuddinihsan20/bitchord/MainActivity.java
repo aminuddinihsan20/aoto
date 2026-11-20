@@ -53,6 +53,12 @@ public class MainActivity extends GameActivity {
     private static final int REQUEST_FOLDER = 7;
     private long folderCall;
 
+    /** Asking for the storage permission, which saving a picture needs before Android 10. */
+    private static final int REQUEST_STORAGE = 8;
+    /** The save waiting for that answer: its call, the picture's file and its name. */
+    private long saveCall;
+    private String[] saveArgs;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -159,8 +165,45 @@ public class MainActivity extends GameActivity {
                 }
                 break;
             }
+            case "lyric-card":
+                LyricCard.render(this, arg, done);
+                break;
+            case "save-image": {
+                String[] s = arg.split("\u001e", 2);
+                if (s.length < 2) {
+                    done.finish(false, "bad save request");
+                } else if (Build.VERSION.SDK_INT < 29 && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                    // Before Android 10 the Pictures folder is written to directly: ask first.
+                    saveCall = id;
+                    saveArgs = s;
+                    requestPermissions(new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE}, REQUEST_STORAGE);
+                } else {
+                    LyricCard.save(this, s[0], s[1], done);
+                }
+                break;
+            }
+            case "share-image":
+                LyricCard.share(this, arg, done);
+                break;
             default:
                 done.finish(false, "unknown request " + kind);
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQUEST_STORAGE || saveCall == 0) {
+            return;
+        }
+        final long id = saveCall;
+        String[] s = saveArgs;
+        saveCall = 0;
+        saveArgs = null;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            LyricCard.save(this, s[0], s[1], (ok, text) -> nativeAnswer(id, ok, text));
+        } else {
+            nativeAnswer(id, false, "the storage permission was not given");
         }
     }
 
