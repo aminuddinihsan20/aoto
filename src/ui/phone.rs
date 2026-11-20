@@ -452,9 +452,30 @@ fn mini_geom(rect: Rect) -> MiniGeom {
     }
 }
 
+/// What the mini player's button shows of the player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MiniState {
+    /// A song is on its way: nothing is heard yet.
+    Loading,
+    Playing,
+    Paused,
+}
+
+/// A song on its way shows as loading whether or not the player counts it as playing.
+fn mini_state(playing: bool, buffering: bool) -> MiniState {
+    match (buffering, playing) {
+        (true, _) => MiniState::Loading,
+        (false, true) => MiniState::Playing,
+        (false, false) => MiniState::Paused,
+    }
+}
+
 /// The song playing, with play/pause and next; a tap anywhere else opens Now Playing.
 fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
-    let Some(track) = app.current().cloned() else { return };
+    let Some(current) = app.current().cloned() else { return };
+    // An Automix handoff keeps the outgoing song here, as Now Playing does, until the
+    // next one is the louder of the two.
+    let track = if app.mix_hold().is_some() { app.shown().cloned().unwrap_or(current) } else { current };
     let m = material::scheme();
     let playing = app.playing();
     let g = mini_geom(rect);
@@ -474,10 +495,9 @@ fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
     m3::two_lines(ui, g.text.left(), g.text.center().y, g.text.width(), &track.title, Type::TitleMedium, ink, &track.artist_line(), Type::BodyMedium, ink.gamma_multiply(0.8));
 
     // Progress: a thin line along the bottom edge, as far as the song has played.
-    let status = app.audio.status.clone();
-    let total = status.duration().map(|d| d.as_secs_f32()).or(track.duration.map(|d| d as f32)).unwrap_or(0.0);
+    let super::nowplaying::SeekState { total, pos, .. } = super::nowplaying::seek_state(app, &track);
     if total > 0.0 {
-        let frac = (status.position_smooth().as_secs_f32() / total).clamp(0.0, 1.0);
+        let frac = (pos / total).clamp(0.0, 1.0);
         let done = Rect::from_min_max(g.line.min, pos2(g.line.left() + g.line.width() * frac, g.line.bottom()));
         ui.painter().rect_filled(done, CornerRadius::same(1), m.primary);
         if playing {
@@ -485,8 +505,15 @@ fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
         }
     }
 
-    let (glyph, name) = if playing { (glyphs::PAUSE, "Pause") } else { (glyphs::PLAY, "Play") };
-    let play = m3::IconButton::new(glyph, name).style(m3::IconStyle::Filled).radius(shape::TILE_SMALL).show_at(ui, g.play.center(), ui.scope_id().with(("mini", "play")));
+    // Play/pause: an arc turns in it while the song is on its way, and its corners are
+    // squarer while it plays, as the large one's on Now Playing are.
+    let (glyph, name): (m3::Icon, &str) = match mini_state(playing, app.buffering) {
+        MiniState::Loading => (m3::Icon::Drawn(m3::drawn::spinner), "Pause"),
+        MiniState::Playing => (glyphs::PAUSE.into(), "Pause"),
+        MiniState::Paused => (glyphs::PLAY.into(), "Play"),
+    };
+    let on = theme::anim_bool(ui.ctx(), "mini-play-morph", playing || app.buffering, 0.2);
+    let play = m3::IconButton::new(glyph, name).style(m3::IconStyle::Filled).radius(egui::lerp(20.0..=shape::TILE_SMALL, on)).show_at(ui, g.play.center(), ui.scope_id().with(("mini", "play")));
     if play.clicked() {
         app.toggle();
     }
@@ -616,6 +643,14 @@ mod tests {
             assert!(g.line.top() >= g.cover.bottom(), "the progress line runs under the cover");
             assert!(g.line.height() <= 2.0);
         }
+    }
+
+    #[test]
+    fn the_mini_players_button_says_whether_the_song_plays_waits_or_is_on_its_way() {
+        assert_eq!(mini_state(true, false), MiniState::Playing);
+        assert_eq!(mini_state(false, false), MiniState::Paused);
+        assert_eq!(mini_state(false, true), MiniState::Loading);
+        assert_eq!(mini_state(true, true), MiniState::Loading, "a song still loading is not heard yet");
     }
 
     #[test]

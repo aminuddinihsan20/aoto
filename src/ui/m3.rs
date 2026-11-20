@@ -170,6 +170,14 @@ pub mod drawn {
         line(ui, center, size, color, &[(5.0, 19.0), (19.0, 19.0)]);
     }
 
+    /// An arc that turns: something is on its way (a song that is loading).
+    pub fn spinner(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+        let a = ui.input(|i| i.time) as f32 * 6.0;
+        let arc = (0..16).map(|i| center + vec2((a + i as f32 * 0.24).cos(), (a + i as f32 * 0.24).sin()) * size * 0.38);
+        ui.painter().add(egui::Shape::line(arc.collect(), Stroke::new(2.4 * size / 24.0, color)));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
+    }
+
     /// Wi-Fi: three arcs over the dot they share as their centre.
     pub fn wifi(ui: &Ui, center: Pos2, size: f32, color: Color32) {
         let k = size / 24.0;
