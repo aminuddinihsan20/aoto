@@ -1276,7 +1276,8 @@ impl App {
     /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
     /// Settings › Appearance › Mode.
     fn light_pages(&self, ctx: &egui::Context) -> bool {
-        self.look().id == crate::preset::DEFAULT_ID && self.appearance.is_light(ctx)
+        let look = self.look();
+        (look.id == crate::preset::DEFAULT_ID || look.material) && self.appearance.is_light(ctx)
     }
 
     /// The active theme preset. Synced once per frame (`sync_look`), so this is a plain
@@ -1456,6 +1457,9 @@ impl eframe::App for App {
         let np = theme::anim_bool(&ctx, "np-open", self.np_open && self.current().is_some(), 0.42);
         let light = self.light_pages(&ctx) && np < 0.5 && !self.fullscreen;
         theme::set_mode(&ctx, light);
+        if crate::platform::phone() {
+            crate::platform::set_light_bars(light);
+        }
         if self.chrome_applied.as_deref() != Some(look.id.as_str()) {
             if self.chrome_applied.is_none() {
                 ctx.add_texture_loader(Arc::new(crate::images::Textures::default()));

@@ -34,6 +34,27 @@ pub fn open_url(url: &str) {
     });
 }
 
+/// Is the page behind the system bars light? Their icons are then drawn dark. Called
+/// every frame: the activity is told only when it changes.
+pub fn set_light_bars(light: bool) {
+    static SAID: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+    if !bars_changed(&SAID, light) {
+        return;
+    }
+    #[cfg(target_os = "android")]
+    std::thread::spawn(move || {
+        if let Err(e) = call("bars", if light { "light" } else { "dark" }, std::time::Duration::from_secs(10)) {
+            log::warn!("couldn't set the system bars' icons: {e}");
+        }
+    });
+}
+
+/// Whether `light` differs from what was last said (kept in `said`: 0 nothing yet, 1 dark, 2 light).
+fn bars_changed(said: &std::sync::atomic::AtomicU8, light: bool) -> bool {
+    let now = if light { 2 } else { 1 };
+    said.swap(now, Ordering::Relaxed) != now
+}
+
 /// Phone layout: bottom navigation and a mini player instead of the desktop frame.
 /// Always on Android; elsewhere `YTM_PHONE=1` forces it, to see and test it on a desktop
 /// (with `YTM_SIZE=412,900`).
@@ -569,6 +590,16 @@ impl LocalFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_system_bars_are_told_once_for_each_change_of_mode() {
+        let said = std::sync::atomic::AtomicU8::new(0);
+        assert!(bars_changed(&said, false), "the first frame says dark");
+        assert!(!bars_changed(&said, false), "and not again");
+        assert!(bars_changed(&said, true), "light pages");
+        assert!(!bars_changed(&said, true));
+        assert!(bars_changed(&said, false), "Now Playing comes up over them: dark again");
+    }
 
     /// The login tests share the login statics.
     static LOGIN: std::sync::Mutex<()> = std::sync::Mutex::new(());

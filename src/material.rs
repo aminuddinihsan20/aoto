@@ -70,6 +70,34 @@ impl Scheme {
         on_error: rgb(0x690005),
     };
 
+    /// The light scheme, from the same seed.
+    pub const LIGHT: Scheme = Scheme {
+        primary: rgb(0x545B8B),
+        on_primary: rgb(0xFFFFFF),
+        primary_container: rgb(0xDFE0FF),
+        on_primary_container: rgb(0x101744),
+        secondary: rgb(0x5B5D72),
+        on_secondary: rgb(0xFFFFFF),
+        secondary_container: rgb(0xE0E1F9),
+        on_secondary_container: rgb(0x181A2C),
+        tertiary: rgb(0x70547B),
+        on_tertiary: rgb(0xFFFFFF),
+        tertiary_container: rgb(0xF7D8FF),
+        on_tertiary_container: rgb(0x291134),
+        surface: rgb(0xFBF8FE),
+        surface_container_lowest: rgb(0xFFFFFF),
+        surface_container_low: rgb(0xF5F2F9),
+        surface_container: rgb(0xF0EDF3),
+        surface_container_high: rgb(0xEAE7ED),
+        surface_container_highest: rgb(0xE4E1E7),
+        on_surface: rgb(0x1B1B20),
+        on_surface_variant: rgb(0x46464F),
+        outline: rgb(0x767680),
+        outline_variant: rgb(0xC7C5D1),
+        error: rgb(0xBA1A1A),
+        on_error: rgb(0xFFFFFF),
+    };
+
     /// What one of the app's older colour names (`theme::text()` and the like) is in
     /// this scheme, so widgets written before the roles come out in them.
     pub fn tone(&self, tone: Tone) -> Color32 {
@@ -119,7 +147,12 @@ pub enum Tone {
 /// The scheme in use. A light scheme, or one made from the phone's wallpaper, would be
 /// chosen here; everything that draws asks this.
 pub fn scheme() -> &'static Scheme {
-    &Scheme::DARK
+    scheme_for(crate::theme::light())
+}
+
+/// The scheme for light pages or dark ones.
+pub fn scheme_for(light: bool) -> &'static Scheme {
+    if light { &Scheme::LIGHT } else { &Scheme::DARK }
 }
 
 /// Is the look being drawn Material You? Then the older colour helpers answer with
@@ -315,8 +348,28 @@ mod tests {
     }
 
     #[test]
-    fn the_scheme_in_use_is_the_dark_one() {
-        assert_eq!(*scheme(), Scheme::DARK);
+    fn light_pages_take_the_light_scheme_and_dark_ones_the_dark() {
+        assert_eq!(*scheme_for(false), Scheme::DARK);
+        assert_eq!(*scheme_for(true), Scheme::LIGHT);
+    }
+
+    #[test]
+    fn the_light_scheme_reads_dark_on_light_in_every_pair() {
+        let s = Scheme::LIGHT;
+        let luma = |c: Color32| 0.299 * c.r() as f32 + 0.587 * c.g() as f32 + 0.114 * c.b() as f32;
+        assert!(luma(s.surface) > 240.0, "a light page");
+        for (on, under, what) in [
+            (s.on_surface, s.surface, "text on the page"),
+            (s.on_surface_variant, s.surface_container, "dim text on a card"),
+            (s.on_primary, s.primary, "on a filled button"),
+            (s.on_primary_container, s.primary_container, "on a tonal card"),
+            (s.on_secondary_container, s.secondary_container, "on a chosen chip"),
+            (s.on_tertiary_container, s.tertiary_container, "on a tertiary tile"),
+            (s.on_error, s.error, "on an error"),
+        ] {
+            assert!((luma(on) - luma(under)).abs() > 110.0, "{what}: {on:?} on {under:?}");
+        }
+        assert!(luma(s.surface_container_highest) < luma(s.surface_container_low), "containers darken as they rise");
     }
 
     #[test]

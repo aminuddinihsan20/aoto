@@ -185,6 +185,16 @@ public class MainActivity extends GameActivity {
             case "turnstile":
                 Turnstile.run(this, done);
                 break;
+            case "bars": {
+                // The page behind the status and navigation bars is light or dark: their
+                // icons (the clock, the battery) are drawn the other way.
+                boolean light = "light".equals(arg);
+                androidx.core.view.WindowInsetsControllerCompat bars = androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                bars.setAppearanceLightStatusBars(light);
+                bars.setAppearanceLightNavigationBars(light);
+                done.finish(true, "");
+                break;
+            }
             case "open-url":
                 // Web pages only: nothing the app hands over may start another kind of app.
                 if (!arg.startsWith("https://") && !arg.startsWith("http://")) {
@@ -357,6 +367,15 @@ public class MainActivity extends GameActivity {
     // it over as the Enter key (the keyboard's action key sends it too).
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // Where Android still sends Back as a key (before 13, and up to 15 for an app that
+        // has not asked otherwise), GameActivity hands every key to the app's own loop and
+        // the press never reaches the back handler above: it is taken here instead.
+        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+            if (event.getAction() == KeyEvent.ACTION_UP && !event.isCanceled()) {
+                getOnBackPressedDispatcher().onBackPressed();
+            }
+            return true;
+        }
         if (event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 nativeEnter();
