@@ -1455,7 +1455,10 @@ impl eframe::App for App {
         let look = self.look();
         // Now playing is dark; once it's most of the way up, so is the player bar under it.
         let np = theme::anim_bool(&ctx, "np-open", self.np_open && self.current().is_some(), 0.42);
-        let light = self.light_pages(&ctx) && np < 0.5 && !self.fullscreen;
+        // The player covers the pages: the old looks' player is dark whatever the mode,
+        // Material You's is light on light pages.
+        let player_light = phone_material() && self.light_pages(&ctx);
+        let light = self.light_pages(&ctx) && (np < 0.5 || player_light) && !self.fullscreen;
         theme::set_mode(&ctx, light);
         if crate::platform::phone() {
             crate::platform::set_light_bars(light);
@@ -1597,7 +1600,7 @@ impl eframe::App for App {
         self.speed_sheet &= self.np_open;
         self.playon.open &= self.np_open;
         if np > 0.001 {
-            let pages = theme::set_mode(&ctx, false);
+            let pages = theme::set_mode(&ctx, player_light);
             nowplaying::overlay(self, &ctx, now);
             sleep::sheet(self, &ctx);
             speed::sheet(self, &ctx);
@@ -2005,6 +2008,11 @@ pub fn shuffle<T>(v: &mut [T]) {
         x ^= x << 17;
         v.swap(i, (x % (i as u64 + 1)) as usize);
     }
+}
+
+/// The phone, drawn in Material You.
+fn phone_material() -> bool {
+    crate::platform::phone() && crate::material::on()
 }
 
 /// Whether this is the installed or the portable app (updates only apply there). It

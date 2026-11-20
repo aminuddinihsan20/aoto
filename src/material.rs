@@ -165,6 +165,21 @@ pub fn on() -> bool {
 /// artwork is mostly `song`: that colour's hue as a dark tone (the designs' is the
 /// seed terracotta's, `#5A2A1D`), running down into the surface.
 pub fn song_backdrop(song: Color32) -> (Color32, Color32) {
+    song_backdrop_for(song, crate::theme::light())
+}
+
+/// [`song_backdrop`] for light pages or dark ones. On light pages the top is a pale tint
+/// of the song's colour instead of a dark tone of it.
+pub fn song_backdrop_for(song: Color32, light: bool) -> (Color32, Color32) {
+    if light {
+        let [r, g, b] = [song.r(), song.g(), song.b()].map(|c| c as f32 / 255.0);
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        let pure = if max > min { [r, g, b].map(|c| (c - min) / (max - min)) } else { [1.0; 3] };
+        // A seventh of the way from white to the hue: a grey cover leaves it white-grey.
+        let strength = if max > 0.0 { ((max - min) / max).min(1.0) * 0.15 } else { 0.0 };
+        let top = pure.map(|c| ((1.0 - strength * (1.0 - c)) * 0.97 * 255.0).round() as u8);
+        return (Color32::from_rgb(top[0], top[1], top[2]), Scheme::LIGHT.surface);
+    }
     let [r, g, b] = [song.r(), song.g(), song.b()].map(|c| c as f32 / 255.0);
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
     // The colour with its brightest channel at one: its hue at its own saturation.
@@ -178,7 +193,7 @@ pub fn song_backdrop(song: Color32) -> (Color32, Color32) {
     // brighter than the designs' tone, so the text over it reads the same.
     let k = (0.215 / (0.299 * tone[0] + 0.587 * tone[1] + 0.114 * tone[2])).min(1.0);
     let top = tone.map(|c| (c * k * 255.0).round() as u8);
-    (Color32::from_rgb(top[0], top[1], top[2]), scheme().surface)
+    (Color32::from_rgb(top[0], top[1], top[2]), Scheme::DARK.surface)
 }
 
 // ------------------------------------------------------------------ type scale
@@ -401,21 +416,41 @@ mod tests {
     fn a_songs_backdrop_is_its_colour_as_a_dark_tone_over_the_surface() {
         let s = Scheme::DARK;
         // The designs' own: the seed terracotta gives their top colour.
-        let (top, bottom) = song_backdrop(hex("#B33B15"));
+        let (top, bottom) = song_backdrop_for(hex("#B33B15"), false);
         assert_eq!(bottom, s.surface);
         for (got, want) in [(top.r(), 0x5A), (top.g(), 0x2A), (top.b(), 0x1D)] {
             assert!((got as i32 - want).abs() <= 14, "{top:?} is not near #5A2A1D");
         }
         for song in ["#B33B15", "#FFE14D", "#2F6BFF", "#38D07A", "#FFFFFF", "#101010", "#808080", "#FF2D55"] {
-            let (top, _) = song_backdrop(hex(song));
+            let (top, _) = song_backdrop_for(hex(song), false);
             assert!(contrast(top, s.on_surface) >= 7.0, "{song}: text on {top:?} reads at {}", contrast(top, s.on_surface));
             assert!(contrast(top, s.primary) >= 4.5, "{song}: the primary colour on {top:?}");
         }
         // A cover's hue is kept: a blue song has a blue backdrop, a grey one a grey.
-        let (blue, _) = song_backdrop(hex("#2F6BFF"));
+        let (blue, _) = song_backdrop_for(hex("#2F6BFF"), false);
         assert!(blue.b() > blue.r() && blue.b() > blue.g());
-        let (grey, _) = song_backdrop(hex("#808080"));
+        let (grey, _) = song_backdrop_for(hex("#808080"), false);
         assert!(grey.r().abs_diff(grey.g()) <= 1 && grey.g().abs_diff(grey.b()) <= 1);
+    }
+
+    #[test]
+    fn on_light_pages_a_songs_backdrop_is_a_pale_tint_of_its_colour() {
+        let s = Scheme::LIGHT;
+        for song in ["#B33B15", "#FFE14D", "#2F6BFF", "#38D07A", "#FFFFFF", "#101010", "#808080", "#FF2D55"] {
+            let (top, bottom) = song_backdrop_for(hex(song), true);
+            assert_eq!(bottom, s.surface);
+            assert!(contrast(top, s.on_surface) >= 7.0, "{song}: text on {top:?} reads at {}", contrast(top, s.on_surface));
+            assert!(contrast(top, s.primary) >= 4.5, "{song}: the primary colour on {top:?} reads at {}", contrast(top, s.primary));
+        }
+        let (blue, _) = song_backdrop_for(hex("#2F6BFF"), true);
+        assert!(blue.b() > blue.r() && blue.b() > blue.g(), "a blue song tints it blue: {blue:?}");
+        assert!(blue.r() < 235, "and it is a tint, not white: {blue:?}");
+        let (grey, _) = song_backdrop_for(hex("#808080"), true);
+        assert!(grey.r().abs_diff(grey.g()) <= 1 && grey.g().abs_diff(grey.b()) <= 1);
+        assert_eq!(song_backdrop_for(hex("#2F6BFF"), false), {
+            let dark = Scheme::DARK;
+            (song_backdrop_for(hex("#2F6BFF"), false).0, dark.surface)
+        });
     }
 
     /// `over` painted on `under`, as the screen shows it.
