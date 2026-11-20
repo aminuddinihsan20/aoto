@@ -37,6 +37,15 @@ public class AutoBrowserService extends MediaBrowserService {
 
     private static native String nativeRows(String node);
 
+    /** The same counts and rows for the home screen's queue widget (PlaybackService). Only with the app running. */
+    static String treeVersions() {
+        return nativeVersions();
+    }
+
+    static String treeRows(String node) {
+        return nativeRows(node);
+    }
+
     /** A load of rows that waits for an app that is starting. */
     private static final class Load {
         final String node;

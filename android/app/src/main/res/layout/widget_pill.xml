@@ -44,7 +44,7 @@
                 android:fontFamily="sans-serif-medium"
                 android:maxLines="1"
                 android:text="@string/widget_empty_title"
-                android:textColor="@color/widget_on_surface"
+                android:textColor="@color/widget_on_primary_container"
                 android:textSize="15sp" />
 
             <TextView
@@ -54,7 +54,8 @@
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:text="@string/widget_empty_text"
-                android:textColor="@color/widget_on_surface_variant"
+                android:alpha="0.8"
+                android:textColor="@color/widget_on_primary_container"
                 android:textSize="13sp" />
         </LinearLayout>
 
@@ -74,6 +75,7 @@
             android:background="@drawable/widget_button_plain"
             android:contentDescription="@string/widget_next"
             android:src="@drawable/ic_widget_next"
+            android:tint="@color/widget_on_primary_container"
             android:visibility="gone" />
     </LinearLayout>
 </FrameLayout>

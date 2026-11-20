@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Previous and Next of the 4×2 widget. -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
     android:color="#33FFFFFF">
     <item>
         <shape>
-            <solid android:color="@color/widget_control" />
+            <solid android:color="@color/widget_tonal" />
             <corners android:radius="100dp" />
         </shape>
     </item>

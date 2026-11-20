@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Beside a song of the queue widget's "Up next": a tile in the widget's colours (the rows have no covers). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="36dp"
+    android:height="36dp"
+    android:viewportWidth="36"
+    android:viewportHeight="36">
+    <path
+        android:fillColor="@color/widget_primary_container"
+        android:pathData="M8,0h20a8,8 0 0 1 8,8v20a8,8 0 0 1 -8,8h-20a8,8 0 0 1 -8,-8v-20a8,8 0 0 1 8,-8z" />
+    <group
+        android:scaleX="0.235"
+        android:scaleY="0.235"
+        android:translateX="5.294"
+        android:translateY="5.388">
+        <path
+            android:fillColor="@color/widget_on_primary_container"
+            android:fillType="evenOdd"
+            android:pathData="M54,26 C54,26 74.56,49.39 74.56,62.86 C74.56,73.85 65.34,82 54,82 C42.66,82 33.44,73.85 33.44,62.86 C33.44,49.39 54,26 54,26 Z" />
+    </group>
+</vector>

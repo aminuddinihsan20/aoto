@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The 2×2 widget: the cover filling it, the title over its foot, play / pause. As
-     written here it is the widget with no song (and the widget picker's preview): the
-     cover is hidden, and the background shows in its place. -->
+<!-- The 2×2 widget: the cover filling it, the Drop in its corner, title and artist over
+     its foot, play / pause. As written here it is the widget with no song (and the
+     widget picker's preview): the cover is hidden, and the background shows in its place. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@android:id/background"
     android:layout_width="match_parent"
@@ -19,11 +19,21 @@
 
     <ImageView
         android:layout_width="match_parent"
-        android:layout_height="96dp"
+        android:layout_height="112dp"
         android:layout_gravity="bottom"
         android:importantForAccessibility="no"
         android:scaleType="fitXY"
         android:src="@drawable/widget_scrim" />
+
+    <ImageView
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_margin="12dp"
+        android:background="@drawable/widget_chip"
+        android:importantForAccessibility="no"
+        android:padding="6dp"
+        android:src="@drawable/widget_drop"
+        android:tint="#FFFFFFFF" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -34,27 +44,46 @@
         android:orientation="horizontal"
         android:padding="12dp">
 
-        <TextView
-            android:id="@+id/widget_title"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:ellipsize="end"
-            android:fontFamily="sans-serif-medium"
-            android:maxLines="2"
-            android:shadowColor="#99000000"
-            android:shadowDy="1"
-            android:shadowRadius="4"
-            android:text="@string/widget_empty_title"
-            android:textColor="#FFFFFFFF"
-            android:textSize="15sp" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:shadowColor="#99000000"
+                android:shadowDy="1"
+                android:shadowRadius="4"
+                android:text="@string/widget_empty_title"
+                android:textColor="#FFFFFFFF"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:shadowColor="#99000000"
+                android:shadowDy="1"
+                android:shadowRadius="4"
+                android:text="@string/widget_empty_text"
+                android:textColor="#CCFFFFFF"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <ImageButton
             android:id="@+id/widget_toggle"
             android:layout_width="48dp"
             android:layout_height="48dp"
-            android:background="@drawable/widget_button_square"
+            android:background="@drawable/widget_button_primary"
             android:contentDescription="@string/widget_play"
             android:src="@drawable/ic_widget_play" />
     </LinearLayout>

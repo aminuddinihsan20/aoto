@@ -147,8 +147,8 @@ final class PlayerSession {
         nativeSearch(query == null ? "" : query);
     }
 
-    /** A row of the car's tree or queue was tapped. */
-    private static void play(String mediaId) {
+    /** A row of the car's tree or queue was tapped, or a song of the home screen's queue widget. */
+    static void play(String mediaId) {
         if (mediaId != null && MainActivity.appRunning()) {
             nativePlay(mediaId);
         }

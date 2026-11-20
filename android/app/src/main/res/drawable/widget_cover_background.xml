@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The 2×2 widget with no cover to show: the cover's place, with a note in its middle. -->
+<!-- The 2×2 widget with no cover to show: the cover's place, with the Drop in its middle. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape>
@@ -8,8 +8,8 @@
         </shape>
     </item>
     <item
-        android:width="56dp"
-        android:height="56dp"
-        android:drawable="@drawable/widget_note"
+        android:width="72dp"
+        android:height="72dp"
+        android:drawable="@drawable/widget_drop"
         android:gravity="center" />
 </layer-list>

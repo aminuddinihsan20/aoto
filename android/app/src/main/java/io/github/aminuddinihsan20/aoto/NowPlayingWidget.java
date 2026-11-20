@@ -21,17 +21,21 @@ import android.util.Log;
 import android.view.View;
 import android.widget.RemoteViews;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The home-screen widgets: what plays and its buttons, in three shapes (4×2 with the
- * cover, the progress and three buttons; 2×2, the cover with play; 4×1, a pill). They
- * show what PlaybackService shows and change when it says so: no timer of their own,
- * nothing that wakes the phone. With no song there, or no app running, they say
- * "Play something" and open the app. What a tap does is decided in WidgetLogic.
+ * The home-screen widgets: what plays and its buttons, in five shapes (4×2 with the
+ * cover, the progress, the times and three buttons; 2×2, the cover with play; 4×1, a
+ * pill; 2×1, a smaller pill; 4×3, the song and what is up next). They show what
+ * PlaybackService shows and change when it says so: no timer of their own, nothing that
+ * wakes the phone. With no song there, or no app running, they say that nothing is
+ * playing, and Play opens the app to play. What a tap does, and what fits in the cell a
+ * launcher gives, is decided in WidgetLogic.
  *
  * Everything is drawn on one thread of its own, in the order asked: covers are scaled
  * there, and the main thread only hands over what to show.
@@ -49,10 +53,21 @@ public class NowPlayingWidget extends AppWidgetProvider {
     public static class Pill extends NowPlayingWidget {
     }
 
+    /** 2×1. */
+    public static class Mini extends NowPlayingWidget {
+    }
+
+    /** 4×3. */
+    public static class Queue extends NowPlayingWidget {
+    }
+
     /** Opens MainActivity to play: what a widget's Play does with no player to tell. */
     static final String ACTION_PLAY = "io.github.aminuddinihsan20.aoto.OPEN_AND_PLAY";
 
     private static final String TAG = "aoto";
+
+    /** The request codes of the queue widget's rows' intents start here (the buttons' are their controls' numbers). */
+    private static final int ROW_REQUESTS = 10;
 
     /** A song as the service published it. */
     private static final class Song {
@@ -60,59 +75,113 @@ public class NowPlayingWidget extends AppWidgetProvider {
         final boolean playing;
         /** Percent played, or WidgetLogic.NO_PROGRESS. */
         final int percent;
+        /** How far it was, of how long (ms; 0: not known), when the system's clock (elapsedRealtime) said `at`. */
+        final long position, duration, at;
+        /** How fast it plays: 1 as recorded. */
+        final float speed;
+        /** Its place in the queue, or -1. */
+        final long queueIndex;
         /** As loaded for the notification, or null. */
         final Bitmap cover;
 
-        Song(String title, String artist, boolean playing, int percent, Bitmap cover) {
+        Song(AutoLogic.Song song, int percent, long at, Bitmap cover) {
+            this(song.title, song.artist, song.playing, percent, song.position, song.duration, at, song.speed, song.queueIndex, cover);
+        }
+
+        private Song(String title, String artist, boolean playing, int percent, long position, long duration, long at, float speed, long queueIndex, Bitmap cover) {
             this.title = title;
             this.artist = artist;
             this.playing = playing;
             this.percent = percent;
+            this.position = position;
+            this.duration = duration;
+            this.at = at;
+            this.speed = speed;
+            this.queueIndex = queueIndex;
             this.cover = cover;
+        }
+
+        /** The same song, its bar moved on. */
+        Song at(int percent) {
+            return new Song(title, artist, playing, percent, position, duration, at, speed, queueIndex, cover);
         }
     }
 
     private static final ExecutorService worker = Executors.newSingleThreadExecutor();
 
+    /** Is a queue widget on the home screen, as of the last time all were drawn? Then the service reads the queue for it. */
+    private static volatile boolean queueShown;
+
     // The worker's own: touched on its thread only.
     /** What the widgets show; null: no song. */
     private static Song song;
-    /** The 4×2 widgets on the home screen, as of the last time all were drawn. */
-    private static int[] wideIds = new int[0];
+    /** The app's "Up next" (the song that plays first), for the queue widget. */
+    private static List<AutoLogic.Row> upNext = new ArrayList<>();
+    /** The widgets with a progress bar (4×2, 4×3) on the home screen, as of the last time all were drawn. */
+    private static int[] wideIds = new int[0], queueIds = new int[0];
     /** `artOf` (a cover, or null for the placeholder) in the sizes the widgets asked for. */
     private static final HashMap<String, Bitmap> arts = new HashMap<>();
     private static Bitmap artOf;
 
-    /** The service: this song is what plays (or is paused) now. */
-    static void show(Context context, String title, String artist, boolean playing, int percent, Bitmap cover) {
-        Song now = new Song(title, artist, playing, percent, cover);
+    /** The service: this song is what plays (or is paused) now, `percent` played, as of `at` on the system's clock. */
+    static void show(Context context, AutoLogic.Song playing, int percent, long at, Bitmap cover) {
+        Song now = new Song(playing, percent, at, cover);
         draw(context, () -> song = now);
     }
 
-    /** The service: the song has moved on to this percent. Only the 4×2 widget has a bar. */
+    /** The service: the song has moved on to this percent. Only the 4×2 and 4×3 widgets have a bar. */
     static void progress(Context context, int percent) {
         Context app = context.getApplicationContext();
         worker.execute(() -> {
             if (song == null) {
                 return;
             }
-            song = new Song(song.title, song.artist, song.playing, percent, song.cover);
-            if (wideIds.length == 0) {
-                return;
-            }
+            song = song.at(percent);
             try {
-                RemoteViews bar = new RemoteViews(app.getPackageName(), R.layout.widget_wide);
-                progress(bar);
-                AppWidgetManager.getInstance(app).partiallyUpdateAppWidget(wideIds, bar);
+                AppWidgetManager manager = AppWidgetManager.getInstance(app);
+                if (wideIds.length > 0) {
+                    RemoteViews bar = new RemoteViews(app.getPackageName(), R.layout.widget_wide);
+                    progress(bar);
+                    manager.partiallyUpdateAppWidget(wideIds, bar);
+                }
+                if (queueIds.length > 0) {
+                    RemoteViews bar = new RemoteViews(app.getPackageName(), R.layout.widget_queue);
+                    progress(bar);
+                    manager.partiallyUpdateAppWidget(queueIds, bar);
+                }
             } catch (RuntimeException e) {
                 Log.w(TAG, "widget progress not shown", e);
             }
         });
     }
 
+    /** Whether the home screen has a queue widget: the service then keeps `queue` told. */
+    static boolean showsQueue() {
+        return queueShown;
+    }
+
+    /** The service: the app's "Up next" changed. Only the queue widget shows it. */
+    static void queue(Context context, List<AutoLogic.Row> rows) {
+        Context app = context.getApplicationContext();
+        worker.execute(() -> {
+            upNext = rows;
+            try {
+                AppWidgetManager manager = AppWidgetManager.getInstance(app);
+                for (int id : queueIds) {
+                    manager.updateAppWidget(id, queue(app, size(app, manager, id)));
+                }
+            } catch (RuntimeException e) {
+                Log.w(TAG, "queue widget not drawn", e);
+            }
+        });
+    }
+
     /** No song any more, or no player to show one. */
     static void clear(Context context) {
-        draw(context, () -> song = null);
+        draw(context, () -> {
+            song = null;
+            upNext = new ArrayList<>();
+        });
     }
 
     /**
@@ -191,6 +260,14 @@ public class NowPlayingWidget extends AppWidgetProvider {
             for (int id : manager.getAppWidgetIds(new ComponentName(c, Pill.class))) {
                 manager.updateAppWidget(id, pill(c));
             }
+            for (int id : manager.getAppWidgetIds(new ComponentName(c, Mini.class))) {
+                manager.updateAppWidget(id, mini(c, size(c, manager, id)));
+            }
+            queueIds = manager.getAppWidgetIds(new ComponentName(c, Queue.class));
+            queueShown = queueIds.length > 0;
+            for (int id : queueIds) {
+                manager.updateAppWidget(id, queue(c, size(c, manager, id)));
+            }
         } catch (RuntimeException e) {
             // A phone without widgets, or a launcher that refused the update.
             Log.w(TAG, "widgets not drawn", e);
@@ -211,21 +288,31 @@ public class NowPlayingWidget extends AppWidgetProvider {
 
     private static RemoteViews wide(Context c, int[] size) {
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_wide);
-        texts(c, v, true);
-        v.setViewVisibility(R.id.widget_artist, WidgetLogic.roomForArtist(size[1]) ? View.VISIBLE : View.GONE);
+        int side = px(c, 16), ends = px(c, WidgetLogic.widePadDp(size[1]));
+        v.setViewPadding(android.R.id.background, side, ends, side, ends);
         // The view is as large as its picture: the size is chosen here.
-        int side = side(c, px(c, WidgetLogic.wideCoverDp(size[0], size[1])));
-        v.setImageViewBitmap(R.id.widget_art, art(c, side, side, c.getResources().getDimension(R.dimen.widget_inner_radius)));
+        int cover = side(c, px(c, WidgetLogic.wideCoverDp(size[0], size[1])));
+        v.setImageViewBitmap(R.id.widget_art, art(c, cover, cover, c.getResources().getDimension(R.dimen.widget_inner_radius)));
+        // With a song, the player; without one, the invitation to play.
+        v.setViewVisibility(R.id.widget_playing, song != null ? View.VISIBLE : View.GONE);
+        v.setViewVisibility(R.id.widget_empty, song != null ? View.GONE : View.VISIBLE);
+        int twoLines = WidgetLogic.roomForArtist(size[1]) ? View.VISIBLE : View.GONE;
+        v.setViewVisibility(R.id.widget_artist, twoLines);
+        v.setViewVisibility(R.id.widget_empty_text, twoLines);
+        texts(c, v);
         progress(v);
+        times(v, WidgetLogic.roomForTimes(size[1]));
         buttons(c, v, true, true);
+        toggleShape(v);
+        control(c, v, R.id.widget_play_something, WidgetLogic.TOGGLE);
         return v;
     }
 
     private static RemoteViews cover(Context c, int[] size) {
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_cover);
-        texts(c, v, false);
+        texts(c, v);
         boolean has = song != null && song.cover != null;
-        // Without a cover the background, with its note, is the picture.
+        // Without a cover the background, with the Drop, is the picture.
         v.setViewVisibility(R.id.widget_art, has ? View.VISIBLE : View.INVISIBLE);
         if (has) {
             int longest = Math.max(size[0], size[1]);
@@ -241,29 +328,94 @@ public class NowPlayingWidget extends AppWidgetProvider {
             }
         }
         buttons(c, v, false, false);
+        toggleShape(v);
         return v;
     }
 
     private static RemoteViews pill(Context c) {
         RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_pill);
-        texts(c, v, true);
+        texts(c, v);
         int side = side(c, px(c, 48));
         v.setImageViewBitmap(R.id.widget_art, art(c, side, side, side / 2f));
         buttons(c, v, false, true);
         return v;
     }
 
-    private static void texts(Context c, RemoteViews v, boolean artist) {
-        v.setTextViewText(R.id.widget_title, song == null ? c.getString(R.string.widget_empty_title) : song.title);
-        if (artist) {
-            v.setTextViewText(R.id.widget_artist, song == null ? c.getString(R.string.widget_empty_text) : song.artist);
+    private static RemoteViews mini(Context c, int[] size) {
+        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_mini);
+        // The view is as large as its picture; in a cell too narrow for it there is none.
+        int cover = WidgetLogic.miniCoverDp(size[0]);
+        v.setViewVisibility(R.id.widget_art, cover > 0 ? View.VISIBLE : View.GONE);
+        if (cover > 0) {
+            int side = side(c, px(c, cover));
+            v.setImageViewBitmap(R.id.widget_art, art(c, side, side, side / 2f));
         }
+        buttons(c, v, false, true);
+        toggleShape(v);
+        return v;
+    }
+
+    private static RemoteViews queue(Context c, int[] size) {
+        RemoteViews v = new RemoteViews(c.getPackageName(), R.layout.widget_queue);
+        texts(c, v);
+        int side = side(c, px(c, 64));
+        v.setImageViewBitmap(R.id.widget_art, art(c, side, side, px(c, 16)));
+        progress(v);
+        buttons(c, v, false, false);
+        toggleShape(v);
+        // The songs after the one that plays, as rows of their own: as many as fit.
+        boolean live = WidgetLogic.tap(WidgetLogic.ROW, song != null) == WidgetLogic.COMMAND;
+        int room = WidgetLogic.queueRows(size[1]);
+        List<AutoLogic.Row> next = live ? WidgetLogic.upNext(upNext, song.queueIndex, room) : new ArrayList<>();
+        v.setViewVisibility(R.id.widget_up_next, next.isEmpty() ? View.GONE : View.VISIBLE);
+        v.setViewVisibility(R.id.widget_queue_end, live && room > 0 && next.isEmpty() ? View.VISIBLE : View.GONE);
+        v.removeAllViews(R.id.widget_rows);
+        for (int at = 0; at < next.size(); at++) {
+            AutoLogic.Row entry = next.get(at);
+            RemoteViews row = new RemoteViews(c.getPackageName(), R.layout.widget_queue_row);
+            row.setTextViewText(R.id.widget_row_title, entry.title);
+            row.setTextViewText(R.id.widget_row_artist, entry.subtitle);
+            // One intent a row of the widget, told anew which song the row holds.
+            row.setOnClickPendingIntent(R.id.widget_row, PendingIntent.getForegroundService(c, ROW_REQUESTS + at,
+                    PlaybackService.widgetRow(c, entry.id), PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT));
+            v.addView(R.id.widget_rows, row);
+        }
+        return v;
+    }
+
+    private static void texts(Context c, RemoteViews v) {
+        v.setTextViewText(R.id.widget_title, song == null ? c.getString(R.string.widget_empty_title) : song.title);
+        v.setTextViewText(R.id.widget_artist, song == null ? c.getString(R.string.widget_empty_text) : song.artist);
     }
 
     private static void progress(RemoteViews v) {
         int percent = song == null ? WidgetLogic.NO_PROGRESS : song.percent;
         v.setViewVisibility(R.id.widget_progress, percent == WidgetLogic.NO_PROGRESS ? View.INVISIBLE : View.VISIBLE);
         v.setProgressBar(R.id.widget_progress, 100, Math.max(percent, 0), false);
+    }
+
+    /**
+     * The times under the 4×2 widget's bar. The time played counts by itself, in the
+     * launcher, from where the song was when the service last said (it says again at
+     * every pause, seek and song): nothing is sent each second. See WidgetLogic.elapsed.
+     */
+    private static void times(RemoteViews v, boolean room) {
+        boolean known = room && song != null && song.duration > 0;
+        v.setViewVisibility(R.id.widget_times, known ? View.VISIBLE : View.GONE);
+        int how = known ? WidgetLogic.elapsed(song.playing, song.speed) : WidgetLogic.NO_TIME;
+        v.setViewVisibility(R.id.widget_elapsed_counting, how == WidgetLogic.COUNTS ? View.VISIBLE : View.GONE);
+        v.setViewVisibility(R.id.widget_elapsed, how == WidgetLogic.STANDS ? View.VISIBLE : View.GONE);
+        v.setChronometer(R.id.widget_elapsed_counting, known ? song.at - song.position : 0, null, how == WidgetLogic.COUNTS);
+        if (known) {
+            v.setTextViewText(R.id.widget_elapsed, WidgetLogic.time(song.position));
+            v.setTextViewText(R.id.widget_total, WidgetLogic.time(song.duration));
+        }
+    }
+
+    /** Pause, while a song plays, is squarer; Play is fully round. */
+    private static void toggleShape(RemoteViews v) {
+        boolean playing = song != null && song.playing;
+        v.setInt(R.id.widget_toggle, "setBackgroundResource", playing ? R.drawable.widget_button_square : R.drawable.widget_button_primary);
     }
 
     private static void buttons(Context c, RemoteViews v, boolean previous, boolean next) {
@@ -325,7 +477,7 @@ public class NowPlayingWidget extends AppWidgetProvider {
             return art;
         }
         // A widget being resized asks for size after size.
-        if (arts.size() >= 6) {
+        if (arts.size() >= 8) {
             arts.clear();
         }
         art = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);

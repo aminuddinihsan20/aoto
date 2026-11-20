@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The 4×2 widget: cover, title, artist, progress, previous / play-pause / next. As
-     written here it is the widget with no song, which is also the widget picker's
-     preview; NowPlayingWidget fills in the rest. The cover is as large as the bitmap it
-     is given, and the paddings and button sizes are the ones WidgetLogic.wideCoverDp
-     counts with: change them together. -->
+<!-- The 4×2 widget. With a song: cover, title, artist, the Drop, progress with the
+     times under it, previous / play-pause / next. With none: the Drop on a tile, "Aoto",
+     "Nothing is playing" and one button that opens the app to play. As written here it
+     is the widget with no song, which is also the widget picker's preview;
+     NowPlayingWidget fills in the rest. The cover is as large as the bitmap it is given,
+     and the paddings and sizes are the ones WidgetLogic (widePadDp, wideCoverDp,
+     roomForArtist, roomForTimes) counts with: change them together. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@android:id/background"
     android:layout_width="match_parent"
@@ -12,7 +14,7 @@
     android:baselineAligned="false"
     android:clipToOutline="true"
     android:orientation="horizontal"
-    android:padding="12dp">
+    android:padding="16dp">
 
     <ImageView
         android:id="@+id/widget_art"
@@ -27,88 +29,205 @@
         android:maxHeight="148dp"
         android:src="@drawable/widget_art_empty" />
 
-    <LinearLayout
+    <FrameLayout
         android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:layout_marginStart="12dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
+        android:layout_marginStart="16dp"
+        android:layout_weight="1">
 
-        <!-- The text gets the height the bar and the buttons leave: too little, and the
-             artist is what is cut. -->
         <LinearLayout
+            android:id="@+id/widget_playing"
             android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- The text gets the height the bar, the times and the buttons leave. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:baselineAligned="false"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/widget_title"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="end"
+                        android:fontFamily="sans-serif-medium"
+                        android:maxLines="1"
+                        android:textColor="@color/widget_on_surface"
+                        android:textSize="16sp" />
+
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_marginStart="8dp"
+                        android:importantForAccessibility="no"
+                        android:src="@drawable/widget_drop"
+                        android:tint="@color/widget_primary" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/widget_artist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textColor="@color/widget_on_surface_variant"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <ProgressBar
+                android:id="@+id/widget_progress"
+                style="@android:style/Widget.ProgressBar.Horizontal"
+                android:layout_width="match_parent"
+                android:layout_height="4dp"
+                android:layout_marginTop="4dp"
+                android:layout_marginBottom="4dp"
+                android:max="100"
+                android:progressDrawable="@drawable/widget_progress"
+                android:visibility="invisible" />
+
+            <!-- The time played, counting by itself (the launcher's own clock) while the
+                 song plays or standing as text while it is paused, and the song's length. -->
+            <FrameLayout
+                android:id="@+id/widget_times"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="4dp"
+                android:visibility="gone">
+
+                <Chronometer
+                    android:id="@+id/widget_elapsed_counting"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/widget_on_surface_variant"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/widget_elapsed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/widget_on_surface_variant"
+                    android:textSize="11sp"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/widget_total"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:includeFontPadding="false"
+                    android:textColor="@color/widget_on_surface_variant"
+                    android:textSize="11sp" />
+            </FrameLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:baselineAligned="false"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/widget_previous"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/widget_button_tonal"
+                    android:contentDescription="@string/widget_previous"
+                    android:src="@drawable/ic_widget_previous" />
+
+                <!-- 72dp at the designed width; wider in a wider cell. -->
+                <ImageButton
+                    android:id="@+id/widget_toggle"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:background="@drawable/widget_button_primary"
+                    android:contentDescription="@string/widget_play"
+                    android:src="@drawable/ic_widget_play" />
+
+                <ImageButton
+                    android:id="@+id/widget_next"
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/widget_button_tonal"
+                    android:contentDescription="@string/widget_next"
+                    android:src="@drawable/ic_widget_next" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_empty"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
             android:orientation="vertical">
 
-            <TextView
-                android:id="@+id/widget_title"
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:fontFamily="sans-serif-medium"
-                android:maxLines="1"
-                android:text="@string/widget_empty_title"
-                android:textColor="@color/widget_on_surface"
-                android:textSize="16sp" />
-
-            <TextView
-                android:id="@+id/widget_artist"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:ellipsize="end"
-                android:maxLines="1"
-                android:text="@string/widget_empty_text"
-                android:textColor="@color/widget_on_surface_variant"
-                android:textSize="14sp" />
-        </LinearLayout>
-
-        <ProgressBar
-            android:id="@+id/widget_progress"
-            style="@android:style/Widget.ProgressBar.Horizontal"
-            android:layout_width="match_parent"
-            android:layout_height="4dp"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="6dp"
-            android:max="100"
-            android:progressDrawable="@drawable/widget_progress"
-            android:visibility="invisible" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:baselineAligned="false"
-            android:orientation="horizontal">
-
-            <ImageButton
-                android:id="@+id/widget_previous"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_marginEnd="6dp"
-                android:background="@drawable/widget_button_tonal"
-                android:contentDescription="@string/widget_previous"
-                android:src="@drawable/ic_widget_previous"
-                android:visibility="gone" />
-
-            <ImageButton
-                android:id="@+id/widget_toggle"
-                android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="0dp"
                 android:layout_weight="1"
-                android:background="@drawable/widget_button_primary"
-                android:contentDescription="@string/widget_play"
-                android:src="@drawable/ic_widget_play" />
+                android:gravity="center_vertical"
+                android:orientation="vertical">
 
-            <ImageButton
-                android:id="@+id/widget_next"
-                android:layout_width="48dp"
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:text="@string/widget_empty_title"
+                    android:textColor="@color/widget_on_surface"
+                    android:textSize="22sp" />
+
+                <TextView
+                    android:id="@+id/widget_empty_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_empty_text"
+                    android:textColor="@color/widget_on_surface_variant"
+                    android:textSize="14sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/widget_play_something"
+                android:layout_width="match_parent"
                 android:layout_height="48dp"
-                android:layout_marginStart="6dp"
-                android:background="@drawable/widget_button_tonal"
-                android:contentDescription="@string/widget_next"
-                android:src="@drawable/ic_widget_next"
-                android:visibility="gone" />
+                android:background="@drawable/widget_button_primary"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:importantForAccessibility="no"
+                    android:src="@drawable/ic_widget_play" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:ellipsize="end"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:text="@string/widget_play_something"
+                    android:textColor="@color/widget_on_primary"
+                    android:textSize="14sp" />
+            </LinearLayout>
         </LinearLayout>
-    </LinearLayout>
+    </FrameLayout>
 </LinearLayout>

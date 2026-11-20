@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The 2×1 widget: a pill with a round cover, play / pause and next. As written here
+     it is the widget with no song (and the widget picker's preview). The pill is as high
+     as its content, in the middle of whatever cell the launcher gives; in a narrow one
+     the cover is made smaller or left out (WidgetLogic.miniCoverDp counts with the
+     sizes here: change them together). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@android:id/background"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:background="@drawable/widget_pill_surface"
+        android:baselineAligned="false"
+        android:clipToOutline="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="12dp">
+
+        <ImageView
+            android:id="@+id/widget_art"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:adjustViewBounds="true"
+            android:background="@drawable/widget_art_round"
+            android:clipToOutline="true"
+            android:importantForAccessibility="no"
+            android:maxWidth="48dp"
+            android:maxHeight="48dp"
+            android:src="@drawable/widget_art_empty" />
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/widget_toggle"
+            android:layout_width="52dp"
+            android:layout_height="48dp"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:background="@drawable/widget_button_primary"
+            android:contentDescription="@string/widget_play"
+            android:src="@drawable/ic_widget_play" />
+
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/widget_next"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/widget_button_tonal_small"
+            android:contentDescription="@string/widget_next"
+            android:padding="14dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_next"
+            android:visibility="gone" />
+    </LinearLayout>
+</FrameLayout>

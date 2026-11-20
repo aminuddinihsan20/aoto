@@ -92,7 +92,7 @@
             </intent-filter>
         </service>
 
-        <!-- The home-screen widgets (4×2, 2×2, 4×1): one receiver each, since each has its
+        <!-- The home-screen widgets (4×2, 2×2, 4×1, 2×1, 4×3): one receiver each, since each has its
              own sizes; the label is the widget's name in the widget picker. -->
         <receiver
             android:name=".NowPlayingWidget$Wide"
@@ -126,6 +126,28 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/widget_pill_info" />
+        </receiver>
+        <receiver
+            android:name=".NowPlayingWidget$Mini"
+            android:exported="false"
+            android:label="@string/widget_mini_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_mini_info" />
+        </receiver>
+        <receiver
+            android:name=".NowPlayingWidget$Queue"
+            android:exported="false"
+            android:label="@string/widget_queue_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_queue_info" />
         </receiver>
         <!-- Sharing a lyric card: other apps read the picture through this, and only the
              pictures in the cache's "share" folder (res/xml/share_paths.xml). -->

@@ -41,11 +41,17 @@ public class PlaybackService extends Service {
     private static final String ACTION_PREVIOUS = "io.github.aminuddinihsan20.aoto.PREVIOUS";
     private static final String ACTION_TOGGLE = "io.github.aminuddinihsan20.aoto.TOGGLE";
     private static final String ACTION_NEXT = "io.github.aminuddinihsan20.aoto.NEXT";
+    /** A song of the queue widget's "Up next" was tapped; EXTRA_ROW says which, as the app named it. */
+    private static final String ACTION_ROW = "io.github.aminuddinihsan20.aoto.QUEUE_ROW";
+    private static final String EXTRA_ROW = "row";
 
     // Implemented in android/rust/src/lib.rs.
     private static native String nativeNowPlaying();
 
     private static native void nativeMediaCommand(int code, long arg);
+
+    /** The home screen has a queue widget (or its last one is gone): the app then keeps its "Up next" published, as for a car. */
+    private static native void nativeQueueWidget(boolean on);
 
     private static final int PLAY = AutoLogic.PLAY, PAUSE = AutoLogic.PAUSE, TOGGLE = AutoLogic.TOGGLE, NEXT = AutoLogic.NEXT, PREVIOUS = AutoLogic.PREVIOUS;
 
@@ -83,6 +89,9 @@ public class PlaybackService extends Service {
     /** The percent the widgets' progress bar shows, and when it was last moved. */
     private int widgetPercent;
     private long widgetProgressAt;
+    /** The app was told the home screen has a queue widget, and its lists' counts when the queue was last read. */
+    private boolean queueAsked;
+    private String queueVersions = "";
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -140,6 +149,9 @@ public class PlaybackService extends Service {
             nativeMediaCommand(TOGGLE, 0);
         } else if (ACTION_NEXT.equals(action)) {
             nativeMediaCommand(NEXT, 0);
+        } else if (ACTION_ROW.equals(action)) {
+            // As a tap on the same row in a car.
+            PlayerSession.play(intent.getStringExtra(EXTRA_ROW));
         }
         return START_NOT_STICKY;
     }
@@ -148,6 +160,11 @@ public class PlaybackService extends Service {
     static Intent widgetButton(Context context, int control) {
         String action = control == WidgetLogic.PREVIOUS ? ACTION_PREVIOUS : control == WidgetLogic.NEXT ? ACTION_NEXT : ACTION_TOGGLE;
         return new Intent(context, PlaybackService.class).setAction(action);
+    }
+
+    /** What a song of the queue widget's "Up next" sends here: the row's id, as the app named it for a car. */
+    static Intent widgetRow(Context context, String mediaId) {
+        return new Intent(context, PlaybackService.class).setAction(ACTION_ROW).putExtra(EXTRA_ROW, mediaId);
     }
 
     /** Play, as the app's own button: what MainActivity does when a widget opened it to play. */
@@ -194,7 +211,8 @@ public class PlaybackService extends Service {
     private void leftBehind(String action) {
         int control = ACTION_TOGGLE.equals(action) ? WidgetLogic.TOGGLE
                 : ACTION_PREVIOUS.equals(action) ? WidgetLogic.PREVIOUS
-                : ACTION_NEXT.equals(action) ? WidgetLogic.NEXT : WidgetLogic.BODY;
+                : ACTION_NEXT.equals(action) ? WidgetLogic.NEXT
+                : ACTION_ROW.equals(action) ? WidgetLogic.ROW : WidgetLogic.BODY;
         Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         if (WidgetLogic.coldTap(control) == WidgetLogic.OPEN_AND_PLAY) {
             open.setAction(NowPlayingWidget.ACTION_PLAY);
@@ -227,6 +245,7 @@ public class PlaybackService extends Service {
             return;
         }
         emptyPolls = 0;
+        readQueue();
         if (line.equals(lastLine)) {
             return;
         }
@@ -281,6 +300,28 @@ public class PlaybackService extends Service {
         publish();
     }
 
+    /**
+     * The queue widget shows the app's "Up next": the list a car gets, which the app only
+     * keeps while someone reads it. So the app is told while such a widget is on the
+     * home screen, and the list is read whenever its count moved on.
+     */
+    private void readQueue() {
+        boolean shown = NowPlayingWidget.showsQueue();
+        if (shown != queueAsked) {
+            queueAsked = shown;
+            queueVersions = "";
+            nativeQueueWidget(shown);
+        }
+        if (!shown) {
+            return;
+        }
+        String versions = AutoBrowserService.treeVersions();
+        if (AutoLogic.changed(queueVersions, versions).contains(AutoLogic.QUEUE)) {
+            NowPlayingWidget.queue(this, AutoLogic.rows(AutoBrowserService.treeRows(AutoLogic.QUEUE)));
+        }
+        queueVersions = versions;
+    }
+
     private void publish() {
         published = true;
         publishedPosition = position;
@@ -298,7 +339,7 @@ public class PlaybackService extends Service {
         notifications.notify(NOTIFICATION_ID, buildNotification());
         widgetPercent = WidgetLogic.percent(position, duration);
         widgetProgressAt = publishedAt;
-        NowPlayingWidget.show(this, title, artist, playing, widgetPercent, cover);
+        NowPlayingWidget.show(this, song, widgetPercent, publishedAt, cover);
     }
 
     /**
@@ -413,6 +454,9 @@ public class PlaybackService extends Service {
             wakeLock.release();
         }
         running = null;
+        if (queueAsked) {
+            nativeQueueWidget(false);
+        }
         session.setActive(false);
         // A car's browser service may still hold the session: it says what there is to say from here.
         PlayerSession.playerGone();

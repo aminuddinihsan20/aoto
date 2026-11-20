@@ -7,32 +7,33 @@
     android:viewportHeight="72">
     <path
         android:fillColor="@color/widget_primary_container"
-        android:pathData="M36,0h308a36,36 0 0 1 36,36a36,36 0 0 1 -36,36h-308a36,36 0 0 1 -36,-36a36,36 0 0 1 36,-36z" />
+        android:pathData="M36,0h308a36,36 0 0 1 36,36v0a36,36 0 0 1 -36,36h-308a36,36 0 0 1 -36,-36v-0a36,36 0 0 1 36,-36z" />
     <path
         android:fillColor="@color/widget_primary"
-        android:pathData="M36,12h0a24,24 0 0 1 24,24a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24a24,24 0 0 1 24,-24z" />
+        android:pathData="M36,12h0a24,24 0 0 1 24,24v0a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24v-0a24,24 0 0 1 24,-24z" />
     <group
-        android:scaleX="1"
-        android:scaleY="1"
-        android:translateX="24"
-        android:translateY="24">
+        android:scaleX="0.329"
+        android:scaleY="0.329"
+        android:translateX="18.212"
+        android:translateY="18.344">
         <path
             android:fillColor="@color/widget_on_primary"
-            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+            android:fillType="evenOdd"
+            android:pathData="M54,26 C54,26 74.56,49.39 74.56,62.86 C74.56,73.85 65.34,82 54,82 C42.66,82 33.44,73.85 33.44,62.86 C33.44,49.39 54,26 54,26 Z" />
     </group>
     <path
-        android:fillColor="@color/widget_on_surface"
-        android:pathData="M78.5,20h111a6.5,6.5 0 0 1 6.5,6.5a6.5,6.5 0 0 1 -6.5,6.5h-111a6.5,6.5 0 0 1 -6.5,-6.5a6.5,6.5 0 0 1 6.5,-6.5z" />
+        android:fillColor="@color/widget_on_primary_container"
+        android:pathData="M78.5,20h111a6.5,6.5 0 0 1 6.5,6.5v0a6.5,6.5 0 0 1 -6.5,6.5h-111a6.5,6.5 0 0 1 -6.5,-6.5v-0a6.5,6.5 0 0 1 6.5,-6.5z" />
     <path
-        android:fillColor="@color/widget_on_surface_variant"
-        android:pathData="M77,42h66a5,5 0 0 1 5,5a5,5 0 0 1 -5,5h-66a5,5 0 0 1 -5,-5a5,5 0 0 1 5,-5z" />
+        android:fillColor="@color/widget_on_primary_container"
+        android:pathData="M77,42h66a5,5 0 0 1 5,5v0a5,5 0 0 1 -5,5h-66a5,5 0 0 1 -5,-5v-0a5,5 0 0 1 5,-5z" />
     <path
         android:fillColor="@color/widget_primary"
-        android:pathData="M288,12h0a24,24 0 0 1 24,24a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24a24,24 0 0 1 24,-24z" />
+        android:pathData="M300,12h0a24,24 0 0 1 24,24v0a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24v-0a24,24 0 0 1 24,-24z" />
     <group
         android:scaleX="1"
         android:scaleY="1"
-        android:translateX="276"
+        android:translateX="288"
         android:translateY="24">
         <path
             android:fillColor="@color/widget_on_primary"
@@ -44,7 +45,7 @@
         android:translateX="332"
         android:translateY="24">
         <path
-            android:fillColor="@color/widget_on_surface"
+            android:fillColor="@color/widget_on_primary_container"
             android:pathData="M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z" />
     </group>
 </vector>

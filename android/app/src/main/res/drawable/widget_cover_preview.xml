@@ -1,33 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The 2×2 widget as the widget picker shows it below Android 12. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="180dp"
-    android:height="180dp"
-    android:viewportWidth="180"
-    android:viewportHeight="180">
+    android:width="182dp"
+    android:height="182dp"
+    android:viewportWidth="182"
+    android:viewportHeight="182">
     <path
         android:fillColor="@color/widget_primary_container"
-        android:pathData="M28,0h124a28,28 0 0 1 28,28v124a28,28 0 0 1 -28,28h-124a28,28 0 0 1 -28,-28v-124a28,28 0 0 1 28,-28z" />
+        android:pathData="M28,0h126a28,28 0 0 1 28,28v126a28,28 0 0 1 -28,28h-126a28,28 0 0 1 -28,-28v-126a28,28 0 0 1 28,-28z" />
     <group
-        android:scaleX="3"
-        android:scaleY="3"
-        android:translateX="54"
-        android:translateY="38">
+        android:scaleX="0.847"
+        android:scaleY="0.847"
+        android:translateX="45.259"
+        android:translateY="35.598">
         <path
-            android:fillColor="@color/widget_primary"
-            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+            android:fillColor="@color/widget_on_primary_container"
+            android:fillType="evenOdd"
+            android:pathData="M54,26 C54,26 74.56,49.39 74.56,62.86 C74.56,73.85 65.34,82 54,82 C42.66,82 33.44,73.85 33.44,62.86 C33.44,49.39 54,26 54,26 Z" />
+    </group>
+    <path
+        android:fillColor="#66000000"
+        android:pathData="M28,12h0a16,16 0 0 1 16,16v0a16,16 0 0 1 -16,16h-0a16,16 0 0 1 -16,-16v-0a16,16 0 0 1 16,-16z" />
+    <group
+        android:scaleX="0.235"
+        android:scaleY="0.235"
+        android:translateX="15.294"
+        android:translateY="15.388">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M54,26 C54,26 74.56,49.39 74.56,62.86 C74.56,73.85 65.34,82 54,82 C42.66,82 33.44,73.85 33.44,62.86 C33.44,49.39 54,26 54,26 Z" />
     </group>
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M23,146h62a7,7 0 0 1 7,7a7,7 0 0 1 -7,7h-62a7,7 0 0 1 -7,-7a7,7 0 0 1 7,-7z" />
+        android:pathData="M20,132h72a6,6 0 0 1 6,6v0a6,6 0 0 1 -6,6h-72a6,6 0 0 1 -6,-6v-0a6,6 0 0 1 6,-6z" />
+    <path
+        android:fillColor="#CCFFFFFF"
+        android:pathData="M18.5,152h51a4.5,4.5 0 0 1 4.5,4.5v0a4.5,4.5 0 0 1 -4.5,4.5h-51a4.5,4.5 0 0 1 -4.5,-4.5v-0a4.5,4.5 0 0 1 4.5,-4.5z" />
     <path
         android:fillColor="@color/widget_primary"
-        android:pathData="M132,116h16a16,16 0 0 1 16,16v16a16,16 0 0 1 -16,16h-16a16,16 0 0 1 -16,-16v-16a16,16 0 0 1 16,-16z" />
+        android:pathData="M146,122h0a24,24 0 0 1 24,24v0a24,24 0 0 1 -24,24h-0a24,24 0 0 1 -24,-24v-0a24,24 0 0 1 24,-24z" />
     <group
         android:scaleX="1"
         android:scaleY="1"
-        android:translateX="128"
-        android:translateY="128">
+        android:translateX="134"
+        android:translateY="134">
         <path
             android:fillColor="@color/widget_on_primary"
             android:pathData="M8,5v14l11,-7z" />
