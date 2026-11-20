@@ -41,8 +41,9 @@ final class AutoLogic {
     /** What the session says while no player service runs: to open the app, nothing, or the loaded song. */
     static final int SAY_OPEN_APP = 0, SAY_NOTHING = 1, SAY_SONG = 2;
 
-    /** Android Auto, for a phone where it is not part of the system. */
+    /** Android Auto and the Google app (the Assistant), for a phone where they are not part of the system. */
     private static final String ANDROID_AUTO = "com.google.android.projection.gearhead";
+    private static final String ASSISTANT = "com.google.android.googlequicksearchbox";
 
     private static final String FIELD = "\u001f";
 
@@ -92,16 +93,16 @@ final class AutoLogic {
 
     /**
      * Who may browse: the tree names what the listener plays and keeps. The app itself
-     * and the system may, and of other apps those that are part of the system (Android
-     * Auto is, on Android 10 and later; the Assistant) and Android Auto installed by
-     * hand. `packageIsCallers`: the name the caller gave is a package of its own uid.
-     * A debug build lets anything in, for the test tools.
+     * and the system may, and of other apps those that are part of the system (as
+     * Android Auto is on Android 10 and later) and, wherever they come from, Android
+     * Auto and the Assistant. `packageIsCallers`: the name the caller gave is a package
+     * of its own uid. A debug build lets anything in, for the test tools.
      */
     static boolean allowed(boolean ownUid, boolean systemUid, boolean packageIsCallers, boolean systemApp, String callerPackage, boolean debuggable) {
         if (debuggable || ownUid || systemUid) {
             return true;
         }
-        return packageIsCallers && (systemApp || ANDROID_AUTO.equals(callerPackage));
+        return packageIsCallers && (systemApp || ANDROID_AUTO.equals(callerPackage) || ASSISTANT.equals(callerPackage));
     }
 
     /**
@@ -180,11 +181,6 @@ final class AutoLogic {
             return SHUFFLE;
         }
         return ACTION_REPEAT.equals(customAction) ? REPEAT : 0;
-    }
-
-    /** With no app there is no player to tell: Play tries to open the app (to play), the rest does nothing. */
-    static boolean opensApp(int command) {
-        return command == PLAY || command == TOGGLE;
     }
 
     /** What the repeat button is called: how the queue repeats now. A press moves it on. */

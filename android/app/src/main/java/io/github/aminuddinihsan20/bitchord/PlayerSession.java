@@ -1,5 +1,6 @@
 package io.github.aminuddinihsan20.bitchord;
 
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -28,11 +29,9 @@ final class PlayerSession {
 
     private static final long ACTIONS = PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE
             | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS | PlaybackState.ACTION_SEEK_TO;
-    /** What a car can also ask for: a row of the tree, a row of the queue, and something by voice. */
-    private static final long CAR_ACTIONS = PlaybackState.ACTION_PLAY_FROM_MEDIA_ID | PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM | PlaybackState.ACTION_PLAY_FROM_SEARCH;
+    /** What a car can also ask for: a row of the tree, a row of the queue, something by voice, and to stop. */
+    private static final long CAR_ACTIONS = PlaybackState.ACTION_PLAY_FROM_MEDIA_ID | PlaybackState.ACTION_SKIP_TO_QUEUE_ITEM | PlaybackState.ACTION_PLAY_FROM_SEARCH | PlaybackState.ACTION_STOP;
 
-    /** The application's own context, there for as long as the process. */
-    private static Context app;
     private static MediaSession session;
     private static int holders;
     /** A car is connected: the session also carries the queue and the car's two extra buttons. */
@@ -47,8 +46,10 @@ final class PlayerSession {
     /** The session, made at its first use. Whoever takes it gives it back with {@link #release}. */
     static MediaSession acquire(Context context) {
         if (session == null) {
-            app = context.getApplicationContext();
+            Context app = context.getApplicationContext();
             session = new MediaSession(app, "BitChord");
+            // How whoever shows the session (a car, the Assistant) opens the app: they do it, a service may not.
+            session.setSessionActivity(PendingIntent.getActivity(app, 0, new Intent(app, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
             session.setCallback(new MediaSession.Callback() {
                 @Override
                 public void onPlay() {
@@ -57,6 +58,12 @@ final class PlayerSession {
 
                 @Override
                 public void onPause() {
+                    command(AutoLogic.PAUSE, 0);
+                }
+
+                @Override
+                public void onStop() {
+                    // "Stop", said in a car: the app has no other stop than a pause.
                     command(AutoLogic.PAUSE, 0);
                 }
 
@@ -84,8 +91,6 @@ final class PlayerSession {
                 public void onPlayFromSearch(String query, Bundle extras) {
                     if (MainActivity.appRunning()) {
                         search(query);
-                    } else {
-                        command(AutoLogic.PLAY, 0);
                     }
                 }
 
@@ -125,19 +130,12 @@ final class PlayerSession {
 
     /**
      * A button of the session. Without the app (a process started for a car or a widget
-     * alone) there is no player to tell: Play then tries to open the app to play, which
-     * Android only lets a background process do in a few cases, so the car keeps saying
-     * to open it on the phone.
+     * alone) there is no player to tell, and nothing happens: the session says to open
+     * the app on the phone, and offers its activity to whoever can open it.
      */
     private static void command(int code, long arg) {
         if (MainActivity.appRunning()) {
             PlaybackService.command(code, arg);
-        } else if (AutoLogic.opensApp(code)) {
-            try {
-                app.startActivity(new Intent(app, MainActivity.class).setAction(NowPlayingWidget.ACTION_PLAY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            } catch (RuntimeException e) {
-                // Not from here, then.
-            }
         }
     }
 
@@ -244,7 +242,7 @@ final class PlayerSession {
         session.setMetadata(null);
         PlaybackState.Builder none = new PlaybackState.Builder();
         if (say == AutoLogic.SAY_OPEN_APP) {
-            none.setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PLAY_PAUSE).setState(PlaybackState.STATE_ERROR, 0, 0f).setErrorMessage(AutoLogic.OPEN_APP);
+            none.setState(PlaybackState.STATE_ERROR, 0, 0f).setErrorMessage(AutoLogic.OPEN_APP);
         } else {
             none.setActions(PlaybackState.ACTION_PLAY_FROM_MEDIA_ID | PlaybackState.ACTION_PLAY_FROM_SEARCH).setState(PlaybackState.STATE_NONE, 0, 0f);
         }

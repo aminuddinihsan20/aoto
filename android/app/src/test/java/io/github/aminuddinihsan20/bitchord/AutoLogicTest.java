@@ -31,6 +31,7 @@ public final class AutoLogicTest {
             AutoLogicTest::without_the_app_a_load_gets_nothing_at_once,
             AutoLogicTest::a_starting_app_is_waited_for_a_few_seconds_and_no_longer,
             AutoLogicTest::android_auto_may_browse,
+            AutoLogicTest::the_assistant_may_browse,
             AutoLogicTest::the_system_and_the_app_itself_may_browse,
             AutoLogicTest::another_app_may_not_browse,
             AutoLogicTest::a_name_alone_does_not_make_an_app_android_auto,
@@ -46,7 +47,6 @@ public final class AutoLogicTest {
             AutoLogicTest::a_queue_rows_id_is_its_place,
             AutoLogicTest::what_is_not_a_queue_row_has_no_place,
             AutoLogicTest::the_cars_buttons_are_the_players_commands,
-            AutoLogicTest::without_the_app_only_play_opens_it,
             AutoLogicTest::the_repeat_button_says_how_the_queue_repeats,
             AutoLogicTest::without_the_app_the_session_says_to_open_it,
             AutoLogicTest::with_the_app_the_session_shows_the_loaded_song_or_nothing,
@@ -102,6 +102,12 @@ public final class AutoLogicTest {
     private static void android_auto_may_browse() {
         same("installed by hand", true, AutoLogic.allowed(false, false, true, false, AUTO, false));
         same("part of the system", true, AutoLogic.allowed(false, false, true, true, AUTO, false));
+    }
+
+    private static void the_assistant_may_browse() {
+        // The Google app, where a phone doesn't count it as part of the system.
+        same("the Google app", true, AutoLogic.allowed(false, false, true, false, "com.google.android.googlequicksearchbox", false));
+        same("its name alone", false, AutoLogic.allowed(false, false, false, false, "com.google.android.googlequicksearchbox", false));
     }
 
     private static void the_system_and_the_app_itself_may_browse() {
@@ -194,15 +200,6 @@ public final class AutoLogicTest {
         // src/platform.rs (MediaCommand) counts them the same.
         same("the numbers", new int[] {1, 2, 3, 4, 5, 6, 7, 8},
                 new int[] {AutoLogic.PLAY, AutoLogic.PAUSE, AutoLogic.TOGGLE, AutoLogic.NEXT, AutoLogic.PREVIOUS, AutoLogic.SEEK, AutoLogic.SHUFFLE, AutoLogic.REPEAT});
-    }
-
-    private static void without_the_app_only_play_opens_it() {
-        same("play", true, AutoLogic.opensApp(AutoLogic.PLAY));
-        same("play or pause", true, AutoLogic.opensApp(AutoLogic.TOGGLE));
-        same("pause", false, AutoLogic.opensApp(AutoLogic.PAUSE));
-        same("next", false, AutoLogic.opensApp(AutoLogic.NEXT));
-        same("seek", false, AutoLogic.opensApp(AutoLogic.SEEK));
-        same("shuffle", false, AutoLogic.opensApp(AutoLogic.SHUFFLE));
     }
 
     private static void the_repeat_button_says_how_the_queue_repeats() {
