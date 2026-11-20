@@ -1,6 +1,16 @@
 //! Gapless playback: the next song's first sample right behind the playing one's last,
 //! in the same stream of samples, so no silence is put between two songs of an album.
 //!
+//! Without it the player runs empty at a song's end and the next song is started from
+//! outside: the audio thread notices the end on its next look (every 100 ms), tells the
+//! UI, which hears it on its next frame (or its next background tick, 400 ms apart,
+//! with the screen off) and asks for the next song; the backend opens its decoder and
+//! sends it back. That is 20 to 110 ms of silence in the audio thread alone (measured
+//! by `audio`'s tests, with the next song handed over the instant it is asked for) and
+//! up to half a second more in a pocket. On top of that an AAC stream's decoder plays
+//! the encoder's priming (1600 samples on YouTube's) and padding as if they were the
+//! song; with gapless playback on they are left out (`stream::Edited`).
+//!
 //! The audio thread keeps a `Slot` and puts the next song in it, decoded and ready,
 //! some seconds before the playing one ends. `Joined` is what the player plays: the
 //! song, and when that runs out, whatever stands by in the slot. A song that did not

@@ -397,6 +397,12 @@ impl App {
         song.div_f32(self.audio.status.speed())
     }
 
+    /// Gapless playback switched on or off, for the songs opened from here on: on, a
+    /// song is its samples alone, without the encoder's priming and padding around them.
+    pub(crate) fn set_gapless(&self) {
+        crate::stream::honour_edits(self.gapless);
+    }
+
     /// The song that follows the playing one without a gap: the next in the queue,
     /// where nothing blends the two (a crossfade and Automix hand over their own way),
     /// nothing stops or repeats the playing one, and no party decides what plays.

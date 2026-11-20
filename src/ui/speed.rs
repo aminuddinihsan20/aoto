@@ -145,6 +145,17 @@ fn contents(ui: &mut Ui, s: &mut Showing) {
     }
 }
 
+/// Dev hooks: YTM_SPEED=<speed> plays at that speed; YTM_SPEED_SHEET opens the sheet.
+pub(super) fn dev_hooks(app: &mut App) {
+    if let Some(speed) = super::dev_var("YTM_SPEED").and_then(|v| v.parse().ok()) {
+        app.speed = crate::speed::nearest(speed);
+        app.set_speed();
+    }
+    if super::dev_var("YTM_SPEED_SHEET").is_some() {
+        app.speed_sheet = true;
+    }
+}
+
 /// The sheet, over Now Playing.
 pub(super) fn sheet(app: &mut App, ctx: &egui::Context) {
     let mut s = Showing::of(app);

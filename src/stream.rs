@@ -189,6 +189,11 @@ impl Shared {
         Some(out)
     }
 
+    /// The file's first block, when it has arrived: where an MP4 keeps its header.
+    fn head(&self) -> Option<Bytes> {
+        self.inner.lock().unwrap().blocks.first().cloned().flatten()
+    }
+
     /// Every block is in memory: readers never wait and the buffer can be replayed.
     pub fn is_complete(&self) -> bool {
         self.inner.lock().unwrap().blocks.iter().all(Option::is_some)
@@ -604,7 +609,12 @@ fn open(shared: Arc<Shared>, seekable: bool, reader: fn(Arc<Shared>) -> StreamRe
                 .with_seekable(seekable)
                 .with_mime_type("audio/mp4")
                 .with_hint("m4a");
-            Ok(TrackDecoder::Rodio(builder.build()?))
+            let decoder = builder.build()?;
+            // With gapless playback on, what the file's edit list says isn't the song
+            // (the encoder's priming and padding) is left out: the decoder doesn't.
+            let rate = rodio::Source::sample_rate(&decoder).get();
+            let edit = HONOUR_EDITS.load(std::sync::atomic::Ordering::Relaxed).then(|| shared.head()).flatten().and_then(|head| edit_list(&head)).and_then(|e| e.in_frames(rate, shared.duration_ms));
+            Ok(TrackDecoder::Rodio(Edited::new(decoder, edit)))
         }
         Format::File { ref hint, ref mime } => {
             let hint = *hint;
@@ -618,8 +628,147 @@ fn open(shared: Arc<Shared>, seekable: bool, reader: fn(Arc<Shared>) -> StreamRe
                 Some(mime) => builder.with_mime_type(mime),
                 None => builder,
             };
-            Ok(TrackDecoder::Rodio(builder.build()?))
+            Ok(TrackDecoder::Rodio(Edited::new(builder.build()?, None)))
         }
+    }
+}
+
+/// Whether AAC decoders play only what the MP4's edit list says is the song. Set with
+/// gapless playback: off, a song plays as it always did, priming and padding included.
+static HONOUR_EDITS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn honour_edits(on: bool) {
+    HONOUR_EDITS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// An MP4 audio track's edit list, when it is the usual single edit: where in the
+/// track the song starts (the samples before are the encoder's priming) and how long it
+/// plays (what the last frame holds beyond that is padding), each in its own time scale.
+#[derive(Debug, PartialEq)]
+struct EditList {
+    media_time: u64,
+    media_scale: u32,
+    duration: u64,
+    movie_scale: u32,
+}
+
+/// What to play of a decoder's output: `skip` frames in, for `play` frames (to the end
+/// when the file doesn't say).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Edit {
+    skip: u64,
+    play: Option<u64>,
+}
+
+impl EditList {
+    /// In frames at the decoder's `rate`. Nothing when the priming is longer than any
+    /// encoder's; and the length only when it is the one the stream was stated to have
+    /// (`duration_ms`, 0 when unknown), so that a wrong header can't cut a song short.
+    fn in_frames(&self, rate: u32, duration_ms: u64) -> Option<Edit> {
+        if self.media_scale == 0 || self.movie_scale == 0 {
+            return None;
+        }
+        let skip = self.media_time * rate as u64 / self.media_scale as u64;
+        let play = self.duration * rate as u64 / self.movie_scale as u64;
+        let stated = duration_ms * rate as u64 / 1000;
+        let trusted = play > 0 && duration_ms > 0 && play.abs_diff(stated) <= rate as u64 / 4;
+        (skip <= 8192).then_some(Edit { skip, play: trusted.then_some(play) })
+    }
+}
+
+/// The edit list in an MP4's header (`head`: the start of the file, which holds it in
+/// YouTube's streams and in saved songs).
+fn edit_list(head: &[u8]) -> Option<EditList> {
+    /// The boxes in `data`: (type, body).
+    fn boxes(data: &[u8]) -> impl Iterator<Item = (&[u8], &[u8])> {
+        let mut at = 0;
+        std::iter::from_fn(move || {
+            let size = u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?) as usize;
+            let item = (data.get(at + 4..at + 8)?, data.get(at + 8..at.checked_add(size.max(8))?)?);
+            at += size.max(8);
+            Some(item)
+        })
+    }
+    fn find<'a>(data: &'a [u8], kind: &[u8; 4]) -> Option<&'a [u8]> {
+        boxes(data).find(|(k, _)| k == kind).map(|(_, body)| body)
+    }
+    fn be32(b: &[u8], at: usize) -> Option<u64> {
+        Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?) as u64)
+    }
+    fn be64(b: &[u8], at: usize) -> Option<u64> {
+        Some(u64::from_be_bytes(b.get(at..at + 8)?.try_into().ok()?))
+    }
+    /// The time scale of an `mvhd` or `mdhd`: after the two dates, 4 or 8 bytes each.
+    fn scale(header: &[u8]) -> Option<u32> {
+        be32(header, if *header.first()? == 1 { 20 } else { 12 }).map(|s| s as u32)
+    }
+    let moov = find(head, b"moov")?;
+    let trak = find(moov, b"trak")?;
+    let elst = find(find(trak, b"edts")?, b"elst")?;
+    // One edit, and not an empty one (a media time of -1 delays the track instead).
+    if be32(elst, 4)? != 1 {
+        return None;
+    }
+    let (duration, media_time) = if elst[0] == 1 { (be64(elst, 8)?, be64(elst, 16)?) } else { (be32(elst, 8)?, be32(elst, 12)?) };
+    if media_time > u32::MAX as u64 / 2 {
+        return None;
+    }
+    Some(EditList { media_time, media_scale: scale(find(find(trak, b"mdia")?, b"mdhd")?)?, duration, movie_scale: scale(find(moov, b"mvhd")?)? })
+}
+
+/// A decoder playing only what an `Edit` says is the song. Positions are the song's:
+/// a seek to 0 lands on its first sample, past the priming.
+pub struct Edited<D> {
+    inner: D,
+    edit: Option<Edit>,
+    /// Samples still to drop before the song starts, and how many of it are left to play.
+    skip: u64,
+    left: Option<u64>,
+}
+
+impl<D: rodio::Source> Edited<D> {
+    fn new(inner: D, edit: Option<Edit>) -> Self {
+        let channels = inner.channels().get() as u64;
+        Self { skip: edit.map_or(0, |e| e.skip * channels), left: edit.and_then(|e| e.play).map(|p| p * channels), inner, edit }
+    }
+}
+
+impl<D: rodio::Source> Iterator for Edited<D> {
+    type Item = rodio::Sample;
+
+    fn next(&mut self) -> Option<rodio::Sample> {
+        while self.skip > 0 {
+            self.inner.next()?;
+            self.skip -= 1;
+        }
+        if let Some(left) = &mut self.left {
+            *left = left.checked_sub(1)?;
+        }
+        self.inner.next()
+    }
+}
+
+impl<D: rodio::Source> rodio::Source for Edited<D> {
+    fn current_span_len(&self) -> Option<usize> {
+        if self.left == Some(0) { Some(0) } else { self.inner.current_span_len() }
+    }
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        let Some(edit) = self.edit else { return self.inner.try_seek(pos) };
+        let (rate, channels) = (self.inner.sample_rate().get() as u64, self.inner.channels().get() as u64);
+        let frame = (pos.as_secs_f64() * rate as f64).round() as u64;
+        self.inner.try_seek(Duration::from_secs_f64((frame + edit.skip) as f64 / rate as f64))?;
+        self.skip = 0;
+        self.left = edit.play.map(|p| p.saturating_sub(frame) * channels);
+        Ok(())
     }
 }
 
@@ -674,7 +823,7 @@ fn codec_label(codec: &str) -> String {
 /// A song's decoder: Opus (our own), in-process PCM (decoded Atmos), or a file
 /// rodio decodes (AAC/MP4 included).
 pub enum TrackDecoder {
-    Rodio(rodio::Decoder<StreamReader>),
+    Rodio(Edited<rodio::Decoder<StreamReader>>),
     /// Boxed: its decoder state is about 11 KB.
     Opus(Box<crate::opus::OpusSource>),
     Pcm(PcmSource),
@@ -802,30 +951,55 @@ mod tests {
         assert!((second as i64 - 48_000).abs() < 200, "the 44.1 kHz song came out as {second} frames, not 48000");
     }
 
-    /// The edit list of an MP4's audio track, when it has one: how many of the track's
-    /// first samples are the encoder's priming (`media_time`), and how long the track
-    /// is to play, with the two time scales those are counted in.
-    fn edit_list(data: &[u8]) -> Option<String> {
-        fn boxes(data: &[u8]) -> Vec<(&[u8], &[u8])> {
-            let mut out = Vec::new();
-            let mut at = 0;
-            while at + 8 <= data.len() {
-                let size = u32::from_be_bytes(data[at..at + 4].try_into().unwrap()) as usize;
-                if size < 8 || at + size > data.len() {
-                    break;
-                }
-                out.push((&data[at + 4..at + 8], &data[at + 8..at + size]));
-                at += size;
-            }
-            out
-        }
-        let find = |data: &'_ [u8], kind: &[u8]| -> Option<Vec<u8>> { boxes(data).into_iter().find(|(k, _)| *k == kind).map(|(_, body)| body.to_vec()) };
-        let moov = find(data, b"moov")?;
-        let trak = find(&moov, b"trak")?;
-        let elst = find(&find(&trak, b"edts")?, b"elst")?;
-        let u32_at = |b: &[u8], at: usize| u32::from_be_bytes(b[at..at + 4].try_into().unwrap());
-        // Version 0: count, then (segment_duration, media_time, rate) of 4 bytes each.
-        Some(format!("elst v{} entries {}: segment_duration {} media_time {}", elst[0], u32_at(&elst, 4), u32_at(&elst, 8), u32_at(&elst, 12) as i32))
+    /// An MP4 box: its size, its type, its body.
+    fn mp4_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+        [&(body.len() as u32 + 8).to_be_bytes()[..], kind, body].concat()
+    }
+
+    /// The header of an AAC stream as YouTube writes it: `priming` samples before the
+    /// song, which plays for `length` (both in a 44.1 kHz time scale).
+    fn mp4_head(priming: u32, length: u32) -> Vec<u8> {
+        let be = |v: u32| v.to_be_bytes();
+        // Version and flags, two dates, the time scale, the duration.
+        let header = [&[0u8; 12][..], &be(44_100), &be(length)].concat();
+        let elst = [&[0u8; 4][..], &be(1), &be(length), &be(priming), &be(0x0001_0000)].concat();
+        let trak = [mp4_box(b"tkhd", &[0; 84]), mp4_box(b"edts", &mp4_box(b"elst", &elst)), mp4_box(b"mdia", &mp4_box(b"mdhd", &header))].concat();
+        [mp4_box(b"ftyp", b"dash"), mp4_box(b"moov", &[mp4_box(b"mvhd", &header), mp4_box(b"trak", &trak)].concat()), mp4_box(b"sidx", &[0; 40])].concat()
+    }
+
+    #[test]
+    fn an_mp4s_edit_list_says_how_much_of_the_track_is_not_the_song() {
+        // The numbers of a real stream: 1600 samples of priming, 10,405,248 of song.
+        let list = super::edit_list(&mp4_head(1600, 10_405_248)).unwrap();
+        assert_eq!(list, super::EditList { media_time: 1600, media_scale: 44_100, duration: 10_405_248, movie_scale: 44_100 });
+        assert_eq!(list.in_frames(44_100, 235_946), Some(super::Edit { skip: 1600, play: Some(10_405_248) }));
+        // A length that isn't the one the stream was stated to have cuts nothing off the end.
+        assert_eq!(list.in_frames(44_100, 300_000), Some(super::Edit { skip: 1600, play: None }));
+        assert_eq!(list.in_frames(44_100, 0), Some(super::Edit { skip: 1600, play: None }));
+        // More priming than any encoder's is a header not to be trusted.
+        assert_eq!(super::edit_list(&mp4_head(90_000, 10_405_248)).unwrap().in_frames(44_100, 235_946), None);
+        // No header, a cut-off one, another kind of file: nothing is left out.
+        assert_eq!(super::edit_list(&[]), None);
+        assert_eq!(super::edit_list(&mp4_head(1600, 10_405_248)[..60]), None);
+        assert_eq!(super::edit_list(b"OggS\0\x02 not an mp4 at all, whatever it says"), None);
+    }
+
+    #[test]
+    fn a_decoder_plays_the_song_without_its_priming_and_padding_and_seeks_within_it() {
+        use rodio::Source;
+        // Mono at 1 kHz, each sample its own number: 5 of priming, 20 of song, 7 of padding.
+        let track = || rodio::buffer::SamplesBuffer::new(std::num::NonZeroU16::new(1).unwrap(), std::num::NonZeroU32::new(1000).unwrap(), (0..32).map(|i| i as f32).collect::<Vec<_>>());
+        let edit = Some(super::Edit { skip: 5, play: Some(20) });
+        let song: Vec<f32> = (5..25).map(|i| i as f32).collect();
+        assert_eq!(super::Edited::new(track(), edit).collect::<Vec<_>>(), song);
+        // Positions are the song's own: its 8th millisecond is the track's 13th sample.
+        let mut d = super::Edited::new(track(), edit);
+        d.try_seek(std::time::Duration::from_millis(8)).unwrap();
+        assert_eq!(d.by_ref().collect::<Vec<_>>(), song[8..]);
+        assert_eq!(d.current_span_len(), Some(0));
+        // Without an edit the track plays as it is.
+        assert_eq!(super::Edited::new(track(), None).count(), 32);
+        assert_eq!(super::Edited::new(track(), Some(super::Edit { skip: 5, play: None })).count(), 27);
     }
 
     /// What a YouTube stream's decoder hands out around the song itself: the encoder's
@@ -865,7 +1039,14 @@ mod tests {
                     tail80 as f64 / rate * 1000.0,
                 );
                 if !opus {
-                    println!("    {}", edit_list(&shared.bytes().unwrap()).unwrap_or_else(|| "no edit list".to_owned()));
+                    let list = super::edit_list(&shared.bytes().unwrap());
+                    println!("    {list:?}");
+                    // Honouring it, exactly the song is left: its stated length, to the sample.
+                    super::honour_edits(true);
+                    let edited = super::decoder(shared.clone(), false).unwrap().count() / ch;
+                    super::honour_edits(false);
+                    println!("    with the edit list honoured: {edited} frames = {:.4} s", edited as f64 / rate);
+                    assert_eq!(edited as u64, list.unwrap().duration);
                 }
             }
         }
