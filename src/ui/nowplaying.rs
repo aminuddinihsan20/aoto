@@ -897,7 +897,8 @@ pub(super) fn options_popup(app: &mut App, resp: &egui::Response, track: &crate:
             ui.set_width(296.0);
             let insets = crate::platform::insets(ui.ctx());
             let room = ui.ctx().content_rect().height() - insets.top - insets.bottom - 32.0;
-            egui::ScrollArea::vertical().max_height(room).show(ui, |ui| options_contents(app, ui, track, lyrics));
+            // (As tall as the screen allows, not only the room beside its button.)
+            egui::ScrollArea::vertical().max_height(room).min_scrolled_height(room).show(ui, |ui| options_contents(app, ui, track, lyrics));
         } else {
             ui.set_width(270.0);
             options_contents(app, ui, track, lyrics);
