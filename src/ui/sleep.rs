@@ -272,7 +272,7 @@ pub(super) fn on_accent(accent: Color32) -> Color32 {
 
 /// A crescent moon in the icon font's line (the font has none): Lucide's, on its
 /// 24-unit grid.
-fn moon(ui: &Ui, center: Pos2, size: f32, color: Color32) {
+pub(super) fn moon(ui: &Ui, center: Pos2, size: f32, color: Color32) {
     let k = size / 24.0;
     let at = |x: f32, y: f32| center + vec2(x - 12.0, y - 12.0) * k;
     // The inner edge, half a circle from the top tip into the disc and out at the right
@@ -416,8 +416,14 @@ pub(super) fn chip(app: &mut App, ui: &mut Ui, at: Pos2) {
     }
 }
 
+/// What the player's sleep timer tool says, and whether a timer runs.
+pub(super) fn tool_label(app: &App) -> (String, bool) {
+    let running = app.sleep.running();
+    (chip_label(running, app.sleep.remaining(clock())), running.is_some())
+}
+
 /// Bring the sheet up, on the timer that runs when one does (to change or cancel it).
-fn open_sheet(app: &mut App) {
+pub(super) fn open_sheet(app: &mut App) {
     if let Some(stop) = app.sleep.running() {
         app.sleep_sheet.stop = stop;
         app.sleep_sheet.fade = app.sleep.fades();

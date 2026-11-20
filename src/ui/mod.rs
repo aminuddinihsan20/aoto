@@ -22,6 +22,7 @@ mod m3;
 mod mini;
 mod notes;
 mod nowplaying;
+mod np_phone;
 mod pages;
 mod phone;
 mod playback;
@@ -898,7 +899,8 @@ impl App {
             wheel_pending: egui::Vec2::ZERO,
             wheel_mods: egui::Modifiers::NONE,
             np_open: false,
-            np_tab: if get("np_art").is_some_and(|v| v == "1") { NpTab::Art } else { NpTab::Lyrics },
+            // The phone's player opens on the artwork: the lyrics are a panel opened from it.
+            np_tab: if crate::platform::phone() || get("np_art").is_some_and(|v| v == "1") { NpTab::Art } else { NpTab::Lyrics },
             queue_open: false,
             fullscreen: false,
             mini: mini::Mini::load(get),
@@ -1514,9 +1516,10 @@ impl eframe::App for App {
             // The top of the window, down to the search box's row: what's on it comes after.
             titlebar::drag_area(ui, egui::Rect::from_min_size(screen.min, egui::vec2(screen.width(), titlebar::HEIGHT)), "main");
         }
-        if !self.fullscreen && covered {
+        if !self.fullscreen && covered && !m3::on() {
             // Now playing hides the pages: the player bar keeps its full-width place. On a
-            // phone it sits above the gesture area.
+            // phone it sits above the gesture area. (The Material phone's player has its
+            // own transport.)
             let gap = if phone { crate::platform::insets(&ctx).bottom } else { 0.0 };
             egui::Panel::bottom("player").resizable(false)
                 .exact_size(if phone { 86.0 } else { self.bar_height() } + gap)
