@@ -346,8 +346,15 @@ fn switch_row(ui: &mut Ui, id: egui::Id, title: &str, note: &str, on: &mut bool)
     }
     let text_w = w - 60.0;
     if m3::on() {
-        let m = material::scheme();
-        m3::two_lines(ui, r.left(), r.center().y, text_w - 8.0, title, Type::BodyLarge, m.on_surface, note, Type::BodyMedium, m.on_surface_variant);
+        // The note takes a second line on a narrow phone rather than being cut short.
+        let (title_g, note_g) = m3::row_text(ui, title, Some(note), text_w - 8.0, 2);
+        let note_h = note_g.as_ref().map_or(0.0, |g| g.size().y);
+        let top = r.center().y - (title_g.size().y + note_h) / 2.0;
+        let note_top = top + title_g.size().y;
+        ui.painter().galley(pos2(r.left(), top), title_g, theme::text());
+        if let Some(g) = note_g {
+            ui.painter().galley(pos2(r.left(), note_top), g, theme::text_dim());
+        }
     } else {
         widgets::text_at(ui, pos2(r.left(), r.top() + 10.0), title, theme::regular(17.0), theme::text(), text_w);
         widgets::text_at(ui, pos2(r.left(), r.top() + 34.0), note, theme::regular(13.5), theme::text_dim(), text_w);

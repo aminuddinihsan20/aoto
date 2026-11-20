@@ -1126,7 +1126,11 @@ pub fn option_pill(ui: &Ui, rect: Rect, id: egui::Id, label: &str, icon: Option<
         ui.painter().rect_filled(rect, radius, ink.gamma_multiply(PRESSED));
     }
     let lead = if icon.is_some() { 26.0 } else { 0.0 };
-    let g = galley(ui, label, Type::TitleMedium, ink, (rect.width() - 20.0 - lead).max(0.0));
+    let room = (rect.width() - 20.0 - lead).max(0.0);
+    // A label too long for a narrow pill (two side by side on a small phone) is set smaller
+    // before it is cut short.
+    let fits = galley(ui, label, Type::TitleMedium, ink, f32::INFINITY).size().x <= room;
+    let g = galley(ui, label, if fits { Type::TitleMedium } else { Type::LabelLarge }, ink, room);
     let left = rect.center().x - (lead + g.size().x) / 2.0;
     if let Some(icon) = icon {
         paint_icon(ui, pos2(left + 9.0, rect.center().y), 20.0, icon, ink);

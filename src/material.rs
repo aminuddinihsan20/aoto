@@ -269,7 +269,6 @@ pub mod shape {
     /// Cards and sheets.
     pub const CARD: f32 = 28.0;
     /// The big artwork of Now Playing and a collection's header.
-    #[allow(dead_code)]
     pub const ARTWORK: f32 = 36.0;
 }
 
