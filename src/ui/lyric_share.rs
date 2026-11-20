@@ -171,6 +171,10 @@ impl State {
             Ask::Next => {
                 if !self.picks.is_empty() {
                     self.step = Step::Card;
+                    // A card that could not be drawn is tried again on the way back to it.
+                    if self.picture.failed.take().is_some() {
+                        self.picture.asked = None;
+                    }
                 }
             }
             Ask::ChangeLines => {
@@ -568,20 +572,34 @@ fn stand_in(ui: &Ui, rect: Rect, card: &Card, thumbs: &[Thumb], tint: egui::Text
 
 // ------------------------------------------------------------------ the app's side
 
-/// The lyrics on screen, and the key of the song and source they are of.
+/// What chosen lines belong to: the song `id` and the source its `lyrics` are from.
+fn song_key(id: &str, lyrics: &Lyrics) -> String {
+    format!("{id}/{}", lyrics.provider.key())
+}
+
+/// The lyrics on screen, and their song's key.
 fn shown_lyrics(app: &App) -> Option<(String, &Lyrics)> {
     let (id, set) = app.lyrics.as_ref()?;
     let lyrics = set.get(app.lyric_prefs.choose(id, set)?)?;
-    Some((format!("{id}/{}", lyrics.provider.key()), lyrics))
+    Some((song_key(id, lyrics), lyrics))
 }
 
-/// Begin sharing the lyrics on screen. `pressed`: the line that was long-pressed, which
-/// is chosen to begin with; from the menu the list opens at the line being sung.
-pub(super) fn start(app: &mut App, pressed: Option<usize>) {
+/// Begin sharing the lyrics on screen, from their menu: the list opens at the line
+/// being sung.
+pub(super) fn start(app: &mut App) {
     let Some((song, lyrics)) = shown_lyrics(app) else { return };
-    let pressed = pressed.filter(|&line| lyrics.lines.get(line).is_some_and(lyric_card::pickable));
+    let at = sung_now(lyrics, app.audio.status.position().as_millis() as i64);
+    app.lyric_share.begin(&song, at, false);
+}
+
+/// Begin sharing with the `line` that was long-pressed as the first one chosen. The
+/// lyrics view hands over the song `id` and the `lyrics` it is drawing: it has them on
+/// loan from the app while it draws.
+pub(super) fn start_with(app: &mut App, id: &str, lyrics: &Lyrics, line: usize) {
+    // A break between verses is nothing to choose: the list opens as from the menu.
+    let pressed = Some(line).filter(|&l| lyrics.lines.get(l).is_some_and(lyric_card::pickable));
     let at = pressed.or_else(|| sung_now(lyrics, app.audio.status.position().as_millis() as i64));
-    app.lyric_share.begin(&song, at, pressed.is_some());
+    app.lyric_share.begin(&song_key(id, lyrics), at, pressed.is_some());
 }
 
 /// Dev hook: YTM_LYRIC_SHARE=lines|card|story|wide opens the screen once the song's
@@ -908,6 +926,32 @@ mod tests {
     }
 
     #[test]
+    fn a_card_that_could_not_be_drawn_is_asked_for_again_on_coming_back_to_it() {
+        let mut s = State::default();
+        s.begin("song/lrclib", None, false);
+        s.act(Ask::Tap(2));
+        s.act(Ask::Next);
+        s.picture.asked = Some("card".to_owned());
+        s.picture.failed = Some(("card".to_owned(), "lyric-card timed out".to_owned()));
+        s.act(Ask::ChangeLines);
+        assert!(s.picture.failed.is_some(), "nothing is tried while the lines are up");
+        s.act(Ask::Next);
+        assert_eq!((s.picture.asked.as_deref(), s.picture.failed.is_none()), (None, true));
+    }
+
+    #[test]
+    fn a_card_that_was_drawn_is_not_drawn_again_for_coming_back_to_it() {
+        let mut s = State::default();
+        s.begin("song/lrclib", None, false);
+        s.act(Ask::Tap(2));
+        s.act(Ask::Next);
+        s.picture.asked = Some("card".to_owned());
+        s.act(Ask::ChangeLines);
+        s.act(Ask::Next);
+        assert_eq!(s.picture.asked.as_deref(), Some("card"));
+    }
+
+    #[test]
     fn the_lines_can_be_changed_from_the_card() {
         let mut s = State::default();
         s.begin("song/lrclib", None, false);
@@ -977,6 +1021,66 @@ mod tests {
     fn lyrics_without_timing_open_at_the_top() {
         let l = lyrics(vec![line(0, "one"), line(0, "two")]);
         assert_eq!(sung_now(&l, 30000), None);
+    }
+
+    // -------------------------------------------------------------- the long press
+
+    /// The lyrics view in a headless egui with a finger put on its middle for `held`
+    /// seconds: the seek and the long press it reported, frame by frame.
+    fn finger_on_the_lyrics(held: f64) -> Vec<(Option<f64>, Option<usize>)> {
+        use super::super::karaoke;
+        let ctx = egui::Context::default();
+        crate::theme::install_fonts(&ctx, "Inter");
+        let l = lyrics((0..12).map(|i| line(i * 3000, "Biar hujan turun perlahan")).collect());
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(412.0, 700.0));
+        let at = screen.center();
+        let touch = |phase| egui::Event::Touch { device_id: egui::TouchDeviceId(0), id: egui::TouchId(1), phase, pos: at, force: None };
+        let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let mut view = karaoke::View::default();
+        let (mut time, mut reported) = (0.0, Vec::new());
+        let mut frame = |time: f64, events: Vec<egui::Event>| {
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(time), events, ..Default::default() };
+            let mut out = None;
+            let run = ctx.run_ui(input, |ui| {
+                let f = karaoke::Frame { lyrics: &l, key: 1, roman: vec![], trans: vec![], t: 16.0, playing: false, now: time, rect: screen, style: &crate::preset::active().lyrics, accent: Color32::WHITE, centered: false, scale: 1.0 };
+                out = Some(view.show(ui, f));
+            });
+            run.drop_without_applying_deltas();
+            let out = out.expect("drawn");
+            reported.push((out.seek, out.long_press));
+        };
+        for _ in 0..3 {
+            time += 0.1;
+            frame(time, vec![]);
+        }
+        time += 0.1;
+        let down = time;
+        frame(time, vec![touch(egui::TouchPhase::Start), egui::Event::PointerMoved(at), button(true)]);
+        while time - down < held {
+            time += 0.1;
+            frame(time, vec![]);
+        }
+        time += 0.02;
+        frame(time, vec![touch(egui::TouchPhase::End), button(false), egui::Event::PointerGone]);
+        for _ in 0..3 {
+            time += 0.1;
+            frame(time, vec![]);
+        }
+        reported
+    }
+
+    #[test]
+    fn a_tap_on_a_lyric_line_seeks_and_is_no_long_press() {
+        let reported = finger_on_the_lyrics(0.1);
+        assert_eq!(reported.iter().filter(|(seek, _)| seek.is_some()).count(), 1, "{reported:?}");
+        assert!(reported.iter().all(|(_, held)| held.is_none()), "{reported:?}");
+    }
+
+    #[test]
+    fn a_finger_held_on_a_lyric_line_is_a_long_press_and_never_seeks() {
+        let reported = finger_on_the_lyrics(1.5);
+        assert_eq!(reported.iter().filter(|(_, held)| held.is_some()).count(), 1, "once, on the line under the finger: {reported:?}");
+        assert!(reported.iter().all(|(seek, _)| seek.is_none()), "{reported:?}");
     }
 
     // -------------------------------------------------------------- the pages

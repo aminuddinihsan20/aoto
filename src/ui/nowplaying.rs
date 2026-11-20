@@ -718,7 +718,7 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
     }
     // A line held on the phone starts sharing the lyrics as a picture, with that line.
     if let Some(line) = out.long_press.filter(|_| crate::platform::phone()) {
-        super::lyric_share::start(app, Some(line));
+        super::lyric_share::start_with(app, id, lyrics, line);
     }
     if out.animating {
         ui.ctx().request_repaint();
@@ -828,7 +828,7 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
             menu_divider(ui);
             if crate::platform::phone() {
                 if widgets::menu_action_drawn(ui, "Share lyrics", |ui, at, color| super::lyric_share::share_mark(ui, at, 16.0, color)) {
-                    super::lyric_share::start(app, None);
+                    super::lyric_share::start(app);
                 }
                 menu_divider(ui);
             }
