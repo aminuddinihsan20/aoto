@@ -90,8 +90,9 @@ jobs:
           fi
           echo "VERSION=$cargo_ver" >> "$GITHUB_ENV"
 
-      # Signed with the project's key when the four secrets exist; otherwise with the
-      # debug key (installs, but a later build can't update it).
+      # Signed with the project's key, which the four secrets below hold. Without them the
+      # build stops: a release signed with a throwaway debug key could never be updated
+      # over by the next one.
       - name: Build the APK
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE }}
@@ -103,7 +104,8 @@ jobs:
             echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.keystore"
             export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.keystore"
           else
-            echo "::warning::no signing key: the APK is signed with the debug key"
+            echo "::error::no signing key (the ANDROID_KEYSTORE secrets): not building a release that could not be updated"
+            exit 1
           fi
           sh android/build.sh release
 
