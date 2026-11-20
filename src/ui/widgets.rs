@@ -591,6 +591,11 @@ pub fn menu_action(ui: &mut Ui, glyph: Option<char>, label: &str) -> bool {
     })
 }
 
+/// A menu row whose mark is drawn by hand, for one the icon font doesn't have.
+pub fn menu_action_drawn(ui: &mut Ui, label: &str, draw: impl FnOnce(&Ui, Pos2, Color32)) -> bool {
+    menu_row(ui, label, draw)
+}
+
 /// A menu row marked with the app's own star, filled once the song is liked.
 fn menu_action_star(ui: &mut Ui, liked: bool, label: &str) -> bool {
     menu_row(ui, label, |ui, at, color| {

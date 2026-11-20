@@ -9,6 +9,7 @@ mod collections;
 mod dev;
 mod dialogs;
 mod downloading;
+mod equalizer;
 mod glyphs;
 mod integrations;
 mod jam;
@@ -84,6 +85,8 @@ pub enum Page {
     LocalSongs,
     /// The saved songs of an album or playlist that was downloaded whole (its id).
     Downloaded(String),
+    /// The equalizer, opened from Settings › Playback or the player's menu.
+    Equalizer,
 }
 
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
@@ -475,6 +478,8 @@ pub struct App {
     automix: bool,
     /// Spatial audio for headphones (`crate::spatial`).
     spatial: bool,
+    /// The equalizer as the listener set it (`crate::eq`).
+    eq: crate::eq::Tuning,
     crossfade_secs: u32,
     /// The next song starts because this one is ending: crossfade into it.
     handoff: bool,
@@ -838,6 +843,7 @@ impl App {
             crossfade: get("crossfade").is_some_and(|v| v == "1"),
             automix: get("automix").is_some_and(|v| v == "1"),
             spatial: get("spatial").is_some_and(|v| v == "1"),
+            eq: crate::eq::Tuning::load(get("eq").as_deref(), get("eq_preset").as_deref(), get("eq_custom").as_deref(), get("eq_bass").as_deref()),
             handoff: false,
             pending_mix: None,
             mix_from: None,
@@ -912,6 +918,7 @@ impl App {
             Ok(p) if p.starts_with("localalbum:") => app.go(Page::LocalAlbum(p[11..].replace('|', "\u{1f}"))),
             Ok("settings") => app.go(Page::Settings),
             Ok("transfer") => app.go(Page::Transfer),
+            Ok("equalizer") => app.go(Page::Equalizer),
             Ok("jam") => app.go(Page::Settings),
             Ok(p) if p.starts_with("album:") => app.go(Page::Album(p[6..].to_owned())),
             Ok(p) if p.starts_with("artist:") => app.go(Page::Artist(p[7..].to_owned())),
@@ -950,6 +957,7 @@ impl App {
         }
         jam::dev_hooks(&mut app);
         app.audio.set_normalize(app.normalize);
+        app.audio.set_equalizer(&app.eq.settings());
         app.set_crossfade();
         app
     }
@@ -1702,6 +1710,10 @@ impl eframe::App for App {
         storage.set_string("crossfade", b(self.crossfade));
         storage.set_string("automix", b(self.automix));
         storage.set_string("spatial", b(self.spatial));
+        storage.set_string("eq", b(self.eq.enabled));
+        storage.set_string("eq_preset", self.eq.preset.key().to_owned());
+        storage.set_string("eq_custom", self.eq.custom_text());
+        storage.set_string("eq_bass", self.eq.bass.to_string());
         storage.set_string("crossfade_secs", self.crossfade_secs.to_string());
         storage.set_string("show_roman", b(self.show_roman));
         storage.set_string("show_trans", b(self.show_trans));

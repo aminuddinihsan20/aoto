@@ -78,6 +78,7 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
             Page::LocalAlbum(key) => local_album(app, ui, key, now),
             Page::LocalSongs => local_songs(app, ui, now),
             Page::Downloaded(id) => super::downloading::saved_page(app, ui, id, now),
+            Page::Equalizer => super::equalizer::page(app, ui),
         }
         // Room to scroll the last rows clear of the player's frosted strip.
         ui.add_space(96.0);
@@ -1839,6 +1840,10 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
             });
             divider(ui);
         }
+        if open_row(ui, "Equalizer", &super::equalizer::settings_note(&app.eq)) {
+            app.actions.push(Action::Go(Page::Equalizer));
+        }
+        divider(ui);
         setting_row(ui, "Spatial audio", Some("Makes stereo songs sound like they surround you, for headphones: a wider stage, a little room around it and the way your head shades each ear. Voices stay in the middle. Not head-tracked, and not Dolby Atmos (that plays as it is when a song has it)."), |ui| {
             if toggle(ui, &mut app.spatial, "Spatial audio").changed() {
                 app.set_crossfade();

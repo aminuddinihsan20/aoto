@@ -5,7 +5,7 @@
 use egui::{Color32, Rect, Sense, Ui, Vec2, pos2, vec2};
 
 use super::widgets::{self, icon_button, named, text_at};
-use super::{Action, App, NpTab, Repeat, glyphs, karaoke};
+use super::{Action, App, NpTab, Page, Repeat, glyphs, karaoke};
 use crate::lyrics::{Lyrics, Sync, SyncKind};
 use crate::shader::Params;
 use crate::theme::{self, icon};
@@ -823,12 +823,15 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
             lyric_options(app, ui);
             menu_divider(ui);
         }
-        // Spatial audio on or off, right where the music is.
+        // Spatial audio on or off, right where the music is, and the way to the equalizer.
         let mut spatial = app.spatial;
         switch_row(ui, "Spatial audio", &mut spatial);
         if spatial != app.spatial {
             app.spatial = spatial;
             app.set_crossfade();
+        }
+        if widgets::menu_action_drawn(ui, "Equalizer", |ui, at, color| super::equalizer::sliders(ui, at, 16.0, color)) {
+            app.actions.push(Action::Go(Page::Equalizer));
         }
         menu_divider(ui);
         widgets::song_actions(ui, track, liked, None, false, &mut app.actions);
