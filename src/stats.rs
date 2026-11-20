@@ -149,6 +149,18 @@ pub struct Song {
     pub cover: Option<Cover>,
 }
 
+impl Song {
+    /// Take the album and the picture from the same song met again, where this one
+    /// has none (a list that leaves them out is often where a song is first met).
+    /// True when that added something.
+    fn learn(&mut self, again: Song) -> bool {
+        let news = self.album.is_none() && again.album.is_some() || self.cover.is_none() && again.cover.is_some();
+        self.album = self.album.take().or(again.album);
+        self.cover = self.cover.take().or(again.cover);
+        news
+    }
+}
+
 /// A stretch of listening to one song on one day.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Play {
@@ -189,7 +201,7 @@ pub struct History {
 
 /// What a report changed, for the file.
 struct Taken {
-    /// The song, when the history hadn't met it.
+    /// The song, when the history hadn't met it or learned more of it.
     song: Option<u32>,
     play: Play,
     /// A new stretch, not more of the last one.
@@ -296,15 +308,17 @@ impl History {
             (last.heard, last.counted) = (report.heard, report.counted);
             return Some(Taken { song: None, play: *last, first: false });
         };
-        let known = self.by_id.get(&song.id).copied();
-        let index = known.unwrap_or(self.songs.len() as u32);
-        if known.is_none() {
-            self.by_id.insert(song.id.clone(), index);
-            self.songs.push(song);
-        }
+        let (index, news) = match self.by_id.get(&song.id) {
+            Some(&index) => (index, self.songs[index as usize].learn(song)),
+            None => {
+                self.by_id.insert(song.id.clone(), self.songs.len() as u32);
+                self.songs.push(song);
+                (self.songs.len() as u32 - 1, true)
+            }
+        };
         let play = Play { song: index, at: report.at, east: report.east, heard: report.heard, counted: report.counted };
         self.plays.push(play);
-        Some(Taken { song: known.is_none().then_some(index), play, first: true })
+        Some(Taken { song: news.then_some(index), play, first: true })
     }
 
     /// Plays from before the last `RECENT_DAYS` become their day's totals. True when
@@ -737,11 +751,17 @@ impl History {
                 let artists = (0..r.number()?).map(|_| r.text()).collect::<Option<Vec<_>>>()?;
                 let album = if r.flag()? { Some(r.text()?) } else { None };
                 let cover = if r.flag()? { Some(Cover { url: r.text()?, width: r.small()?, height: r.small()? }) } else { None };
-                if !r.bytes.is_empty() || self.by_id.contains_key(&id) {
+                if !r.bytes.is_empty() {
                     return None;
                 }
-                self.by_id.insert(id.clone(), self.songs.len() as u32);
-                self.songs.push(Song { id, title, artists, album, cover });
+                // A song written again is the same one with more known of it.
+                match self.by_id.get(&id) {
+                    Some(&index) => self.songs[index as usize] = Song { id, title, artists, album, cover },
+                    None => {
+                        self.by_id.insert(id.clone(), self.songs.len() as u32);
+                        self.songs.push(Song { id, title, artists, album, cover });
+                    }
+                }
             }
             PLAY => {
                 let play = Play { song: known(r.small()?)?, at: r.signed()?, east: r.signed()?.try_into().ok()?, heard: r.small()?, counted: r.flag()? };
@@ -866,8 +886,8 @@ impl Log {
         let Some(taken) = self.history.take(report) else { return };
         self.revision += 1;
         let Some(file) = &mut self.file else { return };
-        // A new stretch goes at the end, after its song when that is new too; more of
-        // the last one is written over it.
+        // A new stretch goes at the end, after its song when there is news of that
+        // too; more of the last one is written over it.
         let mut bytes = Vec::new();
         let at = if taken.first {
             if let Some(song) = taken.song {
@@ -1346,6 +1366,24 @@ mod tests {
     }
 
     #[test]
+    fn what_is_learned_of_a_song_later_is_kept() {
+        let today = day(2026, 11, 20);
+        let bare = song("a");
+        let full = Song { title: "Another spelling".to_owned(), album: Some("Layang-Layang".to_owned()), cover: Some(Cover { url: "https://i/a".to_owned(), width: 120, height: 120 }), ..song("a") };
+        let mut h = History::default();
+        h.played(&bare, today, 1, 100);
+        assert_eq!(h.summary(Period::Week, today).top_album, None);
+        // Met again from a list that says its album and has its picture.
+        h.played(&full, today, 1, 100);
+        assert_eq!(h.songs, [Song { title: bare.title.clone(), ..full.clone() }]);
+        assert_eq!(h.summary(Period::Week, today).top_album, Some(Top { name: "Layang-Layang".to_owned(), heard: 200 }));
+        // What it has is not taken away, or changed.
+        h.played(&bare, today, 1, 100);
+        h.played(&Song { album: Some("A reissue".to_owned()), ..full.clone() }, today, 1, 100);
+        assert_eq!(h.songs, [Song { title: bare.title.clone(), ..full }]);
+    }
+
+    #[test]
     fn a_week_has_a_bar_for_each_day() {
         let (a, b) = (song("a"), song("b"));
         let mut h = History::default();
@@ -1777,6 +1815,31 @@ mod tests {
         assert_eq!(h.of(&b, ALWAYS), (12, 0));
         assert_eq!(h.songs, [a, b]);
         assert_eq!(h.plays.len(), 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn what_is_learned_of_a_song_later_is_in_the_file_too() {
+        let dir = folder("learned");
+        let today = day(2026, 11, 20);
+        let (bare, b) = (song("a"), song("b"));
+        let full = Song { album: Some("Layang-Layang".to_owned()), ..song("a") };
+        let mut steady = 0.0;
+        let mut log = Log::open(&dir, today);
+        listen(&mut log, &mut steady, 1, &bare, 40.0);
+        listen(&mut log, &mut steady, 2, &b, 40.0);
+        listen(&mut log, &mut steady, 3, &full, 40.0);
+        drop(log);
+        let log = Log::open(&dir, today);
+        assert_eq!(log.history().songs, [full.clone(), b]);
+        assert_eq!(log.history().of(&full, ALWAYS), (80, 2));
+        // The file is read to its end, and folding writes each song once.
+        let file = std::fs::read(dir.join(FILE)).unwrap();
+        assert!(matches!(decode(&file), Stored::Read(h, good) if h == *log.history() && good == file.len()));
+        drop(log);
+        let later = Log::open(&dir, today + 180);
+        assert_eq!(later.history().songs[0], full);
+        assert_eq!(std::fs::read(dir.join(FILE)).unwrap(), later.history().encode());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
