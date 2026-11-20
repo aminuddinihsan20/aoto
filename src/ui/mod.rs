@@ -896,6 +896,7 @@ impl App {
         app.request_liked(false);
         // Before anything plays: an end-of-queue timer keeps radio out from the first song.
         sleep::dev_hooks(&mut app);
+        stats::dev_hooks(&mut app);
         // Dev hooks: YTM_SMOKE="query" searches and plays the first song ("id:<videoId>[,<videoId>…]"
         // plays that video); YTM_SEARCH
         // only searches; YTM_PAGE opens a page; YTM_NOWPLAYING opens the overlay.

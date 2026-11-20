@@ -28,6 +28,15 @@ impl Default for View {
     }
 }
 
+/// Dev hook: YTM_STATS=week|year opens the page on that period.
+pub(super) fn dev_hooks(app: &mut App) {
+    match super::dev_var("YTM_STATS") {
+        Some("week") => app.stats.period = Period::Week,
+        Some("year") => app.stats.period = Period::Year,
+        _ => {}
+    }
+}
+
 /// The clock the history's seconds are counted on starts with the app.
 static STARTED: LazyLock<Instant> = LazyLock::new(Instant::now);
 
