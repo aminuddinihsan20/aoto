@@ -89,7 +89,6 @@
                 android:background="@drawable/widget_button_tonal"
                 android:contentDescription="@string/widget_previous"
                 android:src="@drawable/ic_widget_previous"
-                android:tint="@color/widget_on_surface"
                 android:visibility="gone" />
 
             <ImageButton
@@ -99,8 +98,7 @@
                 android:layout_weight="1"
                 android:background="@drawable/widget_button_primary"
                 android:contentDescription="@string/widget_play"
-                android:src="@drawable/ic_widget_play"
-                android:tint="@color/widget_on_primary" />
+                android:src="@drawable/ic_widget_play" />
 
             <ImageButton
                 android:id="@+id/widget_next"
@@ -110,7 +108,6 @@
                 android:background="@drawable/widget_button_tonal"
                 android:contentDescription="@string/widget_next"
                 android:src="@drawable/ic_widget_next"
-                android:tint="@color/widget_on_surface"
                 android:visibility="gone" />
         </LinearLayout>
     </LinearLayout>

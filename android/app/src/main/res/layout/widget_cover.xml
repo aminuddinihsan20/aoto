@@ -56,7 +56,6 @@
             android:layout_height="48dp"
             android:background="@drawable/widget_button_square"
             android:contentDescription="@string/widget_play"
-            android:src="@drawable/ic_widget_play"
-            android:tint="@color/widget_on_primary" />
+            android:src="@drawable/ic_widget_play" />
     </LinearLayout>
 </FrameLayout>
