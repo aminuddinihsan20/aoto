@@ -1087,10 +1087,11 @@ pub fn tool_chip_width(ui: &Ui, label: &str) -> f32 {
     16.0 + 20.0 + 8.0 + galley(ui, label, Type::LabelLarge, Color32::PLACEHOLDER, 200.0).size().x + 18.0
 }
 
-/// A tool of the player (Lyrics, Sleep timer): an icon and a label on a round-ended
-/// tonal container, drawn `TOOL_H` tall in the middle of `rect`. `on`: it is at work
-/// (a timer runs), and wears the primary colour.
-pub fn tool_chip(ui: &Ui, rect: Rect, icon: Icon, label: &str, on: bool, id: egui::Id) -> Response {
+/// How wide `tool_chip_icon` is: a finger across.
+pub const TOOL_ICON_W: f32 = TOUCH;
+
+/// The container of a tool chip in `rect` and the colour its content wears.
+fn tool_chip_body(ui: &Ui, rect: Rect, label: &str, on: bool, id: egui::Id) -> (Response, Rect, Color32) {
     let m = material::scheme();
     let resp = named(ui.interact(rect, id, Sense::click()), label);
     let body = Rect::from_center_size(rect.center(), vec2(rect.width(), TOOL_H));
@@ -1099,9 +1100,27 @@ pub fn tool_chip(ui: &Ui, rect: Rect, icon: Icon, label: &str, on: bool, id: egu
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(body, TOOL_H / 2.0, ink.gamma_multiply(PRESSED));
     }
+    (resp, body, ink)
+}
+
+/// A tool of the player (Lyrics, Sleep timer): an icon and a label on a round-ended
+/// tonal container, drawn `TOOL_H` tall in the middle of `rect`. `on`: it is at work
+/// (a timer runs), and wears the primary colour.
+pub fn tool_chip(ui: &Ui, rect: Rect, icon: Icon, label: &str, on: bool, id: egui::Id) -> Response {
+    let m = material::scheme();
+    let (resp, body, ink) = tool_chip_body(ui, rect, label, on, id);
     paint_icon(ui, pos2(body.left() + 16.0 + 10.0, body.center().y), 20.0, icon, if on { m.primary } else { m.on_surface_variant });
     let g = galley(ui, label, Type::LabelLarge, ink, (body.width() - 62.0).max(0.0));
     ui.painter().galley(pos2(body.left() + 44.0, body.center().y - g.size().y / 2.0), g, ink);
+    resp
+}
+
+/// A tool chip with its icon alone, for a row with no room for the label (`name` is
+/// what a screen reader says): the same container, the icon in its middle.
+pub fn tool_chip_icon(ui: &Ui, rect: Rect, icon: Icon, name: &str, on: bool, id: egui::Id) -> Response {
+    let m = material::scheme();
+    let (resp, body, _) = tool_chip_body(ui, rect, name, on, id);
+    paint_icon(ui, body.center(), 20.0, icon, if on { m.primary } else { m.on_surface_variant });
     resp
 }
 
@@ -1776,6 +1795,16 @@ mod tests {
         assert!(TOOL_H < TOUCH);
         assert_eq!(item.height(), MENU_ITEM_H);
         assert!(MENU_ITEM_H >= TOUCH);
+    }
+
+    #[test]
+    fn a_tool_chip_with_its_icon_alone_is_a_finger_across_and_narrower_than_one_with_a_label() {
+        let (chip, with_label) = drawn(360.0, |ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(TOOL_ICON_W, TOUCH), Sense::hover());
+            (tool_chip_icon(ui, rect, Icon::Font(icon::MUSIC), "Play on", false, ui.id().with("tool")).rect, tool_chip_width(ui, "Lyrics"))
+        });
+        assert_eq!(chip.size(), vec2(TOOL_ICON_W, TOUCH));
+        assert!(TOOL_ICON_W >= TOUCH && TOOL_ICON_W < with_label, "{with_label}");
     }
 
     #[test]
