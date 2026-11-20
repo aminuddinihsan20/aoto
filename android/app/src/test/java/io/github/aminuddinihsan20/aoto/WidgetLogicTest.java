@@ -2,15 +2,21 @@ package io.github.aminuddinihsan20.aoto;
 
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.BODY;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.COMMAND;
+import static io.github.aminuddinihsan20.aoto.WidgetLogic.COUNTS;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.HIDDEN;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.NEXT;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.NO_PROGRESS;
+import static io.github.aminuddinihsan20.aoto.WidgetLogic.NO_TIME;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.OPEN;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.OPEN_AND_PLAY;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.PREVIOUS;
+import static io.github.aminuddinihsan20.aoto.WidgetLogic.ROW;
+import static io.github.aminuddinihsan20.aoto.WidgetLogic.STANDS;
 import static io.github.aminuddinihsan20.aoto.WidgetLogic.TOGGLE;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * The widgets' decisions, checked with nothing but a JDK: `sh android/test-java.sh`. (The
@@ -36,11 +42,21 @@ public final class WidgetLogicTest {
             WidgetLogicTest::a_cover_is_cropped_to_the_shape_of_the_widget_it_fills,
             WidgetLogicTest::a_widget_of_unknown_size_gets_a_square,
             WidgetLogicTest::a_cropped_cover_keeps_the_widgets_shape_at_its_longest_side,
+            WidgetLogicTest::the_wide_widget_is_padded_as_designed_and_less_when_low,
             WidgetLogicTest::the_wide_widgets_cover_is_as_tall_as_the_widget_has_room_for,
             WidgetLogicTest::the_wide_widgets_cover_leaves_room_for_three_full_buttons,
             WidgetLogicTest::the_wide_widgets_cover_is_neither_tiny_nor_larger_than_designed,
             WidgetLogicTest::a_wide_widget_of_unknown_size_gets_a_middling_cover,
             WidgetLogicTest::the_artist_is_left_out_of_a_wide_widget_too_low_for_two_lines,
+            WidgetLogicTest::the_times_are_left_out_of_a_wide_widget_before_the_artist_is,
+            WidgetLogicTest::a_time_reads_as_the_systems_ticking_label_does,
+            WidgetLogicTest::the_time_played_counts_by_itself_only_when_it_can_be_right,
+            WidgetLogicTest::the_mini_widget_gives_up_its_cover_before_its_buttons,
+            WidgetLogicTest::the_queue_widget_shows_the_rows_it_has_room_for,
+            WidgetLogicTest::up_next_is_what_follows_the_song_that_plays,
+            WidgetLogicTest::up_next_never_offers_the_song_that_plays_or_one_before_it,
+            WidgetLogicTest::up_next_has_only_rows_of_the_queue,
+            WidgetLogicTest::a_queue_row_is_told_to_the_player_and_is_not_there_without_one,
         };
         int failedTests = 0;
         for (Runnable test : tests) {
@@ -147,22 +163,29 @@ public final class WidgetLogicTest {
         same("a sliver still has a pixel", new int[] {300, 1}, WidgetLogic.fit(4000, 1, 300));
     }
 
+    private static void the_wide_widget_is_padded_as_designed_and_less_when_low() {
+        same("the designed size", 16, WidgetLogic.widePadDp(180));
+        same("just high enough for everything", 16, WidgetLogic.widePadDp(152));
+        same("just too low", 12, WidgetLogic.widePadDp(151));
+        same("two cells by the old rule", 12, WidgetLogic.widePadDp(110));
+        same("unknown", 16, WidgetLogic.widePadDp(0));
+    }
+
     private static void the_wide_widgets_cover_is_as_tall_as_the_widget_has_room_for() {
-        // 12dp of padding above and below.
-        same("a low widget", 86, WidgetLogic.wideCoverDp(380, 110));
-        same("the designed size", 148, WidgetLogic.wideCoverDp(380, 180));
+        same("a low widget, 12dp above and below", 86, WidgetLogic.wideCoverDp(380, 110));
+        same("the designed size, 16dp above and below", 148, WidgetLogic.wideCoverDp(380, 180));
     }
 
     private static void the_wide_widgets_cover_leaves_room_for_three_full_buttons() {
-        // Beside it: 24dp of padding, a 12dp gap, three 48dp buttons 6dp apart.
-        same("a 360dp phone's four cells", 136, WidgetLogic.wideCoverDp(328, 190));
-        same("four cells of five", 104, WidgetLogic.wideCoverDp(296, 190));
+        // Beside it: 32dp of padding, a 16dp gap, three buttons at least 48dp wide, 8dp apart.
+        same("a 360dp phone's four cells", 120, WidgetLogic.wideCoverDp(328, 190));
+        same("four cells of five", 88, WidgetLogic.wideCoverDp(296, 190));
     }
 
     private static void the_wide_widgets_cover_is_neither_tiny_nor_larger_than_designed() {
         same("a huge cell", 148, WidgetLogic.wideCoverDp(600, 400));
-        same("narrower than the buttons need", 48, WidgetLogic.wideCoverDp(200, 190));
-        same("lower than a button", 48, WidgetLogic.wideCoverDp(380, 60));
+        same("narrower than the buttons need", 40, WidgetLogic.wideCoverDp(200, 190));
+        same("lower than a button", 40, WidgetLogic.wideCoverDp(380, 60));
     }
 
     private static void a_wide_widget_of_unknown_size_gets_a_middling_cover() {
@@ -172,10 +195,95 @@ public final class WidgetLogicTest {
 
     private static void the_artist_is_left_out_of_a_wide_widget_too_low_for_two_lines() {
         same("two cells by the old rule", false, WidgetLogic.roomForArtist(110));
-        same("just too low", false, WidgetLogic.roomForArtist(127));
-        same("just enough", true, WidgetLogic.roomForArtist(128));
+        same("just too low", false, WidgetLogic.roomForArtist(125));
+        same("just enough", true, WidgetLogic.roomForArtist(126));
         same("the designed size", true, WidgetLogic.roomForArtist(180));
         same("unknown", true, WidgetLogic.roomForArtist(0));
+    }
+
+    private static void the_times_are_left_out_of_a_wide_widget_before_the_artist_is() {
+        same("room for the artist only", false, WidgetLogic.roomForTimes(126));
+        same("just too low", false, WidgetLogic.roomForTimes(143));
+        same("just enough", true, WidgetLogic.roomForTimes(144));
+        same("the designed size", true, WidgetLogic.roomForTimes(180));
+        same("unknown", true, WidgetLogic.roomForTimes(0));
+    }
+
+    private static void a_time_reads_as_the_systems_ticking_label_does() {
+        same("under ten minutes", "04:02", WidgetLogic.time(242_000));
+        same("part of a second", "01:24", WidgetLogic.time(84_999));
+        same("nothing yet", "00:00", WidgetLogic.time(0));
+        same("never below nothing", "00:00", WidgetLogic.time(-5));
+        same("over an hour", "1:02:03", WidgetLogic.time(3_723_000));
+    }
+
+    private static void the_time_played_counts_by_itself_only_when_it_can_be_right() {
+        same("playing as recorded", COUNTS, WidgetLogic.elapsed(true, 1f));
+        same("paused", STANDS, WidgetLogic.elapsed(false, 1f));
+        same("paused, whatever the speed", STANDS, WidgetLogic.elapsed(false, 1.5f));
+        // The system's label counts a second a second: wrong for a song played faster or slower.
+        same("playing faster", NO_TIME, WidgetLogic.elapsed(true, 1.25f));
+        same("playing slower", NO_TIME, WidgetLogic.elapsed(true, 0.75f));
+    }
+
+    private static void the_mini_widget_gives_up_its_cover_before_its_buttons() {
+        same("the designed size", 48, WidgetLogic.miniCoverDp(182));
+        same("just room for all of it", 48, WidgetLogic.miniCoverDp(180));
+        same("a little narrow: a smaller cover", 38, WidgetLogic.miniCoverDp(170));
+        same("too narrow for a cover worth showing", 0, WidgetLogic.miniCoverDp(160));
+        same("unknown", 48, WidgetLogic.miniCoverDp(0));
+    }
+
+    private static void the_queue_widget_shows_the_rows_it_has_room_for() {
+        same("the designed size", 3, WidgetLogic.queueRows(276));
+        same("a row's height short", 2, WidgetLogic.queueRows(275));
+        same("two cells high", 0, WidgetLogic.queueRows(150));
+        same("a cell higher", 5, WidgetLogic.queueRows(372));
+        same("as high as the screen", 6, WidgetLogic.queueRows(900));
+        same("unknown", 3, WidgetLogic.queueRows(0));
+    }
+
+    private static List<AutoLogic.Row> queue(String... ids) {
+        List<AutoLogic.Row> rows = new ArrayList<>();
+        for (String id : ids) {
+            rows.add(new AutoLogic.Row(id, "Song " + id, "Artist", true));
+        }
+        return rows;
+    }
+
+    private static String ids(List<AutoLogic.Row> rows) {
+        StringBuilder all = new StringBuilder();
+        for (AutoLogic.Row row : rows) {
+            all.append(row.id).append(' ');
+        }
+        return all.toString().trim();
+    }
+
+    private static void up_next_is_what_follows_the_song_that_plays() {
+        // The app's list starts with the song that plays (src/auto.rs).
+        List<AutoLogic.Row> rows = queue("queue/4/a", "queue/5/b", "queue/6/c", "queue/7/d", "queue/8/e");
+        same("three of them", "queue/5/b queue/6/c queue/7/d", ids(WidgetLogic.upNext(rows, 4, 3)));
+        same("room for more than there are", "queue/5/b queue/6/c queue/7/d queue/8/e", ids(WidgetLogic.upNext(rows, 4, 6)));
+        same("no room", "", ids(WidgetLogic.upNext(rows, 4, 0)));
+    }
+
+    private static void up_next_never_offers_the_song_that_plays_or_one_before_it() {
+        List<AutoLogic.Row> rows = queue("queue/4/a", "queue/5/b", "queue/6/c");
+        // The player moved on before the list was read again.
+        same("a list a song behind", "queue/6/c", ids(WidgetLogic.upNext(rows, 5, 3)));
+        same("the place isn't known: the first row is the song", "queue/5/b queue/6/c", ids(WidgetLogic.upNext(rows, -1, 3)));
+        same("the last song", "", ids(WidgetLogic.upNext(queue("queue/9/z"), 9, 3)));
+        same("no list", "", ids(WidgetLogic.upNext(queue(), 2, 3)));
+    }
+
+    private static void up_next_has_only_rows_of_the_queue() {
+        same("a row of another list", "queue/3/b", ids(WidgetLogic.upNext(queue("queue/2/a", "download/x", "queue/3/b"), 2, 3)));
+    }
+
+    private static void a_queue_row_is_told_to_the_player_and_is_not_there_without_one() {
+        same("a song showing", COMMAND, WidgetLogic.tap(ROW, true));
+        same("no song", HIDDEN, WidgetLogic.tap(ROW, false));
+        same("left behind by a dead app", OPEN, WidgetLogic.coldTap(ROW));
     }
 
     private static void same(String what, Object expected, Object actual) {
