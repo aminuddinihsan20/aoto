@@ -15,6 +15,7 @@ use super::{Action, App, Dialog, HomeState, LibTab, MixFrom, Page, PlayingAs, Re
 
 impl App {
     pub(super) fn pump(&mut self, now: f64) {
+        self.tick_sleep();
         self.media_notification();
         self.apply_storage();
         let cover = self.media_cover.lock().unwrap().take();
@@ -33,17 +34,10 @@ impl App {
         while let Ok(ev) = self.ch.audio_rx.try_recv() {
             match ev {
                 AudioEvent::Finished { generation } if generation == self.generation && self.jam.follows() => {}
-                AudioEvent::Finished { generation } if generation == self.generation => {
-                    if self.queue.repeat == Repeat::One {
-                        self.play_current();
-                    } else {
-                        // The sleeve was this song's: put it down rather than keep its
-                        // decoder, frame and texture for the rest of the session.
-                        self.deload_motion();
-                        self.next();
-                    }
-                }
+                AudioEvent::Finished { generation } if generation == self.generation => self.song_finished(),
                 AudioEvent::Finished { .. } => {}
+                // A song the sleep timer stops after plays out on its own: nothing blends into it.
+                AudioEvent::Ending { generation } if generation == self.generation && self.sleep_stops_after_song() => {}
                 // Crossfade into the next song; repeat-one and the end of the queue wait for the end.
                 AudioEvent::Ending { generation } if generation == self.generation && !self.jam.follows() && self.queue.repeat != Repeat::One => {
                     // Automix: the next song eases in under this one, which keeps the
@@ -382,8 +376,9 @@ impl App {
             Resp::Radio { seed, tracks } => {
                 self.radio_pending = false;
                 let was_at_end = self.queue.add_radio(&seed, tracks);
-                if was_at_end && self.queue.index.is_some() && !self.buffering && !self.playing() {
-                    // The track ended while radio was loading: continue now.
+                if was_at_end && self.queue.index.is_some() && !self.buffering && !self.playing() && self.resume_at.is_none() {
+                    // The track ended while radio was loading: continue now. (Not a song
+                    // that waits for Play: restored, or left there by the sleep timer.)
                     self.next();
                 } else if !self.buffering {
                     self.prefetch_next();

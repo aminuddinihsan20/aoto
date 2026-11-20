@@ -25,6 +25,7 @@ mod queue;
 mod responses;
 mod sheet;
 mod shell;
+mod sleep;
 mod storage;
 #[cfg(target_os = "android")]
 mod shared;
@@ -397,6 +398,9 @@ pub struct App {
     output_devices: Vec<crate::audio::OutputDevice>,
     radio_pending: bool,
     seek_drag: Option<f32>,
+    /// The sleep timer, and its sheet over Now Playing. Not kept across launches.
+    sleep: crate::sleep::Timer,
+    sleep_sheet: sleep::Pick,
 
     // visuals
     art_key: Option<String>,
@@ -787,6 +791,8 @@ impl App {
             media_cover: Default::default(),
             radio_pending: false,
             seek_drag: None,
+            sleep: Default::default(),
+            sleep_sheet: Default::default(),
             art_key: None,
             apple_artists: Default::default(),
             apple_covers: Default::default(),
@@ -866,6 +872,8 @@ impl App {
             smoke: None,
         };
         app.request_liked(false);
+        // Before anything plays: an end-of-queue timer keeps radio out from the first song.
+        sleep::dev_hooks(&mut app);
         // Dev hooks: YTM_SMOKE="query" searches and plays the first song ("id:<videoId>[,<videoId>…]"
         // plays that video); YTM_SEARCH
         // only searches; YTM_PAGE opens a page; YTM_NOWPLAYING opens the overlay.
@@ -1323,6 +1331,9 @@ impl eframe::App for App {
         self.sync_lastfm();
         self.sync_server_queue(ctx, now);
         self.tick_updates(ctx, now);
+        if let Some(wait) = self.sleep_wake() {
+            ctx.request_repaint_after(wait);
+        }
         let np = widgets::NowPlaying {
             song: self.current_id().map(str::to_owned),
             source: self.queue_source.clone(),
@@ -1502,9 +1513,12 @@ impl eframe::App for App {
                     });
                 });
         }
+        // The sleep timer's sheet goes with Now Playing.
+        self.sleep_sheet.open &= self.np_open;
         if np > 0.001 {
             let pages = theme::set_mode(&ctx, false);
             nowplaying::overlay(self, &ctx, now);
+            sleep::sheet(self, &ctx);
             theme::set_mode(&ctx, pages);
         }
         self.draw_dialog(&ctx);

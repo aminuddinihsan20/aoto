@@ -32,6 +32,7 @@ pub mod platform;
 mod opus;
 mod preset;
 mod shader;
+mod sleep;
 mod spatial;
 mod sponsorblock;
 mod stream;

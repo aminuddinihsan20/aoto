@@ -302,6 +302,10 @@ fn body(app: &mut App, ui: &mut Ui, now: f64) {
     if r.clicked() {
         app.np_tab = if on { NpTab::Art } else { NpTab::UpNext };
     }
+    // The sleep timer, on the same line at the other end (its sheet is the phone's).
+    if crate::platform::phone() {
+        super::sleep::chip(app, ui, pos2(area.left(), area.bottom() - 20.0));
+    }
 }
 
 /// Size of the artwork laid out in `col`: what is left once the sleeve's information,
@@ -445,7 +449,8 @@ fn cover_column(app: &mut App, ui: &mut Ui, col: Rect, track: &crate::model::Tra
                 .map(|d| d.as_secs_f32())
                 .or(track.duration.map(|d| d as f32))
                 .unwrap_or(0.0);
-            let next = app.queue.upcoming().is_some() || app.autoplay;
+            // Nothing blends into a song the sleep timer stops after.
+            let next = (app.queue.upcoming().is_some() || app.autoplay) && !app.sleep_stops_after_song();
             let mix = match (total > 0.0, next, app.queue.repeat) {
                 (true, true, repeat) if repeat != Repeat::One => {
                     status.mix_secs(status.duration().or_else(|| track.duration.map(|s| std::time::Duration::from_secs(s as u64)))).min(total * 0.5)

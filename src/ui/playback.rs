@@ -11,7 +11,7 @@ use crate::lyrics::Lyrics;
 use crate::model::Track;
 
 use super::queue::QueueFill;
-use super::{App, MixFrom, PlayingAs, Repeat, Session, lyric_prefs};
+use super::{App, MixFrom, PlayingAs, Session, lyric_prefs};
 
 /// Where in the blend the two songs trade places: the outgoing one holds its level for
 /// the first 30% (see `audio::mix_handoff`) and the curves are mirrors, so the next song
@@ -348,7 +348,8 @@ impl App {
     /// Keep the queue topped up so autoplay never stalls at the end; a playlist still
     /// coming in goes first.
     pub(super) fn top_up(&mut self) {
-        if self.autoplay && !self.radio_pending && !self.jam.follows() && self.queue.fill.is_none() && self.queue.at_end()
+        // A sleep timer waiting for the end of the queue lets it run out.
+        if self.autoplay && !self.radio_pending && !self.jam.follows() && !self.sleep.holds_queue() && self.queue.fill.is_none() && self.queue.at_end()
             && let Some(t) = self.current().cloned()
         {
             self.radio_pending = true;
@@ -400,11 +401,7 @@ impl App {
         self.segment_skipped = now;
         log::info!("sponsorblock: skipping {:.1}–{:.1} s", seg.start, seg.end);
         if seg.end >= duration - 1.0 {
-            if self.queue.repeat == Repeat::One {
-                self.play_current();
-            } else {
-                self.next();
-            }
+            self.song_finished();
         } else {
             self.audio.send(AudioCmd::Seek(Duration::from_secs_f64(seg.end)));
         }

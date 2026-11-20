@@ -77,6 +77,8 @@ pub struct AudioStatus {
     pub normalize: AtomicBool,
     /// The volume slider follows loudness (cubic) rather than amplitude.
     log_volume: AtomicBool,
+    /// How much of the volume the sleep timer's fade takes off (f32 bits; 0 = none).
+    fade_cut: AtomicU32,
     /// Smoothed output loudness 0..1 (f32 bits), for audio-reactive visuals.
     level: AtomicU32,
     /// How far the output device runs behind the position (its buffer), in ms.
@@ -624,6 +626,15 @@ impl AudioHandle {
         self.status.volume.store(v.to_bits(), Ordering::Relaxed);
         self.send(AudioCmd::Volume(v));
     }
+
+    /// The sleep timer's fade: play at `level` (0..1) of the listener's volume, which
+    /// stays where they set it.
+    pub fn set_fade(&self, level: f32) {
+        let cut = 1.0 - level.clamp(0.0, 1.0);
+        if self.status.fade_cut.swap(cut.to_bits(), Ordering::Relaxed) != cut.to_bits() {
+            self.send(AudioCmd::Volume(self.volume()));
+        }
+    }
 }
 
 /// Volume normalization the way YouTube Music does it: tracks mastered louder than
@@ -736,9 +747,11 @@ fn mix_ms(status: &AudioStatus, length: Option<Duration>) -> u32 {
 
 /// Gain for a volume slider position. Ears hear amplitude roughly logarithmically,
 /// so on a linear slider nearly all the change is in its bottom few pixels; the cubic
-/// curve (PulseAudio's) spreads it out: half way is -18 dB.
+/// curve (PulseAudio's) spreads it out: half way is -18 dB. The sleep timer's fade
+/// comes off the result.
 fn slider_gain(status: &AudioStatus, v: f32) -> f32 {
-    if status.log_volume.load(Ordering::Relaxed) { v.powi(3) } else { v }
+    let gain = if status.log_volume.load(Ordering::Relaxed) { v.powi(3) } else { v };
+    gain * (1.0 - f32::from_bits(status.fade_cut.load(Ordering::Relaxed)))
 }
 
 fn norm_gain(status: &AudioStatus, shared: Option<&Shared>) -> f32 {
@@ -1632,6 +1645,27 @@ mod tests {
         assert_eq!(norm_gain(&status, None), 1.0);
         status.normalize.store(false, Ordering::Relaxed);
         assert_eq!(norm_gain(&status, Some(&loud)), 1.0);
+    }
+
+    #[test]
+    fn a_fade_turns_the_music_down_without_moving_the_listeners_volume() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let audio = AudioHandle { tx, status: Arc::new(AudioStatus::default()) };
+        assert_eq!(slider_gain(&audio.status, 1.0), 1.0, "nothing is faded until asked");
+        audio.set_volume(0.8);
+        audio.set_fade(0.25);
+        assert_eq!(audio.volume(), 0.8);
+        assert!((slider_gain(&audio.status, audio.volume()) - 0.2).abs() < 1e-6);
+        // The player is told to play at its volume again, which now includes the fade.
+        assert!(matches!(rx.try_iter().last(), Some(AudioCmd::Volume(v)) if v == 0.8));
+        audio.set_fade(0.0);
+        assert_eq!(slider_gain(&audio.status, audio.volume()), 0.0);
+        audio.set_fade(1.0);
+        assert!((slider_gain(&audio.status, audio.volume()) - 0.8).abs() < 1e-6);
+        // The same level again is not worth a message.
+        rx.try_iter().count();
+        audio.set_fade(1.0);
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
