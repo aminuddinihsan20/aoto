@@ -3,8 +3,8 @@ name = "aoto"
 version = "1.0.0"
 edition = "2024"
 license = "GPL-3.0-only"
-repository = "https://github.com/aminuddinihsan20/Aoto-PC-Official"
-description = "Native Aoto client"
+repository = "https://github.com/aminuddinihsan20/aoto"
+description = "Aoto: a YouTube Music player for Android"
 
 # The Android activity's crate (a cdylib around this one) shares the lock file and target dir.
 [workspace]

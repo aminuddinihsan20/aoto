@@ -23,14 +23,13 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// Whether this copy has a repository to look for newer releases in. Aoto has none yet:
-/// when it does, set `repo!` below and this to true.
-pub const CONFIGURED: bool = false;
+/// Whether this copy has a repository to look for newer releases in.
+pub const CONFIGURED: bool = true;
 
 /// The GitHub repository whose releases this copy updates from.
 macro_rules! repo {
     () => {
-        "aminuddinihsan20/BitChord-PC-Official"
+        "aminuddinihsan20/aoto"
     };
 }
 
@@ -561,7 +560,7 @@ mod tests {
 
     #[test]
     fn release_feed_is_this_repo() {
-        assert_eq!(LATEST, "https://api.github.com/repos/aminuddinihsan20/BitChord-PC-Official/releases/latest");
+        assert_eq!(LATEST, "https://api.github.com/repos/aminuddinihsan20/aoto/releases/latest");
     }
 
     fn release(tag: &str, assets: &[&str]) -> serde_json::Value {

@@ -1167,12 +1167,14 @@ fn play(rx: Receiver<AudioCmd>, tx: Sender<AudioCmd>, status: Arc<AudioStatus>, 
             && let Some(next) = standby.take()
         {
             log::debug!("audio: generation {current} ran into the next song without a gap");
-            let _ = events.send(AudioEvent::Finished { generation: current });
+            let finished = current;
             carried = Some((next, Instant::now()));
             current = 0;
             status.playing_gen.store(0, Ordering::Relaxed);
             status.standby_for.store(0, Ordering::Relaxed);
             shared = None;
+            // Told last: whoever hears of the end finds the status already saying so.
+            let _ = events.send(AudioEvent::Finished { generation: finished });
             wake();
         }
         match received {

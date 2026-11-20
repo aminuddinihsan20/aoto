@@ -65,7 +65,7 @@ The APK ends up in `android/app/build/outputs/apk/debug/`. Read `android/build.s
 
 ## Thanks
 
-Aoto is built on **BitChord** ([kushagrasinghx/BitChord](https://github.com/kushagrasinghx/BitChord)) and on its Rust rewrite, **BitChord PC Official** ([aminuddinihsan20/BitChord-PC-Official](https://github.com/aminuddinihsan20/BitChord-PC-Official)). The player, the sources it plays from, the lyrics and much of the interface come from their work. Thank you.
+Aoto is built on **BitChord** ([kushagrasinghx/BitChord](https://github.com/kushagrasinghx/BitChord)) and on its Rust rewrite, **BitChord PC Official** ([jackychan4891/BitChord-PC-Official](https://github.com/jackychan4891/BitChord-PC-Official)) and its contributors. The player, the sources it plays from, the lyrics and much of the interface come from their work. Thank you.
 
 ## Notes
 
