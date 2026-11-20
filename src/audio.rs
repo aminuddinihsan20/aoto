@@ -89,6 +89,8 @@ pub struct AudioStatus {
     automix: AtomicBool,
     /// Spatial audio for headphones (see `crate::spatial`).
     spatial: AtomicBool,
+    /// The equalizer's settings (see `crate::eq`), read by every song that plays.
+    eq: crate::eq::Shared,
     /// Tempo estimate of the playing song in BPM (f32 bits); 0 until one is heard.
     bpm: AtomicU32,
     mix_generation: AtomicU64,
@@ -336,9 +338,11 @@ impl MixFx {
     }
 }
 
-/// Pass-through source that tracks loudness (RMS over ~23 ms windows, smoothed) and
-/// applies crossfade ramps. `fade_out` is set by the audio thread to the fade-out
-/// length in ms (0 = keep playing); a new value restarts it from the current gain.
+/// Pass-through source that tracks loudness (RMS over ~23 ms windows, smoothed),
+/// equalizes the song as it comes off the decoder (at its own rate, so the song fading
+/// out and the one coming in each have theirs) and applies crossfade ramps. `fade_out`
+/// is set by the audio thread to the fade-out length in ms (0 = keep playing); a new
+/// value restarts it from the current gain.
 struct Meter<S> {
     inner: S,
     status: Arc<AudioStatus>,
@@ -354,10 +358,14 @@ struct Meter<S> {
     analysis: Arc<OnceLock<Option<f32>>>,
     analysis_acc: f32,
     fx: Option<MixFx>,
+    eq: crate::eq::Equalizer,
     spatial: crate::spatial::Spatial,
     /// The right ear's sample of a pair already worked out, for the next call.
     spatial_right: Option<f32>,
 }
+
+/// How many samples go by between looks at the equalizer's settings.
+const EQ_POLL: u32 = 256;
 
 /// How many windows Automix reads for a beat before it settles for the plain length.
 const TEMPO_PASSES: u8 = 4;
@@ -455,7 +463,8 @@ impl<S: rodio::Source> Meter<S> {
             fx.begin(analysis.get().copied().flatten().unwrap_or(0.0));
         }
         let spatial = crate::spatial::Spatial::new(inner.sample_rate().get());
-        let mut m = Self { inner, status, fade_out, seen_out: 0, ramp: None, mix, acc: 0.0, n: 0, smooth: 0.0, tempo, analysis, analysis_acc: 0.0, fx, spatial, spatial_right: None };
+        let eq = crate::eq::Equalizer::new(status.eq.get(), inner.sample_rate().get(), inner.channels().get());
+        let mut m = Self { inner, status, fade_out, seen_out: 0, ramp: None, mix, acc: 0.0, n: 0, smooth: 0.0, tempo, analysis, analysis_acc: 0.0, fx, eq, spatial, spatial_right: None };
         if fade_in_ms > 0 {
             m.ramp = Some(if mix { Ramp::MixIn { at: 0, len: m.samples(fade_in_ms) } } else { Ramp::In { at: 0, len: m.samples(fade_in_ms) } });
         }
@@ -465,6 +474,12 @@ impl<S: rodio::Source> Meter<S> {
     fn samples(&self, ms: u32) -> u32 {
         let per_sec = self.inner.sample_rate().get() as u64 * self.inner.channels().get() as u64;
         (per_sec * ms as u64 / 1000).max(1) as u32
+    }
+
+    /// The decoder's next sample, equalized.
+    fn pull(&mut self) -> Option<f32> {
+        let s = self.inner.next()?;
+        Some(self.eq.process(s))
     }
 }
 
@@ -487,13 +502,17 @@ impl<S: rodio::Source> Iterator for Meter<S> {
         {
             return None;
         }
+        // The equalizer hears of a change a few milliseconds later, and glides to it.
+        if self.n.is_multiple_of(EQ_POLL) {
+            self.eq.set(self.status.eq.get());
+        }
         let mut s = match self.spatial_right.take() {
             Some(right) => right,
             None => {
-                let left = self.inner.next()?;
+                let left = self.pull()?;
                 // Stereo with spatial audio on: the pair is worked out together.
                 if self.status.spatial.load(Ordering::Relaxed) && self.inner.channels().get() == 2 {
-                    match self.inner.next() {
+                    match self.pull() {
                         Some(right) => {
                             let (l, r) = self.spatial.frame(left, right);
                             self.spatial_right = Some(r);
@@ -527,7 +546,9 @@ impl<S: rodio::Source> Iterator for Meter<S> {
         self.acc += s * s;
         self.n += 1;
         if self.n == 2048 {
-            let rms = (self.acc / 2048.0).sqrt();
+            // As loud as the song is before the equalizer's headroom comes off it: the
+            // visuals don't dim because a boost needed room.
+            let rms = (self.acc / 2048.0).sqrt() / self.eq.headroom_gain();
             // Fast attack, slow release, like a VU meter.
             let k = if rms > self.smooth { 0.6 } else { 0.08 };
             self.smooth += (rms - self.smooth) * k;
@@ -543,6 +564,8 @@ impl<S: rodio::Source> Iterator for Meter<S> {
                     }
                 }
             }
+            // A decoder can go on at another rate or channel count part way through a file.
+            self.eq.set_format(self.inner.sample_rate().get(), self.inner.channels().get());
             self.acc = 0.0;
             self.analysis_acc = 0.0;
             self.n = 0;
@@ -568,6 +591,7 @@ impl<S: rodio::Source> rodio::Source for Meter<S> {
         self.inner.try_seek(pos)?;
         self.spatial_right = None;
         self.spatial.reset();
+        self.eq.reset();
         self.ramp = None;
         self.acc = 0.0;
         self.analysis_acc = 0.0;
@@ -620,6 +644,11 @@ impl AudioHandle {
     /// Spatial audio for headphones, from the next sound on.
     pub fn set_spatial(&self, on: bool) {
         self.status.spatial.store(on, Ordering::Relaxed);
+    }
+
+    /// The equalizer, for the songs playing and every one after: they glide to it.
+    pub fn set_equalizer(&self, settings: &crate::eq::Settings) {
+        self.status.eq.set(settings);
     }
 
     pub fn set_volume(&self, v: f32) {
@@ -1389,6 +1418,104 @@ mod tests {
         let mono = rodio::buffer::SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(48_000).unwrap(), vec![0.5; 100]);
         let mut meter = Meter::new(mono, status, 0, Arc::new(AtomicU32::new(0)), false, Default::default());
         assert!(std::iter::from_fn(|| meter.next()).all(|s| s == 0.5));
+    }
+
+    /// A mono tone of `hz` at `rate`, a second long.
+    fn mono_tone(hz: f32, rate: u32) -> Vec<f32> {
+        (0..rate).map(|i| (i as f32 * hz * std::f32::consts::TAU / rate as f32).sin() * 0.2).collect()
+    }
+
+    fn metered(samples: Vec<f32>, rate: u32, status: &Arc<AudioStatus>) -> Meter<rodio::buffer::SamplesBuffer> {
+        use std::num::NonZero;
+        let source = rodio::buffer::SamplesBuffer::new(NonZero::new(1).unwrap(), NonZero::new(rate).unwrap(), samples);
+        Meter::new(source, status.clone(), 0, Arc::new(AtomicU32::new(0)), false, Default::default())
+    }
+
+    /// How much louder the second half of `out` is than that of `input`, in dB.
+    fn louder_db(out: &[f32], input: &[f32]) -> f32 {
+        let rms = |x: &[f32]| (x[x.len() / 2..].iter().map(|v| v * v).sum::<f32>() / (x.len() / 2) as f32).sqrt();
+        20.0 * (rms(out) / rms(input)).log10()
+    }
+
+    /// The 1 kHz band of the equalizer, 12 dB down.
+    fn one_khz_cut() -> crate::eq::Settings {
+        crate::eq::Settings { enabled: true, bands: [0.0, 0.0, 0.0, -12.0, 0.0, 0.0, 0.0], bass: 0.0 }
+    }
+
+    #[test]
+    fn with_the_equalizer_off_a_song_comes_out_sample_for_sample() {
+        let status = Arc::new(AudioStatus::default());
+        let input = mono_tone(1000.0, 44_100);
+        let out: Vec<f32> = metered(input.clone(), 44_100, &status).collect();
+        assert!(out == input);
+        // Set but switched off is the same.
+        status.eq.set(&crate::eq::Settings { enabled: false, ..one_khz_cut() });
+        let out: Vec<f32> = metered(input.clone(), 44_100, &status).collect();
+        assert!(out == input);
+    }
+
+    #[test]
+    fn the_equalizer_shapes_a_song_at_whatever_rate_it_plays() {
+        let status = Arc::new(AudioStatus::default());
+        status.eq.set(&one_khz_cut());
+        // YouTube's 44.1 and 48 kHz, a hi-res source's 96 and 192 kHz.
+        for rate in [44_100, 48_000, 96_000, 192_000] {
+            let input = mono_tone(1000.0, rate);
+            let out: Vec<f32> = metered(input.clone(), rate, &status).collect();
+            assert_eq!(out.len(), input.len(), "as many samples out as in");
+            let db = louder_db(&out, &input);
+            assert!((db + 12.0).abs() < 0.1, "1 kHz came out at {db} dB at {rate} Hz");
+        }
+    }
+
+    #[test]
+    fn both_songs_of_a_crossfade_are_equalized() {
+        let status = Arc::new(AudioStatus::default());
+        status.eq.set(&one_khz_cut());
+        let fade = Arc::new(AtomicU32::new(0));
+        let input = mono_tone(1000.0, 48_000);
+        let source = |samples: Vec<f32>| rodio::buffer::SamplesBuffer::new(std::num::NonZero::new(1).unwrap(), std::num::NonZero::new(48_000).unwrap(), samples);
+        // The song going out, a long fade ahead of it, and the one coming in at another rate.
+        let mut outgoing = Meter::new(source(input.clone()), status.clone(), 0, fade.clone(), false, Default::default());
+        let incoming = metered(mono_tone(1000.0, 44_100), 44_100, &status);
+        let before: Vec<f32> = outgoing.by_ref().take(24_000).collect();
+        assert!((louder_db(&before, &input[..24_000]) + 12.0).abs() < 0.1);
+        fade.store(60_000, Ordering::Relaxed);
+        let fading: Vec<f32> = outgoing.by_ref().take(2_000).collect();
+        // Barely into the fade, it is still the equalized song: a quarter of the tone's level.
+        let peak = fading.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((0.045..=0.051).contains(&peak), "the outgoing song peaks at {peak}");
+        let out: Vec<f32> = incoming.collect();
+        assert!((louder_db(&out, &mono_tone(1000.0, 44_100)) + 12.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn an_equalizer_change_reaches_the_song_already_playing_without_a_step() {
+        let status = Arc::new(AudioStatus::default());
+        let input = mono_tone(1000.0, 48_000);
+        let mut meter = metered(input.clone(), 48_000, &status);
+        let before: Vec<f32> = meter.by_ref().take(12_000).collect();
+        assert!(before == input[..12_000]);
+        status.eq.set(&one_khz_cut());
+        let after: Vec<f32> = meter.collect();
+        assert!((louder_db(&after, &input[12_000..]) + 12.0).abs() < 0.1);
+        let steepest = |x: &[f32]| x.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max);
+        assert!(steepest(&after) <= steepest(&before) * 1.01, "no sample jumps further than the tone itself does");
+    }
+
+    #[test]
+    fn the_level_the_visuals_follow_does_not_sink_with_the_equalizers_headroom() {
+        let level = |settings: crate::eq::Settings| {
+            let status = Arc::new(AudioStatus::default());
+            status.eq.set(&settings);
+            metered(mono_tone(1000.0, 48_000), 48_000, &status).count();
+            status.level()
+        };
+        let plain = level(crate::eq::Settings::default());
+        // A 12 dB boost far below the tone turns the whole song down by 12 dB to make room.
+        let boosted = level(crate::eq::Settings { enabled: true, bands: [12.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], bass: 0.0 });
+        assert!(plain > 0.1);
+        assert!((boosted / plain - 1.0).abs() < 0.05, "{boosted} with the boost, {plain} without");
     }
 
     #[test]

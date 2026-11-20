@@ -17,6 +17,7 @@ mod discord;
 mod dash;
 mod download_queue;
 mod downloads;
+mod eq;
 mod hires;
 mod images;
 mod jam;
