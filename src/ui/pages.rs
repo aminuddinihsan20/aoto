@@ -3272,8 +3272,10 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         divider(ui);
         settings_row(app, ui, Row::Normalize);
         divider(ui);
-        settings_row(app, ui, Row::LogVolume);
-        divider(ui);
+        if Row::LogVolume.shown(crate::platform::phone()) {
+            settings_row(app, ui, Row::LogVolume);
+            divider(ui);
+        }
         settings_row(app, ui, Row::PlaySongs);
         divider(ui);
         // On a phone the system routes the sound: speaker, headphones or Bluetooth.

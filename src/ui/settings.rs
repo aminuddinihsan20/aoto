@@ -76,9 +76,10 @@ impl Category {
         }
     }
 
-    /// Its rows, in the order its page shows them.
+    /// Its rows, in the order its page shows them: the phone's, so without the ones a
+    /// phone has no use for.
     pub fn rows(self) -> impl Iterator<Item = Row> {
-        Row::ALL.into_iter().filter(move |r| r.place().0 == self)
+        Row::ALL.into_iter().filter(move |r| r.place().0 == self && r.shown(true))
     }
 
     /// The page a tap on its row opens: its own, but for the stats, which have theirs.
@@ -90,7 +91,7 @@ impl Category {
     }
 }
 
-/// Every setting the phone has.
+/// Every setting, the desktop's and the phone's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Row {
     Account,
@@ -180,6 +181,13 @@ impl Row {
         Row::Version,
         Row::Updates,
     ];
+
+    /// Is the row shown on a `phone`? The logarithmic volume is not: a phone plays at full
+    /// and leaves the loudness to the system's volume (`platform::app_volume`), so the
+    /// switch would change nothing there.
+    pub fn shown(self, phone: bool) -> bool {
+        !(phone && self == Row::LogVolume)
+    }
 
     /// Where the row lives: its category, and the group of that category's page it is
     /// in ("" on a page that is one group).
@@ -375,7 +383,10 @@ mod tests {
                 assert!(seen.insert(row), "{row:?} is in two categories");
             }
         }
-        assert_eq!(seen, listed, "every row is on some category's page");
+        let left_off: HashSet<Row> = Row::ALL.into_iter().filter(|r| !r.shown(true)).collect();
+        assert_eq!(left_off, HashSet::from([Row::LogVolume]), "only the setting a phone has no use for is left off");
+        assert_eq!(seen.union(&left_off).copied().collect::<HashSet<_>>(), listed, "every other row is on some category's page");
+        assert!(seen.is_disjoint(&left_off));
     }
 
     #[test]
@@ -384,7 +395,7 @@ mod tests {
         let rows = |c: Category| c.rows().collect::<Vec<_>>();
         assert_eq!(rows(C::Account), [Row::Account, Row::Channel, Row::ListenTogether, Row::ClearHistory]);
         assert_eq!(rows(C::Playback), [Row::PlaybackSpeed, Row::KeepPitch, Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic]);
-        assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::LogVolume, Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
+        assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
         assert_eq!(rows(C::Downloads), [Row::DownloadFolder]);
         assert_eq!(rows(C::Lyrics), [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim, Row::LyricsSources]);
         assert_eq!(rows(C::Appearance), [Row::Mode, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork, Row::StatsForNerds, Row::SignatureService]);
@@ -392,6 +403,16 @@ mod tests {
         assert_eq!(rows(C::Connections), [Row::LastFm]);
         assert_eq!(rows(C::Transfer), [Row::TransferFromSpotify, Row::SpotifyAccount]);
         assert_eq!(rows(C::About), [Row::Version, Row::Updates]);
+    }
+
+    #[test]
+    fn the_logarithmic_volume_is_a_desktop_setting() {
+        assert!(Row::LogVolume.shown(false), "the desktop keeps it");
+        assert!(!Row::LogVolume.shown(true), "a phone plays at full, so it would change nothing");
+        for row in Row::ALL.into_iter().filter(|r| *r != Row::LogVolume) {
+            assert!(row.shown(true) && row.shown(false), "{row:?} stays on both");
+        }
+        assert!(Row::LogVolume.place().0 == Category::Sound && !Category::Sound.rows().any(|r| r == Row::LogVolume), "and it is on no phone page");
     }
 
     #[test]
@@ -405,7 +426,7 @@ mod tests {
 
     #[test]
     fn a_categorys_page_keeps_its_rows_in_their_groups() {
-        assert_eq!(groups(Category::Sound), [("Sound", vec![Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::LogVolume]), ("Quality", vec![Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs])]);
+        assert_eq!(groups(Category::Sound), [("Sound", vec![Row::Equalizer, Row::SpatialAudio, Row::Normalize]), ("Quality", vec![Row::HiRes, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs])]);
         assert_eq!(groups(Category::Playback), [("Playback speed", vec![Row::PlaybackSpeed, Row::KeepPitch]), ("Between songs", vec![Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic])], "the speed and its pitch switch are a card of their own");
         assert_eq!(groups(Category::Downloads).len(), 1, "a page of one group");
         assert_eq!(groups(Category::Appearance).iter().map(|g| g.0).collect::<Vec<_>>(), ["Theme", "Motion", "More", "Artist pages"]);
