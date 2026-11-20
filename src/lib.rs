@@ -35,6 +35,7 @@ mod opus;
 mod preset;
 mod shader;
 mod sleep;
+mod stats;
 mod spatial;
 mod sponsorblock;
 mod stream;
