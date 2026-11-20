@@ -484,6 +484,9 @@ pub struct StreamReader {
     id: u64,
     /// The block this reader last read.
     block: usize,
+    /// Opened ahead of the song's own play (see `decoder_ahead`): dropping it leaves
+    /// the download running for that play.
+    ahead: bool,
 }
 
 impl StreamReader {
@@ -497,7 +500,13 @@ impl StreamReader {
             inner.wants.push((id, 0));
         }
         shared.changed.notify_waiters();
-        Self { shared, pos: 0, id, block: 0 }
+        Self { shared, pos: 0, id, block: 0, ahead: false }
+    }
+
+    fn ahead(shared: Arc<Shared>) -> Self {
+        let mut reader = Self::new(shared);
+        reader.ahead = true;
+        reader
     }
 }
 
@@ -506,7 +515,7 @@ impl Drop for StreamReader {
         let mut inner = self.shared.inner.lock().unwrap();
         inner.readers -= 1;
         inner.wants.retain(|&(id, _)| id != self.id);
-        if inner.readers == 0 {
+        if inner.readers == 0 && !self.ahead {
             // Stops the workers once their current request finishes.
             inner.cancelled = true;
         }
@@ -570,16 +579,27 @@ impl Seek for StreamReader {
 /// download). Opus ones are always seekable: WebM's index is at the start. Raw PCM
 /// (decoded in-process, e.g. Dolby Atmos) plays straight from the buffer.
 pub fn decoder(shared: Arc<Shared>, seekable: bool) -> anyhow::Result<TrackDecoder> {
+    open(shared, seekable, StreamReader::new)
+}
+
+/// Open a decoder over a song that isn't playing yet, from its start, for it to follow
+/// the playing one without a gap. Unlike `decoder`'s, dropping it unplayed leaves the
+/// download running: the song's own play still wants the buffer.
+pub fn decoder_ahead(shared: Arc<Shared>) -> anyhow::Result<TrackDecoder> {
+    open(shared, false, StreamReader::ahead)
+}
+
+fn open(shared: Arc<Shared>, seekable: bool, reader: fn(Arc<Shared>) -> StreamReader) -> anyhow::Result<TrackDecoder> {
     let size = shared.total;
     match shared.format {
         Format::Opus => {
             let duration_ms = shared.duration_ms;
-            Ok(TrackDecoder::Opus(Box::new(crate::opus::OpusSource::new(StreamReader::new(shared), size, duration_ms)?)))
+            Ok(TrackDecoder::Opus(Box::new(crate::opus::OpusSource::new(reader(shared), size, duration_ms)?)))
         }
-        Format::Pcm { rate, channels } => Ok(TrackDecoder::Pcm(PcmSource::new(shared, rate, channels))),
+        Format::Pcm { rate, channels } => Ok(TrackDecoder::Pcm(PcmSource::new(reader(shared), rate, channels))),
         Format::Aac => {
             let builder = rodio::Decoder::builder()
-                .with_data(StreamReader::new(shared.clone()))
+                .with_data(reader(shared.clone()))
                 .with_byte_len(size)
                 .with_seekable(seekable)
                 .with_mime_type("audio/mp4")
@@ -590,7 +610,7 @@ pub fn decoder(shared: Arc<Shared>, seekable: bool) -> anyhow::Result<TrackDecod
             let hint = *hint;
             let mime = mime.clone();
             let builder = rodio::Decoder::builder()
-                .with_data(StreamReader::new(shared))
+                .with_data(reader(shared))
                 .with_byte_len(size)
                 .with_seekable(seekable)
                 .with_hint(hint);
@@ -719,9 +739,9 @@ pub struct PcmSource {
 }
 
 impl PcmSource {
-    fn new(shared: Arc<Shared>, rate: u32, channels: u16) -> Self {
-        let duration_ms = shared.duration_ms;
-        Self { reader: StreamReader::new(shared), rate, channels, duration: (duration_ms > 0).then(|| Duration::from_millis(duration_ms)) }
+    fn new(reader: StreamReader, rate: u32, channels: u16) -> Self {
+        let duration_ms = reader.shared.duration_ms;
+        Self { reader, rate, channels, duration: (duration_ms > 0).then(|| Duration::from_millis(duration_ms)) }
     }
 }
 

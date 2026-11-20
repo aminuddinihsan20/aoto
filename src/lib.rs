@@ -6,6 +6,7 @@ mod appicon;
 mod apple;
 mod artist_signature;
 mod fullscreen;
+mod gapless;
 mod proxy;
 mod renderer;
 mod art;
