@@ -224,7 +224,8 @@ final class AudioOutput {
         for (ResolveInfo answer : answers) {
             ApplicationInfo owner = answer.activityInfo == null ? null : answer.activityInfo.applicationInfo;
             if (owner != null && (owner.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0) {
-                return intent;
+                // To that system app and no other that claims the same action.
+                return intent.setPackage(owner.packageName);
             }
         }
         return null;
