@@ -175,9 +175,10 @@ public class PlaybackService extends Service {
     /**
      * Started in a process without the app: by a button of a widget that still showed a
      * song from a run that was killed with no chance to say so. Music is played by the
-     * app, which only runs in its activity, so there is no player to tell: the widgets are
-     * set right, and the app is opened (to play, if the button was Play). Should Android
-     * not let it open from here, the widgets now say "Play something", which opens it.
+     * app, which only runs in its activity, so there is no player to tell: the app is
+     * opened (to play, if the button was Play) and the service goes again, which sets the
+     * widgets right (onDestroy). Should Android not let the app open from here, they now
+     * say "Play something", and that opens it.
      */
     private void leftBehind(String action) {
         int control = ACTION_TOGGLE.equals(action) ? WidgetLogic.TOGGLE
