@@ -132,7 +132,7 @@ impl Format {
 /// are set smaller rather than cut.
 pub fn text_sizes(format: Format) -> Vec<u32> {
     // For 1080 pixels on the short side; each step is about a ninth smaller.
-    const STEPS: [u32; 8] = [92, 82, 73, 65, 58, 52, 46, 41];
+    const STEPS: [u32; 8] = [96, 86, 76, 68, 60, 53, 47, 42];
     let (w, h) = format.size();
     STEPS.iter().map(|s| s * w.min(h) / 1080).collect()
 }
@@ -238,6 +238,7 @@ fn vivid(c: Color32) -> Color32 {
 }
 
 /// How much brighter the lighter of two colours is (WCAG's contrast ratio, 1 to 21).
+#[cfg(test)]
 fn contrast(a: Color32, b: Color32) -> f32 {
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)

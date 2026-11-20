@@ -17,6 +17,7 @@ mod karaoke;
 mod keys;
 mod lists;
 mod lyric_prefs;
+mod lyric_share;
 mod m3;
 mod mini;
 mod notes;
@@ -413,6 +414,8 @@ pub struct App {
     /// The sleep timer, and its sheet over Now Playing. Not kept across launches.
     sleep: crate::sleep::Timer,
     sleep_sheet: sleep::Pick,
+    /// Sharing lyrics as a picture: the screen over Now Playing's lyrics.
+    lyric_share: lyric_share::State,
     /// What was listened to on this device (`crate::stats`), and the page that shows it.
     listening: crate::stats::Log,
     stats: stats::View,
@@ -813,6 +816,7 @@ impl App {
             seek_drag: None,
             sleep: Default::default(),
             sleep_sheet: Default::default(),
+            lyric_share: Default::default(),
             listening,
             stats: Default::default(),
             art_key: None,
@@ -1460,6 +1464,8 @@ impl eframe::App for App {
                 // An open sheet is the first thing Back closes.
                 if sheet_open {
                     sheet::dismiss(&ctx);
+                } else if self.lyric_share.is_open() {
+                    self.lyric_share.back();
                 } else {
                     self.nav_back();
                 }
@@ -1550,6 +1556,7 @@ impl eframe::App for App {
             let pages = theme::set_mode(&ctx, false);
             nowplaying::overlay(self, &ctx, now);
             sleep::sheet(self, &ctx);
+            lyric_share::overlay(self, &ctx);
             theme::set_mode(&ctx, pages);
         }
         if phone {

@@ -833,6 +833,8 @@ pub struct Out {
     pub animating: bool,
     /// The reader scrolled away; a "resume" control can bring the view back.
     pub user_scrolling: bool,
+    /// A line (its place in the lyrics) was pressed and held, on a touch screen.
+    pub long_press: Option<usize>,
 }
 
 impl View {
@@ -1026,6 +1028,7 @@ impl View {
         let atlas = ctx.fonts(|fv| fv.font_image_size());
         let ppp = ctx.pixels_per_point();
         let mut seek = None;
+        let mut long_press = None;
         let active_line = active.last().copied();
         let first_active = active.first().copied().filter(|_| active_real);
         let mut glow_work: Vec<GlowJob> = Vec::new();
@@ -1215,6 +1218,10 @@ impl View {
                 if resp.clicked() && f.lyrics.sync != Sync::None {
                     seek = Some(f.lyrics.lines[li].start as f64 / 1000.0);
                 }
+                // Held, not tapped: egui gives a long touch no click, so it never seeks.
+                if resp.long_touched() {
+                    long_press = Some(li);
+                }
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
@@ -1227,7 +1234,7 @@ impl View {
         if f.playing {
             animating = true;
         }
-        Out { seek, animating, user_scrolling: user }
+        Out { seek, animating, user_scrolling: user, long_press }
     }
 
     fn relayout(&mut self, ui: &mut egui::Ui, cfg: &Cfg, f: &Frame, key: u64, rect: Rect) {
