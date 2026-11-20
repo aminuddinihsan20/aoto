@@ -151,11 +151,6 @@ pub fn set_volume(index: u32) {
     crate::platform::post("output-volume", &index.to_string());
 }
 
-/// The step nearest `fraction` (0..1) of the way along a slider with `max` steps.
-pub fn step_at(fraction: f32, max: u32) -> u32 {
-    (fraction.clamp(0.0, 1.0) * max as f32).round() as u32
-}
-
 /// How long the slider keeps to what the listener set while the phone hasn't followed.
 const HOLD_SECS: f64 = 1.0;
 
@@ -273,17 +268,6 @@ mod tests {
         assert_eq!(output().kind, Kind::Wired, "a broken report changes nothing");
         set_output_line(&line(&["0", "", "3", "15", "1"]));
         assert_eq!(output().kind, Kind::Phone);
-    }
-
-    #[test]
-    fn the_slider_lands_on_the_nearest_of_the_phones_steps() {
-        assert_eq!(step_at(0.0, 15), 0);
-        assert_eq!(step_at(1.0, 15), 15);
-        assert_eq!(step_at(0.5, 15), 8);
-        assert_eq!(step_at(0.49, 25), 12);
-        assert_eq!(step_at(-0.3, 15), 0);
-        assert_eq!(step_at(1.7, 15), 15);
-        assert_eq!(step_at(0.5, 0), 0, "a fixed volume has no steps");
     }
 
     #[test]

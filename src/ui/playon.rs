@@ -3,12 +3,12 @@
 //! output switcher and the phone's media volume. What it shows is `crate::playon`'s; the
 //! switching itself is Android's.
 
-use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Ui, pos2, vec2};
+use egui::{Color32, Pos2, Rect, Sense, Ui, pos2, vec2};
 
 use super::widgets::{self, named};
 use super::{App, glyphs, m3, sheet};
 use crate::material::{self, Type, shape};
-use crate::playon::{Kind, Output, Slider, Switcher, step_at};
+use crate::playon::{Kind, Output, Slider, Switcher};
 use crate::theme::{self, icon};
 
 /// The sheet: whether it is up, and its slider's memory.
@@ -35,10 +35,6 @@ enum Ask {
 
 fn switch_id() -> egui::Id {
     egui::Id::unique("playon-switch")
-}
-
-fn volume_id() -> egui::Id {
-    egui::Id::unique("playon-volume")
 }
 
 /// The line under the output's name.
@@ -69,12 +65,16 @@ fn phone(ui: &Ui, center: Pos2, size: f32, color: Color32) {
 }
 
 /// The picture of a kind of output: the phone, headphones, or a speaker.
-fn kind_icon(ui: &Ui, center: Pos2, size: f32, kind: Kind, color: Color32) {
+pub(super) fn mark(kind: Kind) -> m3::Icon {
     match kind {
-        Kind::Phone => phone(ui, center, size, color),
-        Kind::Bluetooth | Kind::Wired | Kind::HearingAid => widgets::icon_at(ui, center, icon::HEADPHONES, size * 0.9, color),
-        Kind::Usb | Kind::External | Kind::Other => glyphs::draw(ui, center, size, glyphs::VOLUME[3], color),
+        Kind::Phone => m3::Icon::Drawn(phone),
+        Kind::Bluetooth | Kind::Wired | Kind::HearingAid => m3::Icon::Font(icon::HEADPHONES),
+        Kind::Usb | Kind::External | Kind::Other => m3::Icon::Glyph(glyphs::VOLUME[3]),
     }
+}
+
+fn kind_icon(ui: &Ui, center: Pos2, size: f32, kind: Kind, color: Color32) {
+    m3::paint_icon(ui, center, size, mark(kind), color);
 }
 
 /// Sound playing: five bars, tallest in the middle.
@@ -124,66 +124,30 @@ pub(super) fn chip(app: &mut App, ui: &mut Ui, left: f32, right: f32, cy: f32) {
     }
 }
 
-/// Where the parts of the volume slider are: the filled part up to the handle, the
-/// upright handle with clear room either side, and the rest of the track.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct SliderGeom {
-    filled: Rect,
-    handle: Rect,
-    rest: Rect,
-}
+/// The volume row's height, and the room left of its slider for the speaker.
+const VOLUME_H: f32 = 56.0;
+const SPEAKER_W: f32 = 48.0;
 
-/// The slider's track, its handle's width and the clear room either side of the handle.
-const TRACK_H: f32 = 16.0;
-const HANDLE_W: f32 = 4.0;
-const HANDLE_GAP: f32 = 6.0;
+/// The gap between the sheet's rows.
+const GAP: f32 = 8.0;
 
-/// The slider in `rect` (as tall as its handle) with its handle `fraction` of the way along.
-fn slider_geom(rect: Rect, fraction: f32) -> SliderGeom {
-    let x = egui::lerp(rect.left() + HANDLE_W / 2.0..=rect.right() - HANDLE_W / 2.0, fraction.clamp(0.0, 1.0));
-    let handle = Rect::from_center_size(pos2(x, rect.center().y), vec2(HANDLE_W, rect.height()));
-    let track = |from: f32, to: f32| Rect::from_min_max(pos2(from, rect.center().y - TRACK_H / 2.0), pos2(to, rect.center().y + TRACK_H / 2.0));
-    SliderGeom { filled: track(rect.left(), handle.left() - HANDLE_GAP), handle, rest: track(handle.right() + HANDLE_GAP, rect.right()) }
-}
-
-/// How far along the slider in `rect` a finger at `x` is, 0 to 1.
-fn fraction_at(rect: Rect, x: f32) -> f32 {
-    ((x - rect.left() - HANDLE_W / 2.0) / (rect.width() - HANDLE_W)).clamp(0.0, 1.0)
+/// The slider in the volume `row`: right of the speaker, a finger tall.
+fn volume_slider(row: Rect) -> Rect {
+    Rect::from_min_max(pos2(row.left() + SPEAKER_W, row.center().y - m3::TOUCH / 2.0), pos2(row.right() - 8.0, row.center().y + m3::TOUCH / 2.0))
 }
 
 /// The media volume: a speaker and a slider on the phone's own steps. The step the
 /// listener put it on, when that is to be asked of the phone.
 fn volume(ui: &mut Ui, output: &Output, slider: &mut Slider, now: f64) -> Option<u32> {
     let m = material::scheme();
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 56.0), Sense::hover());
-    let rect = Rect::from_min_max(pos2(row.left() + 48.0, row.center().y - 22.0), pos2(row.right() - 8.0, row.center().y + 22.0));
-    let resp = ui.interact(rect, volume_id(), Sense::click_and_drag());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, true, "Media volume"));
-    let mut shown = slider.shown(output.volume, now);
-    let mut ask = None;
-    if (resp.is_pointer_button_down_on() || resp.clicked())
-        && let Some(at) = resp.interact_pointer_pos()
-    {
-        let step = step_at(fraction_at(rect, at.x), output.max_volume);
-        if step != shown && slider.set(step, now) {
-            ask = Some(step);
-        }
-        shown = slider.shown(output.volume, now);
-    }
-    let fraction = shown as f32 / output.max_volume as f32;
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), VOLUME_H), Sense::hover());
+    let before = slider.shown(output.volume, now);
+    let mut step = before;
+    let mut bar = ui.new_child(egui::UiBuilder::new().max_rect(volume_slider(row)));
+    m3::slider(&mut bar, &mut step, 0..=output.max_volume, "Media volume");
+    let ask = (step != before && slider.set(step, now)).then_some(step);
+    let fraction = step as f32 / output.max_volume as f32;
     glyphs::draw(ui, pos2(row.left() + 8.0 + 12.0, row.center().y), 24.0, glyphs::VOLUME[glyphs::volume_step(fraction)], m.on_surface_variant);
-    let g = slider_geom(rect, fraction);
-    if g.filled.width() > 0.0 {
-        ui.painter().rect_filled(g.filled, CornerRadius { nw: 8, sw: 8, ne: 2, se: 2 }, m.primary);
-    }
-    if g.rest.width() > 0.0 {
-        ui.painter().rect_filled(g.rest, CornerRadius { nw: 2, sw: 2, ne: 8, se: 8 }, m.secondary_container);
-        // Where the track ends.
-        if g.rest.width() > 12.0 {
-            ui.painter().circle_filled(pos2(g.rest.right() - 8.0, g.rest.center().y), 2.0, m.on_secondary_container);
-        }
-    }
-    ui.painter().rect_filled(g.handle, HANDLE_W / 2.0, m.primary);
     if slider.waiting() {
         // The phone hasn't followed yet: look again shortly.
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -199,8 +163,7 @@ fn contents(ui: &mut Ui, s: &Showing, slider: &mut Slider, now: f64) -> Option<A
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let mut ask = None;
 
-    let (head, _) = ui.allocate_exact_size(vec2(w, 44.0), Sense::hover());
-    m3::text(ui, pos2(head.left() + 8.0, head.top()), "Play on", Type::HeadlineSmall, m.on_surface, w - 16.0);
+    m3::sheet_header(ui, "Play on", "Where the music plays, and how loud");
     ui.add_space(12.0);
 
     // Where the music plays now.
@@ -217,7 +180,7 @@ fn contents(ui: &mut Ui, s: &Showing, slider: &mut Slider, now: f64) -> Option<A
     }
 
     if let Some((title, note)) = switch_words(s.output.switcher) {
-        ui.add_space(8.0);
+        ui.add_space(GAP);
         let (row, _) = ui.allocate_exact_size(vec2(w, 72.0), Sense::hover());
         let resp = named(ui.interact(row, switch_id(), Sense::click()), title);
         if resp.is_pointer_button_down_on() {
@@ -235,7 +198,7 @@ fn contents(ui: &mut Ui, s: &Showing, slider: &mut Slider, now: f64) -> Option<A
     }
 
     if s.output.max_volume > 0 {
-        ui.add_space(8.0);
+        ui.add_space(GAP);
         if let Some(step) = volume(ui, &s.output, slider, now) {
             ask = Some(Ask::Volume(step));
         }
@@ -308,36 +271,16 @@ mod tests {
     }
 
     #[test]
-    fn the_slider_is_filled_up_to_its_handle() {
-        let rect = Rect::from_min_size(pos2(40.0, 100.0), vec2(300.0, 44.0));
-        let g = slider_geom(rect, 0.5);
-        assert!((g.handle.center().x - 190.0).abs() < 0.01, "{g:?}");
-        assert_eq!(g.filled.left(), 40.0);
-        assert!(g.filled.right() < g.handle.left() && g.handle.right() < g.rest.left(), "clear room round the handle: {g:?}");
-        assert_eq!(g.rest.right(), 340.0);
-        assert!(g.handle.height() > g.filled.height(), "the handle stands taller than the track");
-    }
-
-    #[test]
-    fn at_either_end_the_slider_has_only_one_part() {
-        let rect = Rect::from_min_size(pos2(40.0, 100.0), vec2(300.0, 44.0));
-        let quiet = slider_geom(rect, 0.0);
-        assert!(quiet.filled.width() <= 0.0, "{quiet:?}");
-        assert!(quiet.handle.left() >= 40.0);
-        let loud = slider_geom(rect, 1.0);
-        assert!(loud.rest.width() <= 0.0, "{loud:?}");
-        assert!(loud.handle.right() <= 340.0);
-    }
-
-    #[test]
-    fn a_finger_on_the_slider_is_a_place_along_it() {
-        let rect = Rect::from_min_size(pos2(40.0, 100.0), vec2(300.0, 44.0));
-        let handle = |f: f32| slider_geom(rect, f).handle.center().x;
-        for f in [0.0, 0.25, 0.5, 1.0] {
-            assert!((fraction_at(rect, handle(f)) - f).abs() < 0.001, "a finger on the handle at {f} leaves it there");
+    fn a_finger_on_the_handle_of_a_step_is_on_that_step() {
+        // The phone's own numbers of steps: 15 for most streams, 25 for some.
+        let rect = volume_slider(Rect::from_min_size(pos2(16.0, 100.0), vec2(348.0, VOLUME_H)));
+        assert!(rect.height() >= 44.0, "a finger's height");
+        for most in [7, 15, 25] {
+            for step in 0..=most {
+                let handle = m3::slider_geom(rect, step as f32 / most as f32).handle.center().x;
+                assert_eq!(m3::slider_value(rect, handle, 0, most), step, "of {most}");
+            }
         }
-        assert_eq!(fraction_at(rect, 0.0), 0.0);
-        assert_eq!(fraction_at(rect, 900.0), 1.0);
     }
 
     /// The sheet's contents in a headless egui, 380 points wide, with stand-ins for the
@@ -348,6 +291,8 @@ mod tests {
         slider: Slider,
         time: f64,
         asks: Vec<Ask>,
+        /// What the contents took up in the last frame.
+        content: Rect,
     }
 
     impl Sheet {
@@ -359,7 +304,7 @@ mod tests {
                 fonts.families.insert(FontFamily::Name(family.into()), plain.clone());
             }
             ctx.set_fonts(fonts);
-            let mut sheet = Self { ctx, s: Showing { output, playing: true }, slider: Slider::default(), time: 0.0, asks: Vec::new() };
+            let mut sheet = Self { ctx, s: Showing { output, playing: true }, slider: Slider::default(), time: 0.0, asks: Vec::new(), content: Rect::NOTHING };
             sheet.frame(vec![]);
             sheet.frame(vec![]);
             sheet
@@ -368,10 +313,14 @@ mod tests {
         fn frame(&mut self, events: Vec<egui::Event>) {
             self.time += 1.0 / 60.0;
             let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(380.0, 500.0))), time: Some(self.time), events, ..Default::default() };
-            let mut ask = None;
-            let out = self.ctx.run_ui(input, |ui| ask = contents(ui, &self.s, &mut self.slider, self.time));
+            let (mut ask, mut content) = (None, Rect::NOTHING);
+            let out = self.ctx.run_ui(input, |ui| {
+                ask = contents(ui, &self.s, &mut self.slider, self.time);
+                content = ui.min_rect();
+            });
             out.drop_without_applying_deltas();
             self.asks.extend(ask);
+            self.content = content;
         }
 
         fn rect(&self, id: egui::Id) -> Option<Rect> {
@@ -388,10 +337,14 @@ mod tests {
             self.frame(vec![]);
         }
 
+        /// The volume slider: the sheet's last row.
+        fn slider(&self) -> Rect {
+            volume_slider(Rect::from_min_max(pos2(self.content.left(), self.content.bottom() - VOLUME_H), self.content.right_bottom()))
+        }
+
         /// Where on the slider a finger is on `step` of the phone's.
         fn at_step(&self, step: u32) -> Pos2 {
-            let rect = self.rect(volume_id()).expect("the slider is on the sheet");
-            slider_geom(rect, step as f32 / self.s.output.max_volume as f32).handle.center()
+            m3::slider_geom(self.slider(), step as f32 / self.s.output.max_volume as f32).handle.center()
         }
     }
 
@@ -410,16 +363,20 @@ mod tests {
 
     #[test]
     fn with_nothing_to_open_there_is_no_row() {
-        let sheet = Sheet::new(output(Kind::Phone, "", 7, 15, Switcher::None));
-        assert_eq!(sheet.rect(switch_id()), None);
-        assert!(sheet.rect(volume_id()).is_some());
+        let (without, with) = (Sheet::new(output(Kind::Phone, "", 7, 15, Switcher::None)), Sheet::new(buds()));
+        assert_eq!(without.rect(switch_id()), None);
+        assert_eq!(without.content.height() + 72.0 + GAP, with.content.height(), "only the row is missing");
+        let mut without = without;
+        let at = without.at_step(3);
+        without.tap(at);
+        assert_eq!(without.asks, [Ask::Volume(3)], "the slider is there");
     }
 
     #[test]
     fn a_volume_that_cannot_be_set_has_no_slider() {
-        let sheet = Sheet::new(output(Kind::External, "", 0, 0, Switcher::System));
-        assert_eq!(sheet.rect(volume_id()), None);
-        assert!(sheet.rect(switch_id()).is_some());
+        let (fixed, settable) = (Sheet::new(output(Kind::External, "", 0, 0, Switcher::System)), Sheet::new(buds()));
+        assert!(fixed.rect(switch_id()).is_some());
+        assert_eq!(fixed.content.height() + VOLUME_H + GAP, settable.content.height(), "only the slider is missing");
     }
 
     #[test]
@@ -454,11 +411,138 @@ mod tests {
     #[test]
     fn the_row_and_the_slider_do_not_overlap_and_stay_on_the_sheet() {
         let sheet = Sheet::new(buds());
-        let (row, slider) = (sheet.rect(switch_id()).unwrap(), sheet.rect(volume_id()).unwrap());
+        let (row, slider) = (sheet.rect(switch_id()).unwrap(), sheet.slider());
         assert!(row.bottom() <= slider.top(), "{row:?} {slider:?}");
         assert!(slider.height() >= 44.0, "a finger's height");
         for r in [row, slider] {
             assert!(r.left() >= 0.0 && r.right() <= 380.0, "{r:?}");
         }
+    }
+
+    /// The sheet as the phone shows it: up over a 380 x 800 screen, with what it holds.
+    struct Up {
+        ctx: egui::Context,
+        open: bool,
+        output: Output,
+        slider: Slider,
+        time: f64,
+        asks: Vec<Ask>,
+        /// Where the sheet is, and what it holds.
+        sheet: Option<Rect>,
+        content: Rect,
+    }
+
+    impl Up {
+        fn new() -> Self {
+            let ctx = egui::Context::default();
+            let mut fonts = egui::FontDefinitions::default();
+            let plain = fonts.families[&FontFamily::Proportional].clone();
+            for family in ["semibold", "bold", "icons"] {
+                fonts.families.insert(FontFamily::Name(family.into()), plain.clone());
+            }
+            ctx.set_fonts(fonts);
+            let mut up = Self { ctx, open: true, output: buds(), slider: Slider::default(), time: 0.0, asks: Vec::new(), sheet: None, content: Rect::NOTHING };
+            // Slid all the way up before a finger comes down.
+            for _ in 0..60 {
+                up.frame(vec![]);
+            }
+            up
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 1.0 / 60.0;
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(380.0, 800.0))), time: Some(self.time), events, ..Default::default() };
+            let showing = Showing { output: self.output.clone(), playing: true };
+            let (mut open, mut ask, mut content, mut sheet) = (self.open, None, self.content, None);
+            let out = self.ctx.run_ui(input, |ui| {
+                sheet = sheet::show(ui.ctx(), "play-on", &mut open, |ui| {
+                    ask = contents(ui, &showing, &mut self.slider, self.time);
+                    content = ui.min_rect();
+                });
+            });
+            out.drop_without_applying_deltas();
+            self.open = open;
+            self.sheet = sheet;
+            self.content = content;
+            self.asks.extend(ask);
+        }
+
+        fn down(&mut self, at: Pos2) {
+            self.frame(vec![egui::Event::PointerMoved(at), Sheet::button(at, true)]);
+        }
+
+        fn up(&mut self, at: Pos2) {
+            self.frame(vec![Sheet::button(at, false)]);
+            self.frame(vec![]);
+        }
+
+        fn tap(&mut self, at: Pos2) {
+            self.down(at);
+            self.up(at);
+        }
+
+        /// A finger slides from `from` to `to` over `frames` frames, then lifts.
+        fn swipe(&mut self, from: Pos2, to: Pos2, frames: usize) {
+            self.down(from);
+            for i in 1..=frames {
+                self.frame(vec![egui::Event::PointerMoved(from + (to - from) * (i as f32 / frames as f32))]);
+            }
+            self.up(to);
+        }
+
+        /// A point on the output's card.
+        fn card(&self) -> Pos2 {
+            pos2(self.content.center().x, self.content.top() + 60.0 + 12.0 + 40.0)
+        }
+
+        /// Where on the volume slider a finger is on `step`.
+        fn at_step(&self, step: u32) -> Pos2 {
+            let row = Rect::from_min_max(pos2(self.content.left(), self.content.bottom() - VOLUME_H), self.content.right_bottom());
+            m3::slider_geom(volume_slider(row), step as f32 / self.output.max_volume as f32).handle.center()
+        }
+    }
+
+    #[test]
+    fn a_tap_outside_the_sheet_closes_it_and_a_tap_on_it_does_not() {
+        let mut up = Up::new();
+        assert!(up.sheet.is_some());
+        let card = up.card();
+        up.tap(card);
+        assert!(up.open, "a tap on the card");
+        up.tap(pos2(190.0, 100.0));
+        assert!(!up.open, "a tap on the dimmed screen");
+        for _ in 0..60 {
+            up.frame(vec![]);
+        }
+        assert!(up.sheet.is_none(), "it slid away");
+    }
+
+    #[test]
+    fn a_swipe_down_and_androids_back_close_the_sheet() {
+        let mut up = Up::new();
+        let from = up.card();
+        up.swipe(from, from + vec2(0.0, 220.0), 12);
+        assert!(!up.open, "a swipe down from the card");
+        assert!(up.asks.is_empty(), "and it pressed nothing");
+
+        let mut up = Up::new();
+        assert!(sheet::is_open(&up.ctx));
+        sheet::dismiss(&up.ctx);
+        up.frame(vec![]);
+        assert!(!up.open, "Back");
+    }
+
+    #[test]
+    fn a_drag_along_the_volume_slider_sets_the_volume_and_leaves_the_sheet_up() {
+        let mut up = Up::new();
+        let (from, to) = (up.at_step(7), up.at_step(12));
+        up.swipe(from, to, 20);
+        assert!(up.open);
+        assert_eq!(up.asks.last(), Some(&Ask::Volume(12)));
+        // A finger that slides down off the slider still only sets the volume.
+        let mut up = Up::new();
+        let from = up.at_step(7);
+        up.swipe(from, from + vec2(40.0, 200.0), 12);
+        assert!(up.open, "the slider keeps its finger");
     }
 }

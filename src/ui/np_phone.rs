@@ -7,10 +7,11 @@
 use egui::{Color32, CornerRadius, Pos2, Rect, Sense, Ui, Vec2, pos2, vec2};
 
 use super::widgets::{self, named};
-use super::{Action, App, NpTab, Repeat, Target, glyphs, m3, nowplaying, sleep};
+use super::{Action, App, NpTab, Repeat, Target, glyphs, m3, nowplaying, playon, sleep};
 use crate::material::{self, Type, Weight, shape};
 use crate::model::Track;
 use crate::platform::Insets;
+use crate::playon::Output;
 use crate::theme::{self, icon};
 
 /// The widest the player's column gets, on a screen wider than a phone's.
@@ -86,7 +87,7 @@ struct ArtGeom {
     seek: Rect,
     times: Rect,
     transport: Transport,
-    /// The row of tools (Lyrics, Sleep timer).
+    /// The row of tools (Lyrics, where the music plays, Sleep timer).
     tools: Rect,
     /// The peek at what plays next, down to the screen's bottom edge.
     peek: Rect,
@@ -156,11 +157,16 @@ fn peek_geom(peek: Rect) -> PeekGeom {
     PeekGeom { handle, label, cover, text: Rect::from_min_max(pos2(cover.right() + 14.0, cy - 22.0), pos2(mark.x - 12.0 - 12.0, cy + 22.0)), mark }
 }
 
+/// The room `tools` leaves between two tools.
+const TOOL_GAP: f32 = 8.0;
+/// The least of the output tool's name worth showing: a name with less room than this
+/// is left out and the tool is its icon alone.
+const OUTPUT_WORDS: f32 = 64.0;
+
 /// The player's tools side by side in `row`, each as wide as it asks, the group in the
 /// row's middle. Tools that together ask for more than the row has share it in proportion.
 fn tools(row: Rect, widths: &[f32]) -> Vec<Rect> {
-    const GAP: f32 = 8.0;
-    let gaps = GAP * widths.len().saturating_sub(1) as f32;
+    let gaps = TOOL_GAP * widths.len().saturating_sub(1) as f32;
     let asked: f32 = widths.iter().sum();
     let k = if asked > 0.0 { ((row.width() - gaps) / asked).min(1.0) } else { 1.0 };
     let mut x = row.center().x - (asked * k + gaps) / 2.0;
@@ -168,10 +174,74 @@ fn tools(row: Rect, widths: &[f32]) -> Vec<Rect> {
         .iter()
         .map(|w| {
             let r = Rect::from_min_size(pos2(x, row.top()), vec2(w * k, row.height()));
-            x += w * k + GAP;
+            x += w * k + TOOL_GAP;
             r
         })
         .collect()
+}
+
+/// How wide the tool for where the music plays is in a row `row` wide whose other two
+/// tools ask for `others` together. It asks for `want`, which fits it with its name
+/// whole; with less room than that its name is cut short, as long as `chrome` (what its
+/// icon and padding take) leaves `OUTPUT_WORDS` for it; with less still it is its icon alone.
+fn output_width(row: f32, others: f32, want: f32, chrome: f32) -> f32 {
+    let room = row - others - 2.0 * TOOL_GAP;
+    if room >= want {
+        want
+    } else if room - chrome >= OUTPUT_WORDS {
+        room
+    } else {
+        m3::TOOL_ICON_W
+    }
+}
+
+/// The row of tools as it is drawn: where Lyrics, where the music plays and the sleep
+/// timer are, and whether the middle one has room for its name.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct ToolRow {
+    rects: [Rect; 3],
+    words: bool,
+}
+
+/// Lay the tools out in `row`, the output tool named `output` and the sleep timer's
+/// label `sleep`.
+fn tool_row(ui: &Ui, row: Rect, output: &str, sleep: &str) -> ToolRow {
+    let (lyrics, sleep) = (m3::tool_chip_width(ui, "Lyrics"), m3::tool_chip_width(ui, sleep));
+    let chrome = m3::tool_chip_width(ui, "");
+    let middle = output_width(row.width(), lyrics + sleep, m3::tool_chip_width(ui, output), chrome);
+    // With no room even for the icon the other two share what it leaves.
+    let k = ((row.width() - 2.0 * TOOL_GAP - middle) / (lyrics + sleep)).min(1.0);
+    let rects = tools(row, &[lyrics * k, middle, sleep * k]);
+    ToolRow { rects: [rects[0], rects[1], rects[2]], words: middle > m3::TOOL_ICON_W }
+}
+
+/// The tool a tap landed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Tool {
+    Lyrics,
+    /// Where the music plays: the "Play on" sheet.
+    Output,
+    Sleep,
+}
+
+/// Draw the player's tools in `row`, and say which was tapped. `sleep` is the sleep
+/// timer's label and whether a timer runs.
+fn tools_view(ui: &Ui, row: Rect, id: egui::Id, output: &Output, sleep: (&str, bool)) -> Option<Tool> {
+    let layout = tool_row(ui, row, output.title(), sleep.0);
+    let tool = |i: usize| id.with(("tool", i));
+    let mut tapped = None;
+    if m3::tool_chip(ui, layout.rects[0], glyphs::LYRICS.into(), "Lyrics", false, tool(0)).clicked() {
+        tapped = Some(Tool::Lyrics);
+    }
+    let mark = playon::mark(output.kind);
+    let middle = if layout.words { m3::tool_chip(ui, layout.rects[1], mark, output.title(), false, tool(1)) } else { m3::tool_chip_icon(ui, layout.rects[1], mark, &format!("Play on, {}", output.title()), false, tool(1)) };
+    if middle.clicked() {
+        tapped = Some(Tool::Output);
+    }
+    if m3::tool_chip(ui, layout.rects[2], m3::Icon::Drawn(sleep::moon), sleep.0, sleep.1, tool(2)).clicked() {
+        tapped = Some(Tool::Sleep);
+    }
+    tapped
 }
 
 /// Where the parts of a panel (the lyrics, the queue) are: the playing song's cover
@@ -338,17 +408,14 @@ fn art_view(app: &mut App, ui: &mut Ui, screen: Rect, insets: Insets, track: &Tr
         };
     }
 
-    // The tools. (A control for where the music plays joins them here, between the two.)
+    // The tools: the lyrics, where the music plays (its name, or its icon alone when the
+    // row is short of room) and the sleep timer.
     let (sleep_label, sleeping) = sleep::tool_label(app);
-    let chips: [(m3::Icon, &str, bool); 2] = [(glyphs::LYRICS.into(), "Lyrics", false), (m3::Icon::Drawn(sleep::moon), &sleep_label, sleeping)];
-    let widths: Vec<f32> = chips.iter().map(|(_, label, _)| m3::tool_chip_width(ui, label)).collect();
-    for (i, ((icon, label, on), rect)) in chips.into_iter().zip(tools(g.tools, &widths)).enumerate() {
-        if m3::tool_chip(ui, rect, icon, label, on, id.with(("tool", i))).clicked() {
-            match i {
-                0 => nowplaying::ask_lyrics(app, ui.ctx()),
-                _ => sleep::open_sheet(app),
-            }
-        }
+    match tools_view(ui, g.tools, id, &crate::playon::output(), (&sleep_label, sleeping)) {
+        Some(Tool::Lyrics) => nowplaying::ask_lyrics(app, ui.ctx()),
+        Some(Tool::Output) => app.playon.open = true,
+        Some(Tool::Sleep) => sleep::open_sheet(app),
+        None => {}
     }
 
     peek(app, ui, g.peek, insets.bottom);
@@ -710,6 +777,130 @@ mod tests {
         }
         assert!(three.iter().all(|r| r.width() >= 80.0 && r.height() == 48.0));
         assert!(tools(row, &[]).is_empty());
+    }
+
+    #[test]
+    fn the_output_tool_keeps_its_name_while_the_row_has_room_and_then_is_its_icon() {
+        // A name that asks for 130 beside two tools that ask for 100 and 135 together,
+        // the chip's icon and padding taking 62.
+        assert_eq!(output_width(420.0, 235.0, 130.0, 62.0), 130.0, "room for the whole name");
+        assert_eq!(output_width(336.0, 235.0, 130.0, 62.0), m3::TOOL_ICON_W, "a 360-point phone's row: the icon alone");
+        // A long name is cut short while 64 points of it still show, and given up below that.
+        assert_eq!(output_width(377.0, 235.0, 200.0, 62.0), 126.0);
+        assert_eq!(output_width(376.0, 235.0, 200.0, 62.0), m3::TOOL_ICON_W);
+        assert!(m3::TOOL_ICON_W >= m3::TOUCH);
+    }
+
+    /// The tools drawn in a headless egui `width` points across, in the row Now Playing
+    /// gives them, and tapped.
+    struct Tools {
+        ctx: egui::Context,
+        row: Rect,
+        output: Output,
+        sleep: (String, bool),
+        time: f64,
+        layout: Option<ToolRow>,
+        tapped: Vec<Tool>,
+    }
+
+    impl Tools {
+        fn new(width: f32, output: Output, sleep: (&str, bool)) -> Self {
+            let row = art_geom(screen(width, 800.0), INSETS).tools;
+            let mut t = Self { ctx: egui::Context::default(), row, output, sleep: (sleep.0.to_owned(), sleep.1), time: 0.0, layout: None, tapped: Vec::new() };
+            t.frame(vec![]);
+            t.frame(vec![]);
+            t
+        }
+
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            self.time += 1.0 / 60.0;
+            let input = egui::RawInput { screen_rect: Some(screen(self.row.right() + 40.0, 800.0)), time: Some(self.time), events, ..Default::default() };
+            let (mut layout, mut tapped) = (None, None);
+            let out = self.ctx.run_ui(input, |ui| {
+                layout = Some(tool_row(ui, self.row, self.output.title(), &self.sleep.0));
+                tapped = tools_view(ui, self.row, ui.scope_id(), &self.output, (&self.sleep.0, self.sleep.1));
+            });
+            out.drop_without_applying_deltas();
+            self.layout = layout;
+            self.tapped.extend(tapped);
+        }
+
+        fn tap(&mut self, at: Pos2) {
+            let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+            self.frame(vec![egui::Event::PointerMoved(at), button(true)]);
+            self.frame(vec![button(false)]);
+            self.frame(vec![]);
+        }
+
+        fn layout(&self) -> ToolRow {
+            self.layout.expect("drawn")
+        }
+    }
+
+    fn buds() -> Output {
+        Output { kind: crate::playon::Kind::Bluetooth, name: "Pixel Buds Pro".into(), volume: 7, max_volume: 15, switcher: crate::playon::Switcher::System }
+    }
+
+    #[test]
+    fn where_the_music_plays_is_a_tool_between_lyrics_and_the_sleep_timer() {
+        for width in [360.0, 412.0, MAX_W] {
+            let t = Tools::new(width, Output::default(), ("Sleep timer", false));
+            let [lyrics, output, sleep] = t.layout().rects;
+            assert!(lyrics.right() < output.left() && output.right() < sleep.left(), "{width}: in that order, apart");
+            for r in [lyrics, output, sleep] {
+                assert_eq!(r.height(), m3::TOUCH);
+                assert!(t.row.expand(0.01).contains_rect(r), "{width}: {r:?} is in the row {:?}", t.row);
+            }
+        }
+    }
+
+    #[test]
+    fn at_360_points_every_tool_fits_whatever_the_output_is_called_and_the_timer_says() {
+        let names = ["This phone", "Pixel Buds Pro", "Galaxy Buds2 Pro (Aminuddin's)", "A"];
+        for name in names {
+            for label in ["Sleep timer", "End of queue", "End of song", "12:34"] {
+                let output = Output { kind: crate::playon::Kind::Bluetooth, name: name.into(), ..buds() };
+                let t = Tools::new(360.0, output, (label, true));
+                let rects = t.layout().rects;
+                for r in rects {
+                    assert!(t.row.expand(0.01).contains_rect(r), "{name} / {label}: {r:?} leaves the row {:?}", t.row);
+                    assert!(r.width() >= 44.0 && r.height() >= m3::TOUCH, "{name} / {label}: {r:?} is a finger wide");
+                }
+                assert!(rects[1].width() >= m3::TOOL_ICON_W - 0.01, "{name} / {label}: the output tool, an icon at least, keeps a finger's width");
+                for pair in rects.windows(2) {
+                    assert!(pair[0].right() + 7.99 <= pair[1].left(), "{name} / {label}: {pair:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_short_row_shows_the_output_as_its_icon_and_a_wide_one_names_it() {
+        let words = |width: f32, name: &str| Tools::new(width, Output { kind: crate::playon::Kind::Bluetooth, name: name.into(), ..buds() }, ("Sleep timer", false)).layout().words;
+        assert!(!words(320.0, "Pixel Buds Pro"), "a small phone");
+        assert!(!words(MAX_W, "Galaxy Buds2 Pro (Aminuddin's)"), "a long name does not squeeze the others");
+        assert!(words(MAX_W, "Buds"), "a wide screen and a short name");
+    }
+
+    #[test]
+    fn a_tap_on_a_tool_chooses_it_with_its_name_and_without() {
+        for width in [320.0, MAX_W] {
+            for (tool, at) in [(Tool::Lyrics, 0), (Tool::Output, 1), (Tool::Sleep, 2)] {
+                let mut t = Tools::new(width, buds(), ("Sleep timer", false));
+                let at = t.layout().rects[at].center();
+                t.tap(at);
+                assert_eq!(t.tapped, [tool], "{width}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_tap_beside_the_tools_chooses_none() {
+        let mut t = Tools::new(MAX_W, buds(), ("Sleep timer", false));
+        let [_, _, sleep] = t.layout().rects;
+        t.tap(pos2(sleep.right() + 20.0, sleep.center().y));
+        t.tap(pos2(t.row.center().x, t.row.top() - 30.0));
+        assert!(t.tapped.is_empty());
     }
 
     #[test]
