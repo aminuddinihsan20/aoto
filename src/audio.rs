@@ -2407,4 +2407,32 @@ mod tests {
         };
         assert!((4000..=4500).contains(&ending), "the next song was asked for at {ending} ms");
     }
+
+    #[test]
+    fn a_crossfade_still_blends_one_song_into_the_next_with_no_silence() {
+        let rig = Rig::new();
+        rig.audio.set_crossfade(1);
+        // Three seconds each: the last second of the first under the first of the second.
+        let (a, b) = (pcm_song(8000, 144_000, None), pcm_song(-6000, 144_000, None));
+        rig.start(1, &a);
+        loop {
+            match rig.events.recv_timeout(Duration::from_secs(10)).expect("the song never neared its end") {
+                AudioEvent::Ending { generation: 1 } => break,
+                _ => continue,
+            }
+        }
+        rig.audio.send(AudioCmd::Handoff);
+        rig.start(2, &b);
+        rig.wait(1500);
+        let runs: Vec<(f32, usize)> = rig.runs().into_iter().skip_while(|(level, _)| *level == 0.0).collect();
+        assert_eq!(runs[0].0, heard(8000), "the first song alone");
+        assert!(runs[0].1 > 90_000, "for its first two seconds or so: {} frames", runs[0].1);
+        // Then the two together, each frame somewhere between them, and the second alone.
+        let alone = runs.iter().position(|(level, n)| *level == heard(-6000) && *n > 4800).expect("the second song plays on alone");
+        let blend: usize = runs[1..alone].iter().map(|(_, n)| n).sum();
+        assert!((40_000..=56_000).contains(&blend), "the blend took {blend} frames");
+        assert!(runs[1..alone].iter().all(|(level, n)| *level != 0.0 || *n < 8), "no silence in the blend");
+        assert!(runs[1..alone].iter().all(|(level, _)| (heard(-6000)..=heard(8000)).contains(level)));
+        assert_eq!(rig.audio.status.playing_gen.load(Ordering::Relaxed), 2);
+    }
 }
