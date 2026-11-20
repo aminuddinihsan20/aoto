@@ -1,13 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The home-screen widgets' colours below Android 12: the design's terracotta, dark.
+    <!-- The home-screen widgets' colours below Android 12: indigo, dark.
          From 12 on they follow the wallpaper (values-v31). -->
-    <color name="widget_surface">#322825</color>
-    <color name="widget_primary">#FFB5A0</color>
-    <color name="widget_on_primary">#561F0F</color>
-    <color name="widget_primary_container">#723523</color>
-    <color name="widget_on_surface">#F1DFDA</color>
-    <color name="widget_on_surface_variant">#D8C2BC</color>
+    <color name="widget_surface">#2A2A2E</color>
+    <color name="widget_primary">#BFC4EE</color>
+    <color name="widget_on_primary">#292E50</color>
+    <color name="widget_primary_container">#3F4468</color>
+    <color name="widget_on_surface">#E4E1E7</color>
+    <color name="widget_on_surface_variant">#C7C5D1</color>
     <!-- Behind Previous and Next, and the unplayed part of the bar. -->
-    <color name="widget_control">#53433F</color>
+    <color name="widget_control">#46464F</color>
 </resources>
