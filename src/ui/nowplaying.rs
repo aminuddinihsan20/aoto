@@ -833,6 +833,10 @@ fn options_menu(app: &mut App, ui: &mut Ui, rect: Rect, track: &crate::model::Tr
         if widgets::menu_action_drawn(ui, "Equalizer", |ui, at, color| super::equalizer::sliders(ui, at, 16.0, color)) {
             app.actions.push(Action::Go(Page::Equalizer));
         }
+        if widgets::menu_action_drawn(ui, &super::speed::menu_label(app), |ui, at, color| super::speed::gauge(ui, at, 16.0, color)) {
+            app.speed_sheet = true;
+            ui.close();
+        }
         menu_divider(ui);
         widgets::song_actions(ui, track, liked, None, false, &mut app.actions);
         menu_divider(ui);

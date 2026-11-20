@@ -69,6 +69,8 @@ public class PlaybackService extends Service {
     private String title = "", artist = "", coverUrl = "";
     private boolean playing;
     private long duration, position;
+    /** How fast the position moves while playing: 1 as recorded (the app's playback speed). */
+    private float speed = 1f;
     private Bitmap cover;
     private String coverLoading = "";
     private int emptyPolls;
@@ -177,12 +179,15 @@ public class PlaybackService extends Service {
         }
         boolean wasPlaying = playing;
         String newCover = f[2];
+        // The seventh field is the playback speed in hundredths.
+        float newSpeed = f.length > 6 && parse(f[6]) > 0 ? parse(f[6]) / 100f : 1f;
         // The position moves on by itself while a song plays, and the system counts it
-        // on from the last one it was told: only a change it can't work out is published.
+        // on, at the speed it was told, from the last one it was told: only a change it
+        // can't work out is published.
         long now = android.os.SystemClock.elapsedRealtime();
-        long expected = publishedPosition + (wasPlaying ? now - publishedAt : 0);
+        long expected = publishedPosition + (wasPlaying ? (long) ((now - publishedAt) * speed) : 0);
         boolean same = f[0].equals(title) && f[1].equals(artist) && newCover.equals(coverUrl)
-                && "1".equals(f[3]) == playing && parse(f[4]) == duration
+                && "1".equals(f[3]) == playing && parse(f[4]) == duration && newSpeed == speed
                 && Math.abs(parse(f[5]) - expected) < SEEK_SLACK_MS;
         if (same && published) {
             return;
@@ -192,6 +197,7 @@ public class PlaybackService extends Service {
         playing = "1".equals(f[3]);
         duration = parse(f[4]);
         position = parse(f[5]);
+        speed = newSpeed;
         if (!newCover.equals(coverUrl)) {
             coverUrl = newCover;
             cover = null;
@@ -233,7 +239,7 @@ public class PlaybackService extends Service {
         session.setPlaybackState(new PlaybackState.Builder()
                 .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE
                         | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS | PlaybackState.ACTION_SEEK_TO)
-                .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing ? 1f : 0f)
+                .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing ? speed : 0f)
                 .build());
         notifications.notify(NOTIFICATION_ID, buildNotification());
     }

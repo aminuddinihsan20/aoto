@@ -84,14 +84,14 @@ impl App {
         self.queue.at_end() && self.queue.fill.is_none()
     }
 
-    /// Seconds of the song still to play, once the player has it: a song on its way,
-    /// or one waiting for Play, has no end to fade towards yet.
+    /// Seconds until the song ends at the speed it plays, once the player has it: a
+    /// song on its way, or one waiting for Play, has no end to fade towards yet.
     fn song_left(&self) -> Option<f64> {
         if self.buffering || self.resume_at.is_some() {
             return None;
         }
         let total = self.audio.status.duration()?;
-        Some(total.saturating_sub(self.audio.status.position()).as_secs_f64())
+        Some(self.heard(total.saturating_sub(self.audio.status.position())).as_secs_f64())
     }
 
     /// The timer's turn, drawn or in the background: the fade's volume, and the pause

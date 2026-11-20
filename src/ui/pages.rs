@@ -1945,6 +1945,14 @@ fn channel_picker(app: &mut App, ui: &mut Ui) {
 fn settings_playback(app: &mut App, ui: &mut Ui) {
     section_label(ui, "Playback", None);
     settings_card(ui, |ui| {
+        setting_row(ui, "Playback speed", Some(super::speed::settings_note(app)), |ui| super::speed::settings_pills(app, ui));
+        divider(ui);
+        setting_row(ui, "Keep the pitch", Some("Voices and instruments stay in tune at any speed. Off, the pitch rises and falls with the speed."), |ui| {
+            if toggle(ui, &mut app.keep_pitch, "Keep the pitch").changed() {
+                app.set_speed();
+            }
+        });
+        divider(ui);
         setting_row(ui, "Autoplay", Some("Keep playing similar songs when the queue ends."), |ui| {
             toggle(ui, &mut app.autoplay, "Autoplay");
         });
@@ -1984,6 +1992,12 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         setting_row(ui, "Spatial audio", Some("Makes stereo songs sound like they surround you, for headphones: a wider stage, a little room around it and the way your head shades each ear. Voices stay in the middle. Not head-tracked, and not Dolby Atmos (that plays as it is when a song has it)."), |ui| {
             if toggle(ui, &mut app.spatial, "Spatial audio").changed() {
                 app.set_crossfade();
+            }
+        });
+        divider(ui);
+        setting_row(ui, "Gapless playback", Some("No silence between the songs of an album: each starts on the last one's final sample. With Automix or Crossfade on, songs blend that way instead."), |ui| {
+            if toggle(ui, &mut app.gapless, "Gapless playback").changed() {
+                app.set_gapless();
             }
         });
         divider(ui);
