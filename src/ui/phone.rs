@@ -23,14 +23,15 @@ impl Tab {
     pub const ALL: [Tab; 4] = [Tab::Home, Tab::Search, Tab::Library, Tab::Downloads];
 
     /// The tab `page` belongs to; pages that belong to none (album, artist, playlist,
-    /// settings, transfer, the equalizer) stay with `last`, the tab they were opened from.
+    /// settings, transfer, the equalizer, listening stats) stay with `last`, the tab they
+    /// were opened from.
     pub fn of(page: &Page, last: Tab) -> Tab {
         match page {
             Page::Home | Page::New => Tab::Home,
             Page::Search(_) => Tab::Search,
             Page::Library(_) => Tab::Library,
             Page::Downloads | Page::LocalFolder(_) | Page::LocalAlbum(_) | Page::LocalSongs | Page::Downloaded(_) => Tab::Downloads,
-            Page::Album(_) | Page::Playlist(_) | Page::Artist(_) | Page::Settings | Page::Transfer | Page::Equalizer => last,
+            Page::Album(_) | Page::Playlist(_) | Page::Artist(_) | Page::Settings | Page::Transfer | Page::Equalizer | Page::Stats => last,
         }
     }
 
@@ -279,7 +280,7 @@ mod tests {
 
     #[test]
     fn a_page_opened_from_a_tab_keeps_that_tab() {
-        for page in [Page::Album("a".into()), Page::Artist("a".into()), Page::Playlist("p".into()), Page::Settings, Page::Transfer, Page::Equalizer] {
+        for page in [Page::Album("a".into()), Page::Artist("a".into()), Page::Playlist("p".into()), Page::Settings, Page::Transfer, Page::Equalizer, Page::Stats] {
             assert_eq!(Tab::of(&page, Tab::Library), Tab::Library, "{page:?}");
             assert_eq!(Tab::of(&page, Tab::Search), Tab::Search, "{page:?}");
         }
@@ -305,6 +306,7 @@ mod tests {
         assert!(!Tab::is_root(&Page::Album("a".into())));
         assert!(!Tab::is_root(&Page::Settings));
         assert!(!Tab::is_root(&Page::Equalizer));
+        assert!(!Tab::is_root(&Page::Stats));
         assert!(!Tab::is_root(&Page::New));
     }
 }

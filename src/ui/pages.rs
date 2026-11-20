@@ -79,6 +79,7 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
             Page::LocalSongs => local_songs(app, ui, now),
             Page::Downloaded(id) => super::downloading::saved_page(app, ui, id, now),
             Page::Equalizer => super::equalizer::page(app, ui),
+            Page::Stats => super::stats::page(app, ui),
         }
         // Room to scroll the last rows clear of the player's frosted strip.
         ui.add_space(96.0);
@@ -1661,6 +1662,7 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
     settings_account(app, ui);
     settings_playback(app, ui);
     settings_downloads(app, ui);
+    super::stats::settings_section(app, ui);
     settings_lyrics(app, ui);
     settings_artists(app, ui);
     settings_appearance(app, ui);
@@ -1749,6 +1751,7 @@ fn settings_account(app: &mut App, ui: &mut Ui) {
         if open_row(ui, "Listen together", &format!("Play the same music at the same moment, on up to {} devices.", crate::jam::DEFAULT_MEMBERS)) {
             app.jam_open = true;
         }
+        super::stats::account_row(app, ui);
     });
     if busy {
         ui.add_space(6.0);

@@ -28,6 +28,7 @@ mod responses;
 mod sheet;
 mod shell;
 mod sleep;
+mod stats;
 mod storage;
 #[cfg(target_os = "android")]
 mod shared;
@@ -87,6 +88,8 @@ pub enum Page {
     Downloaded(String),
     /// The equalizer, opened from Settings › Playback or the player's menu.
     Equalizer,
+    /// Listening stats, opened from Settings › Account.
+    Stats,
 }
 
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
@@ -409,6 +412,9 @@ pub struct App {
     /// The sleep timer, and its sheet over Now Playing. Not kept across launches.
     sleep: crate::sleep::Timer,
     sleep_sheet: sleep::Pick,
+    /// What was listened to on this device (`crate::stats`), and the page that shows it.
+    listening: crate::stats::Log,
+    stats: stats::View,
 
     // visuals
     art_key: Option<String>,
@@ -648,6 +654,7 @@ impl App {
         let downloads = downloading::Downloading::load(backend.data_dir(), get("download_wifi_only").is_none_or(|v| v == "1"));
         crate::local::init(backend.data_dir());
         crate::lastfm::init(backend.data_dir());
+        let listening = crate::stats::Log::open(backend.data_dir(), stats::today());
         let logged_in = backend.is_logged_in();
         // Before any request: a song started at launch (dev hooks) must see this setting.
         backend.set_high_quality(get("high_quality").is_none_or(|v| v == "1"));
@@ -805,6 +812,8 @@ impl App {
             seek_drag: None,
             sleep: Default::default(),
             sleep_sheet: Default::default(),
+            listening,
+            stats: Default::default(),
             art_key: None,
             apple_artists: Default::default(),
             apple_covers: Default::default(),
@@ -919,6 +928,7 @@ impl App {
             Ok("settings") => app.go(Page::Settings),
             Ok("transfer") => app.go(Page::Transfer),
             Ok("equalizer") => app.go(Page::Equalizer),
+            Ok("stats") => app.go(Page::Stats),
             Ok("jam") => app.go(Page::Settings),
             Ok(p) if p.starts_with("album:") => app.go(Page::Album(p[6..].to_owned())),
             Ok(p) if p.starts_with("artist:") => app.go(Page::Artist(p[7..].to_owned())),

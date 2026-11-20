@@ -593,7 +593,7 @@ fn local_tz() -> (String, i32) {
 }
 
 #[cfg(windows)]
-fn utc_offset_minutes() -> i32 {
+pub(crate) fn utc_offset_minutes() -> i32 {
     #[repr(C)]
     struct SystemTime([u16; 8]);
     #[repr(C)]
@@ -622,7 +622,7 @@ fn utc_offset_minutes() -> i32 {
 }
 
 #[cfg(unix)]
-fn utc_offset_minutes() -> i32 {
+pub(crate) fn utc_offset_minutes() -> i32 {
     // SAFETY: localtime_r fills the out-parameter from a valid time_t.
     unsafe {
         let now = libc::time(std::ptr::null_mut());

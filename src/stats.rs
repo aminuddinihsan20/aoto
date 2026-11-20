@@ -228,6 +228,7 @@ impl Pace {
 /// A period as the page shows it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Summary {
+    pub period: Period,
     /// The period's first day, and the first day of the one before it.
     pub first: Date,
     pub before: Date,
@@ -368,6 +369,7 @@ impl History {
         let top_songs = played.into_iter().take(TOP_SONGS).map(|(song, plays, heard)| TopSong { song: song.clone(), plays, heard }).collect();
 
         Summary {
+            period,
             first: Date::of(span.first),
             before: Date::of(before.first),
             heard: bars.iter().sum(),
@@ -784,6 +786,9 @@ const FILE: &str = "listening.bin";
 /// The history and its file. The file only grows at its end: a song's first report
 /// adds a record, and later ones write over that record until the next begins, so a
 /// kill leaves every earlier play whole. Reading stops at a record that is cut short.
+/// (The default one has no file: it is what the app holds while the real one is told
+/// what plays.)
+#[derive(Default)]
 pub struct Log {
     history: History,
     tracker: Tracker,
