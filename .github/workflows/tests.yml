@@ -1,6 +1,7 @@
 name: Tests
 
-# Runs the tests and clippy on every pull request and on main, on Windows, Linux and macOS.
+# Runs the tests and clippy on every pull request and on main. The app is built for
+# Android; its tests run on the host, and one host is enough.
 on:
   pull_request:
   push:
@@ -17,12 +18,7 @@ concurrency:
 
 jobs:
   test:
-    strategy:
-      fail-fast: false
-      matrix:
-        # The same runners the release job builds on.
-        os: [windows-latest, ubuntu-22.04, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
 
@@ -33,13 +29,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install libraries
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libssl-dev libasound2-dev libgtk-3-dev libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev libdbus-1-dev
 
       - name: Test
         run: cargo test --locked
+
+      # What the Java side decides (widgets, audio focus, the car's lists), with a JDK alone.
+      - uses: actions/setup-java@v5
+        if: ${{ !cancelled() }}
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Java checks
+        if: ${{ !cancelled() }}
+        run: JAVA_HOME="$JAVA_HOME" sh android/test-java.sh
 
       # Also when a test failed, so one run shows both.
       - name: Clippy
