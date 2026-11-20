@@ -310,7 +310,9 @@ fn body(app: &mut App, ui: &mut Ui, now: f64) {
     }
     // The sleep timer, on the same line at the other end (its sheet is the phone's).
     if crate::platform::phone() {
-        super::sleep::chip(app, ui, pos2(area.left(), area.bottom() - 20.0));
+        let sleep = super::sleep::chip(app, ui, pos2(area.left(), area.bottom() - 20.0));
+        // Where the sound goes, between it and the lyrics button.
+        super::playon::chip(app, ui, sleep.right() + 8.0, area.right() - 64.0 - 17.0 - 8.0, area.bottom() - 20.0);
     }
 }
 

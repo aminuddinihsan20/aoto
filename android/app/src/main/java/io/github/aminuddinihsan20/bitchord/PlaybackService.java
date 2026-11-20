@@ -16,9 +16,7 @@ import android.graphics.drawable.Icon;
 import android.media.AudioAttributes;
 import android.media.AudioFocusRequest;
 import android.media.AudioManager;
-import android.media.MediaMetadata;
 import android.media.session.MediaSession;
-import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -34,7 +32,8 @@ import java.net.URL;
  * media notification (title, artist, artwork, previous / play-pause / next) and a media
  * session for the lock screen and headset buttons. What plays comes from the Rust app
  * (polled), and what is pressed goes back to it. The home-screen widgets (NowPlayingWidget)
- * show the same and are told from here whenever it changes.
+ * show the same and are told from here whenever it changes. The media session itself is
+ * the process's (PlayerSession), shared with a car's browser service.
  */
 public class PlaybackService extends Service {
     private static final String CHANNEL = "playback";
@@ -42,14 +41,16 @@ public class PlaybackService extends Service {
     private static final String ACTION_PREVIOUS = "io.github.aminuddinihsan20.bitchord.PREVIOUS";
     private static final String ACTION_TOGGLE = "io.github.aminuddinihsan20.bitchord.TOGGLE";
     private static final String ACTION_NEXT = "io.github.aminuddinihsan20.bitchord.NEXT";
-    private static final char FIELD = '\u001f';
 
     // Implemented in android/rust/src/lib.rs.
     private static native String nativeNowPlaying();
 
     private static native void nativeMediaCommand(int code, long arg);
 
-    private static final int PLAY = 1, PAUSE = 2, TOGGLE = 3, NEXT = 4, PREVIOUS = 5, SEEK = 6;
+    private static final int PLAY = AutoLogic.PLAY, PAUSE = AutoLogic.PAUSE, TOGGLE = AutoLogic.TOGGLE, NEXT = AutoLogic.NEXT, PREVIOUS = AutoLogic.PREVIOUS;
+
+    /** The service that runs, if one does (main thread only). */
+    private static PlaybackService running;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private MediaSession session;
@@ -73,6 +74,9 @@ public class PlaybackService extends Service {
     private long duration, position;
     /** How fast the position moves while playing: 1 as recorded (the app's playback speed). */
     private float speed = 1f;
+    /** How the queue repeats and the song's place in it, for a car's buttons and queue. */
+    private int repeat;
+    private long queueIndex = -1;
     private Bitmap cover;
     private String coverLoading = "";
     private int emptyPolls;
@@ -108,33 +112,8 @@ public class PlaybackService extends Service {
         wakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BitChord:playback");
         wakeLock.setReferenceCounted(false);
 
-        session = new MediaSession(this, "BitChord");
-        session.setCallback(new MediaSession.Callback() {
-            @Override
-            public void onPlay() {
-                nativeMediaCommand(PLAY, 0);
-            }
-
-            @Override
-            public void onPause() {
-                nativeMediaCommand(PAUSE, 0);
-            }
-
-            @Override
-            public void onSkipToNext() {
-                nativeMediaCommand(NEXT, 0);
-            }
-
-            @Override
-            public void onSkipToPrevious() {
-                nativeMediaCommand(PREVIOUS, 0);
-            }
-
-            @Override
-            public void onSeekTo(long pos) {
-                nativeMediaCommand(SEEK, pos);
-            }
-        });
+        session = PlayerSession.acquire(this);
+        running = this;
         // Without the app (see onStartCommand) there is nothing to ask and nothing to tell.
         boolean app = MainActivity.appRunning();
         session.setActive(app);
@@ -172,6 +151,30 @@ public class PlaybackService extends Service {
     /** Play, as the app's own button: what MainActivity does when a widget opened it to play. */
     static void play() {
         nativeMediaCommand(PLAY, 0);
+    }
+
+    /** A button of the media session (PlayerSession), for the app. Only with the app running. */
+    static void command(int code, long arg) {
+        nativeMediaCommand(code, arg);
+    }
+
+    /** The app's line of what plays. Only with the app running. */
+    static String nowPlaying() {
+        return nativeNowPlaying();
+    }
+
+    /** Does the player service run? Then it is the one that tells the session what plays. */
+    static boolean running() {
+        return running != null;
+    }
+
+    /** What the session carries changed (a car came or went, its queue arrived): say what plays again, as it is now. */
+    static void republish() {
+        if (running != null && MainActivity.appRunning()) {
+            running.lastLine = "";
+            running.published = false;
+            running.refresh();
+        }
     }
 
     /**
@@ -222,34 +225,35 @@ public class PlaybackService extends Service {
             return;
         }
         lastLine = line;
-        String[] f = line.split(String.valueOf(FIELD), -1);
-        if (f.length < 6) {
+        AutoLogic.Song now = AutoLogic.song(line);
+        if (now == null) {
             return;
         }
         boolean wasPlaying = playing;
-        String newCover = f[2];
-        // The seventh field is the playback speed in hundredths.
-        float newSpeed = f.length > 6 && parse(f[6]) > 0 ? parse(f[6]) / 100f : 1f;
+        String newCover = now.cover;
         // The position moves on by itself while a song plays, and the system counts it
         // on, at the speed it was told, from the last one it was told: only a change it
         // can't work out is published.
-        long now = android.os.SystemClock.elapsedRealtime();
-        long expected = publishedPosition + (wasPlaying ? (long) ((now - publishedAt) * speed) : 0);
-        boolean same = f[0].equals(title) && f[1].equals(artist) && newCover.equals(coverUrl)
-                && "1".equals(f[3]) == playing && parse(f[4]) == duration && newSpeed == speed
-                && Math.abs(parse(f[5]) - expected) < SEEK_SLACK_MS;
+        long clock = android.os.SystemClock.elapsedRealtime();
+        long expected = publishedPosition + (wasPlaying ? (long) ((clock - publishedAt) * speed) : 0);
+        boolean same = now.title.equals(title) && now.artist.equals(artist) && newCover.equals(coverUrl)
+                && now.playing == playing && now.duration == duration && now.speed == speed
+                && now.repeat == repeat && now.queueIndex == queueIndex
+                && Math.abs(now.position - expected) < SEEK_SLACK_MS;
         if (same && published) {
             if (playing) {
-                moveWidgetProgress(parse(f[5]));
+                moveWidgetProgress(now.position);
             }
             return;
         }
-        title = f[0];
-        artist = f[1];
-        playing = "1".equals(f[3]);
-        duration = parse(f[4]);
-        position = parse(f[5]);
-        speed = newSpeed;
+        title = now.title;
+        artist = now.artist;
+        playing = now.playing;
+        duration = now.duration;
+        position = now.position;
+        speed = now.speed;
+        repeat = now.repeat;
+        queueIndex = now.queueIndex;
         if (!newCover.equals(coverUrl)) {
             coverUrl = newCover;
             cover = null;
@@ -270,29 +274,20 @@ public class PlaybackService extends Service {
         publish();
     }
 
-    private static long parse(String s) {
-        try {
-            return Long.parseLong(s);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
     private void publish() {
         published = true;
         publishedPosition = position;
         publishedAt = android.os.SystemClock.elapsedRealtime();
-        session.setMetadata(new MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, artist)
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, duration)
-                .putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, cover)
-                .build());
-        session.setPlaybackState(new PlaybackState.Builder()
-                .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE | PlaybackState.ACTION_PLAY_PAUSE
-                        | PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS | PlaybackState.ACTION_SEEK_TO)
-                .setState(playing ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, position, playing ? speed : 0f)
-                .build());
+        AutoLogic.Song song = new AutoLogic.Song();
+        song.title = title;
+        song.artist = artist;
+        song.playing = playing;
+        song.duration = duration;
+        song.position = position;
+        song.speed = speed;
+        song.repeat = repeat;
+        song.queueIndex = queueIndex;
+        PlayerSession.show(song, cover);
         notifications.notify(NOTIFICATION_ID, buildNotification());
         widgetPercent = WidgetLogic.percent(position, duration);
         widgetProgressAt = publishedAt;
@@ -405,8 +400,11 @@ public class PlaybackService extends Service {
         if (wakeLock.isHeld()) {
             wakeLock.release();
         }
+        running = null;
         session.setActive(false);
-        session.release();
+        // A car's browser service may still hold the session: it says what there is to say from here.
+        PlayerSession.playerGone();
+        PlayerSession.release();
         // No player any more: the widgets' buttons would have no one to tell.
         NowPlayingWidget.clear(this);
         super.onDestroy();

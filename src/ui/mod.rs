@@ -5,6 +5,7 @@
 
 mod account;
 mod actions;
+mod auto;
 mod collections;
 mod dev;
 mod dialogs;
@@ -26,6 +27,7 @@ mod np_phone;
 mod pages;
 mod phone;
 mod playback;
+mod playon;
 mod queue;
 mod responses;
 mod sheet;
@@ -425,6 +427,10 @@ pub struct App {
     speed: f32,
     keep_pitch: bool,
     speed_sheet: bool,
+    /// "Play on": the sheet over Now Playing that says where the sound goes.
+    playon: playon::View,
+    /// Android Auto: what was last told to a connected car (`crate::auto`).
+    auto: auto::State,
     /// No silence between a song and the next (`crate::gapless`).
     gapless: bool,
     /// The song asked to stand by behind the playing one, to follow it without a gap.
@@ -824,6 +830,8 @@ impl App {
             speed: get("speed").and_then(|v| v.parse().ok()).map_or(1.0, crate::speed::nearest),
             keep_pitch: get("keep_pitch").is_none_or(|v| v == "1"),
             speed_sheet: false,
+            playon: Default::default(),
+            auto: Default::default(),
             gapless: get("gapless").is_none_or(|v| v == "1"),
             standby: None,
             carry: false,
@@ -912,6 +920,7 @@ impl App {
         sleep::dev_hooks(&mut app);
         stats::dev_hooks(&mut app);
         speed::dev_hooks(&mut app);
+        playon::dev_hooks(&mut app);
         // Dev hooks: YTM_SMOKE="query" searches and plays the first song ("id:<videoId>[,<videoId>…]"
         // plays that video); YTM_SEARCH
         // only searches; YTM_PAGE opens a page; YTM_NOWPLAYING opens the overlay.
@@ -1393,6 +1402,9 @@ impl eframe::App for App {
         if let Some(wait) = self.downloads_wake() {
             ctx.request_repaint_after(wait);
         }
+        if let Some(wait) = self.auto_wake() {
+            ctx.request_repaint_after(wait);
+        }
         let np = widgets::NowPlaying {
             song: self.current_id().map(str::to_owned),
             source: self.queue_source.clone(),
@@ -1578,11 +1590,13 @@ impl eframe::App for App {
         // The sleep timer's sheet goes with Now Playing, and so does the speed's.
         self.sleep_sheet.open &= self.np_open;
         self.speed_sheet &= self.np_open;
+        self.playon.open &= self.np_open;
         if np > 0.001 {
             let pages = theme::set_mode(&ctx, false);
             nowplaying::overlay(self, &ctx, now);
             sleep::sheet(self, &ctx);
             speed::sheet(self, &ctx);
+            playon::sheet(self, &ctx);
             lyric_share::overlay(self, &ctx);
             theme::set_mode(&ctx, pages);
         }

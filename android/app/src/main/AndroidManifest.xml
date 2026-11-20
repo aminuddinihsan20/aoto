@@ -16,6 +16,21 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
 
+    <!-- "Play on" opens Android's own output switcher, which the System UI (Android 12
+         and 13) or the Settings app (10 and 11) shows when asked; and the Bluetooth
+         settings where there is none. The app checks that a system app answers first. -->
+    <queries>
+        <intent>
+            <action android:name="com.android.systemui.action.LAUNCH_MEDIA_OUTPUT_DIALOG" />
+        </intent>
+        <intent>
+            <action android:name="com.android.settings.panel.action.MEDIA_OUTPUT" />
+        </intent>
+        <intent>
+            <action android:name="android.settings.BLUETOOTH_SETTINGS" />
+        </intent>
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -39,12 +54,42 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- "Play … on BitChord", said to the Assistant: with a car connected that goes
+                 to the media session; without one Android opens the app with it. Android
+                 Auto expects a media app to declare it. -->
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service
             android:name=".PlaybackService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <!-- Android Auto: the app is a media app (automotive_app_desc), and this is the
+             service a car connects to, to browse and to get the media session. Exported
+             for that; the service itself lets only the system, system apps and Android
+             Auto in (AutoLogic.allowed). -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+        <!-- The app's small one-colour icon beside what plays: under the name Android Auto
+             reads now, and the one it read before. -->
+        <meta-data
+            android:name="androidx.car.app.TintableAttributionIcon"
+            android:resource="@drawable/ic_stat_music" />
+        <meta-data
+            android:name="com.google.android.gms.car.notification.SmallIcon"
+            android:resource="@drawable/ic_stat_music" />
+        <service
+            android:name=".AutoBrowserService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
 
         <!-- The home-screen widgets (4×2, 2×2, 4×1): one receiver each, since each has its
              own sizes; the label is the widget's name in the widget picker. -->
