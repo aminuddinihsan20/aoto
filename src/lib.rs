@@ -27,6 +27,7 @@ mod innertube;
 mod jsc;
 mod lastfm;
 mod local;
+mod lossless;
 mod login;
 mod lyric_card;
 mod lyrics;

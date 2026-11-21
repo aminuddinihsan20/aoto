@@ -145,6 +145,8 @@ pub enum Action {
     /// Rows (indices into the open playlist) to take out of it.
     RemoveFromPlaylist(Vec<usize>),
     Download(Track),
+    /// Take a downloaded song off the phone.
+    RemoveDownload(Track),
     NewPlaylist(Vec<Track>),
     EditPlaylist,
     /// The open playlist's collaboration settings.
@@ -479,6 +481,8 @@ pub struct App {
     hires_checking: std::collections::HashSet<String>,
     /// Ask the addons for Dolby Atmos renditions.
     prefer_atmos: bool,
+    /// When an addon's lossless copy may play (Always, Wi-Fi only, Off).
+    lossless: crate::lossless::Lossless,
     /// What the playing stream is (codec, rate, depth, size), when a hi-res source
     /// supplied it, with the generation it belongs to.
     audio_info: Option<(u64, crate::hires::Info)>,
@@ -496,6 +500,8 @@ pub struct App {
     chrome_applied: Option<String>,
     /// Light or dark pages (the ytm-rs theme's; see `light_pages`).
     appearance: theme::Appearance,
+    /// Dark pages on true black (Settings › Appearance).
+    pure_black: bool,
     anim_bg: bool,
     reactive_bg: bool,
     /// Apple's moving album art. Off unless asked for: a sleeve needs a decoder, a
@@ -686,8 +692,12 @@ impl App {
         let hires_source = get("hires_source").unwrap_or_default();
         let hires_sources: Vec<String> = dedupe_hires(hires_source.lines().map(str::trim).filter(|l| !l.is_empty()));
         backend.set_hires_source(&hires_sources.join("\n"));
+        let pure_black = get("pure_black").is_some_and(|v| v == "1");
+        crate::material::set_pure_black(pure_black);
         let prefer_atmos = get("prefer_atmos").is_some_and(|v| v == "1");
         backend.set_prefer_atmos(prefer_atmos);
+        let lossless = crate::lossless::Lossless::from_code(&get("lossless").unwrap_or_default());
+        backend.set_lossless(lossless);
         let show_nerd_stats = get("show_nerd_stats").is_some_and(|v| v == "1");
         let disable_direct_stream = get("disable_direct_stream").is_some_and(|v| v == "1");
         backend.set_disable_direct_stream(disable_direct_stream);
@@ -857,6 +867,7 @@ impl App {
             hires_checks: Default::default(),
             hires_checking: Default::default(),
             prefer_atmos,
+            lossless,
             audio_info: None,
             show_nerd_stats,
             stream_stats: None,
@@ -869,6 +880,7 @@ impl App {
             theme_id: if crate::platform::phone() { crate::preset::MATERIAL_ID } else { crate::preset::DEFAULT_ID }.to_owned(),
             chrome_applied: None,
             // Dev hook: YTM_APPEARANCE=light|dark|system tries a mode without saving it.
+            pure_black,
             appearance: theme::Appearance::from_key(&dev_var("YTM_APPEARANCE").map(str::to_owned).or_else(|| get("appearance")).unwrap_or_default()),
             anim_bg: get("anim_bg").is_none_or(|v| v == "1"),
             reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
@@ -1279,6 +1291,13 @@ impl App {
 
     /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
     /// Settings › Appearance › Mode.
+    /// The Pure black switch was turned: draw with it from now on.
+    fn apply_pure_black(&self, ctx: &egui::Context) {
+        if crate::material::set_pure_black(self.pure_black) {
+            theme::restyle(ctx);
+        }
+    }
+
     fn light_pages(&self, ctx: &egui::Context) -> bool {
         let look = self.look();
         (look.id == crate::preset::DEFAULT_ID || look.material) && self.appearance.is_light(ctx)
@@ -1782,6 +1801,7 @@ impl eframe::App for App {
         }
         if dev_var("YTM_APPEARANCE").is_none() {
             storage.set_string("appearance", self.appearance.key().to_owned());
+            storage.set_string("pure_black", b(self.pure_black));
         }
         if std::env::var_os("YTM_THEME").is_none() {
             storage.set_string("theme", self.theme_id.clone());
@@ -1795,6 +1815,7 @@ impl eframe::App for App {
         storage.set_string("signature_api", self.signature_api.clone());
         storage.set_string("hires_source", self.hires_sources.join("\n"));
         storage.set_string("prefer_atmos", b(self.prefer_atmos));
+        storage.set_string("lossless", self.lossless.code().to_owned());
         storage.set_string("show_nerd_stats", b(self.show_nerd_stats));
         storage.set_string("disable_direct_stream", b(self.disable_direct_stream));
         storage.set_string("sponsorblock", b(self.sponsorblock));

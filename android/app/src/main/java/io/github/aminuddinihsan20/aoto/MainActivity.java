@@ -78,6 +78,8 @@ public class MainActivity extends GameActivity {
         appRunning = true;
         // Whatever an earlier run left on the home screen: nothing plays yet.
         NowPlayingWidget.refresh(this);
+        // The twice-a-day look for a newer release (a notification when there is one).
+        UpdateCheckJob.schedule(this);
         if (savedInstanceState == null) {
             playIfAsked(getIntent());
         }

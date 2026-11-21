@@ -1,5 +1,6 @@
 //! Page bodies. Every page fades and slides in when navigated to.
 
+use crate::lossless::Lossless;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
@@ -2905,6 +2906,35 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 ui.add_space(10.0);
             }
         }
+        Row::Lossless => {
+            let desc = "When an addon's lossless copy (FLAC and the like) may play instead of YouTube's. Those files are several times larger, so Wi-Fi only keeps mobile data for YouTube's stream. Off leaves the addons in the list, unused.";
+            let mut pick = None;
+            setting_row(ui, "Lossless from addons", Some(desc), |ui| {
+                if m3::on() {
+                    let labels = Lossless::ALL.map(|l| l.label());
+                    let chosen = Lossless::ALL.iter().position(|l| *l == app.lossless).unwrap_or(0);
+                    pick = m3::segmented(ui, &labels, chosen).map(|i| Lossless::ALL[i]);
+                    return;
+                }
+                let btn = dropdown_button(ui, app.lossless.label(), 160.0, "Lossless from addons");
+                egui::Popup::menu(&btn).show(|ui| {
+                    ui.set_width(160.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    ui.add_space(4.0);
+                    for l in Lossless::ALL {
+                        if option_row(ui, l.label(), l == app.lossless).clicked() {
+                            pick = Some(l);
+                            ui.close();
+                        }
+                    }
+                    ui.add_space(4.0);
+                });
+            });
+            if let Some(l) = pick {
+                app.lossless = l;
+                app.backend.set_lossless(l);
+            }
+        }
         Row::PreferAtmos => {
             setting_row(ui, "Prefer Dolby Atmos", Some("Ask the hi-res sources for a Dolby Atmos copy when they offer one. Falls back to the best stereo copy when the stream's codec can't be decoded."), |ui| {
                 if toggle(ui, &mut app.prefer_atmos, "Prefer Dolby Atmos").changed() {
@@ -3050,6 +3080,13 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
             if let Some(a) = pick {
                 app.appearance = a;
             }
+        }
+        Row::PureBlack => {
+            setting_row(ui, "Pure black", Some("In dark mode, a true black background instead of dark grey. Saves battery on OLED screens. Cards and sheets stay dark grey so they can be told apart."), |ui| {
+                if toggle(ui, &mut app.pure_black, "Pure black").changed() {
+                    app.apply_pure_black(ui.ctx());
+                }
+            });
         }
         Row::AnimatedBackground => {
             setting_row(ui, "Animated background", Some("The album art slowly drifts behind everything."), |ui| {
@@ -3320,6 +3357,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         settings_row(app, ui, Row::SkipNonMusic);
         divider(ui);
         settings_row(app, ui, Row::HiRes);
+        settings_row(app, ui, Row::Lossless);
         settings_row(app, ui, Row::PreferAtmos);
         settings_row(app, ui, Row::DisableDirect);
     });

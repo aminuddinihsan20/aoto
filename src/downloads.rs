@@ -304,6 +304,40 @@ pub fn list() -> Vec<Track> {
     out.into_iter().map(|(_, t)| t).collect()
 }
 
+/// Forget `video_id` and delete its file. A file that is already gone still counts as
+/// removed; one that can't be deleted (a refused permission) keeps its entry, so the song
+/// doesn't vanish from the list while its file stays and takes the room.
+fn forget(index: &mut HashMap<String, Entry>, video_id: &str) -> std::io::Result<Option<PathBuf>> {
+    let Some(entry) = index.get(video_id) else { return Ok(None) };
+    match std::fs::remove_file(&entry.path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    Ok(index.remove(video_id).map(|e| e.path))
+}
+
+/// Delete a downloaded song's file from the app's storage and drop it from the list.
+/// On Android the copy in the folder the listener chose stays: it is theirs.
+/// Returns whether the song was removed.
+pub fn remove(video_id: &str) -> bool {
+    let mut st = STATE.write().unwrap();
+    match forget(&mut st.index, video_id) {
+        Ok(Some(path)) => {
+            log::info!("{video_id}: download removed ({})", path.display());
+            if let Ok(json) = serde_json::to_vec(&st.index) {
+                let _ = std::fs::write(&st.file, json);
+            }
+            true
+        }
+        Ok(None) => false,
+        Err(e) => {
+            log::warn!("{video_id}: couldn't remove the download: {e}");
+            false
+        }
+    }
+}
+
 /// The downloaded song version of the music video `video_id`, if its file is still there.
 pub fn song_for(video_id: &str) -> Option<Track> {
     let st = STATE.read().unwrap();
@@ -498,5 +532,58 @@ mod tests {
         let t = track("What? / Why: \"Now\"...", vec![Link { name: "AC/DC".into(), id: None }]);
         assert_eq!(file_stem(&t), "AC_DC - What_ _ Why_ _Now_");
         assert_eq!(file_stem(&track("...", Vec::new())), "abc");
+    }
+
+    fn entry_at(path: PathBuf) -> Entry {
+        Entry { path, duration_ms: 1000, loudness_db: None, stands_for: None, song: None }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aoto-test-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn removing_a_download_deletes_its_file_and_forgets_it() {
+        let dir = temp_dir("remove-one");
+        let (a, b) = (dir.join("a.m4a"), dir.join("b.m4a"));
+        std::fs::write(&a, b"audio").unwrap();
+        std::fs::write(&b, b"audio").unwrap();
+        let mut index = HashMap::from([("a".to_owned(), entry_at(a.clone())), ("b".to_owned(), entry_at(b.clone()))]);
+        assert_eq!(forget(&mut index, "a").unwrap(), Some(a.clone()));
+        assert!(!a.exists());
+        assert!(!index.contains_key("a"));
+        assert!(b.is_file() && index.contains_key("b"), "another song's file is left alone");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_download_whose_file_is_already_gone_is_still_forgotten() {
+        let dir = temp_dir("remove-gone");
+        let mut index = HashMap::from([("a".to_owned(), entry_at(dir.join("moved-away.m4a")))]);
+        assert!(forget(&mut index, "a").unwrap().is_some());
+        assert!(index.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn removing_a_song_that_was_never_downloaded_changes_nothing() {
+        let mut index = HashMap::from([("a".to_owned(), entry_at(PathBuf::from("/nowhere/a.m4a")))]);
+        assert_eq!(forget(&mut index, "zzz").unwrap(), None);
+        assert_eq!(index.len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_deleted_keeps_its_entry() {
+        let dir = temp_dir("remove-refused");
+        // A folder in the file's place: remove_file refuses it.
+        let path = dir.join("not-a-file.m4a");
+        std::fs::create_dir_all(&path).unwrap();
+        let mut index = HashMap::from([("a".to_owned(), entry_at(path.clone()))]);
+        assert!(forget(&mut index, "a").is_err());
+        assert!(index.contains_key("a"), "still listed: its file is still there");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

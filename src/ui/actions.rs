@@ -140,6 +140,13 @@ impl App {
                 self.toast("Link copied");
             }
             Action::Download(track) => self.download_song(track),
+            Action::RemoveDownload(track) => {
+                if crate::downloads::remove(&track.id) {
+                    self.toast(format!("Removed \u{201c}{}\u{201d} from downloads", track.title));
+                } else {
+                    self.toast("Couldn't remove the download");
+                }
+            }
             Action::AddToPlaylist(tracks) => {
                 if self.logged_in { self.dialog = Some(Dialog::PickPlaylist(tracks)); }
                 else { self.toast("Sign in to edit playlists"); }

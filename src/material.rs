@@ -70,6 +70,19 @@ impl Scheme {
         on_error: rgb(0x690005),
     };
 
+    /// The dark scheme on a true black page, for OLED screens. The surfaces are the dark
+    /// scheme's moved one step down, so a card still stands out from the page; the
+    /// colours of text and accents are the same.
+    pub const BLACK: Scheme = Scheme {
+        surface: rgb(0x000000),
+        surface_container_lowest: rgb(0x000000),
+        surface_container_low: rgb(0x0F0F12),
+        surface_container: rgb(0x17171B),
+        surface_container_high: rgb(0x1F1F24),
+        surface_container_highest: rgb(0x2A2A2E),
+        ..Scheme::DARK
+    };
+
     /// The light scheme, from the same seed.
     pub const LIGHT: Scheme = Scheme {
         primary: rgb(0x545B8B),
@@ -152,7 +165,26 @@ pub fn scheme() -> &'static Scheme {
 
 /// The scheme for light pages or dark ones.
 pub fn scheme_for(light: bool) -> &'static Scheme {
-    if light { &Scheme::LIGHT } else { &Scheme::DARK }
+    pick(light, PURE_BLACK.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Settings › Appearance › Pure black: dark pages on a true black background.
+static PURE_BLACK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Draw dark pages on true black (or back on the dark grey). Returns whether it changed,
+/// so the caller knows to restyle.
+pub fn set_pure_black(on: bool) -> bool {
+    PURE_BLACK.swap(on, std::sync::atomic::Ordering::Relaxed) != on
+}
+
+/// The scheme for light or dark pages; `black`: dark pages are pure black. Light pages
+/// are not affected.
+fn pick(light: bool, black: bool) -> &'static Scheme {
+    match (light, black) {
+        (true, _) => &Scheme::LIGHT,
+        (false, true) => &Scheme::BLACK,
+        (false, false) => &Scheme::DARK,
+    }
 }
 
 /// Is the look being drawn Material You? Then the older colour helpers answer with
@@ -193,7 +225,7 @@ pub fn song_backdrop_for(song: Color32, light: bool) -> (Color32, Color32) {
     // brighter than the designs' tone, so the text over it reads the same.
     let k = (0.215 / (0.299 * tone[0] + 0.587 * tone[1] + 0.114 * tone[2])).min(1.0);
     let top = tone.map(|c| (c * k * 255.0).round() as u8);
-    (Color32::from_rgb(top[0], top[1], top[2]), Scheme::DARK.surface)
+    (Color32::from_rgb(top[0], top[1], top[2]), scheme_for(false).surface)
 }
 
 // ------------------------------------------------------------------ type scale
@@ -366,6 +398,32 @@ mod tests {
     fn light_pages_take_the_light_scheme_and_dark_ones_the_dark() {
         assert_eq!(*scheme_for(false), Scheme::DARK);
         assert_eq!(*scheme_for(true), Scheme::LIGHT);
+    }
+
+    #[test]
+    fn pure_black_changes_only_dark_pages() {
+        assert_eq!(*pick(false, false), Scheme::DARK);
+        assert_eq!(*pick(false, true), Scheme::BLACK);
+        assert_eq!(*pick(true, true), Scheme::LIGHT, "light pages are left as they are");
+        assert_eq!(*pick(true, false), Scheme::LIGHT);
+    }
+
+    #[test]
+    fn the_black_scheme_has_a_black_page_and_surfaces_that_still_step_up_from_it() {
+        let b = Scheme::BLACK;
+        assert_eq!(b.surface, Color32::BLACK);
+        let steps = [b.surface_container_lowest, b.surface_container_low, b.surface_container, b.surface_container_high, b.surface_container_highest];
+        let luma = |c: Color32| c.r() as u32 + c.g() as u32 + c.b() as u32;
+        for pair in steps.windows(2) {
+            assert!(luma(pair[0]) <= luma(pair[1]), "{pair:?}");
+        }
+        assert!(luma(b.surface_container_low) > luma(b.surface), "a card stands out from the page");
+    }
+
+    #[test]
+    fn the_black_scheme_keeps_the_dark_schemes_text_and_accents() {
+        let (b, d) = (Scheme::BLACK, Scheme::DARK);
+        assert_eq!((b.primary, b.on_primary, b.on_surface, b.on_surface_variant, b.outline, b.error), (d.primary, d.on_primary, d.on_surface, d.on_surface_variant, d.outline, d.error));
     }
 
     #[test]

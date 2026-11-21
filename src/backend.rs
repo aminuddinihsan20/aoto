@@ -510,6 +510,8 @@ pub struct Backend {
     hires: Arc<std::sync::RwLock<Vec<Arc<hires::Client>>>>,
     /// Ask the addons for Dolby Atmos renditions when they offer one.
     atmos: Arc<std::sync::atomic::AtomicBool>,
+    /// When the addons' lossless copies may play (the Sound & quality setting).
+    lossless: Arc<std::sync::RwLock<crate::lossless::Lossless>>,
     /// Play YouTube first and upgrade to hi-res in the background.
     disable_direct: Arc<std::sync::atomic::AtomicBool>,
     /// Songs the listener sent back to YouTube audio: no addon copy until they leave.
@@ -544,7 +546,7 @@ impl Backend {
         {
             log::warn!("proxy relay: {e:#}");
         }
-        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), hires: Default::default(), atmos: Default::default(), disable_direct: Default::default(), reverted: Default::default(), songs: Default::default() };
+        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), hires: Default::default(), atmos: Default::default(), lossless: Default::default(), disable_direct: Default::default(), reverted: Default::default(), songs: Default::default() };
         backend.keep_signed_in();
         Ok(backend)
     }
@@ -1474,7 +1476,7 @@ impl Backend {
     async fn resolve(&self, video_id: &str, best: bool, track: Option<&Track>, allow_hires: bool, prefetch: bool) -> anyhow::Result<(Source, ResolvedStream)> {
         // The listener's addons answer for the songs they have; when they miss, YouTube plays.
         let reverted = self.reverted.lock().unwrap().contains(video_id);
-        let hires = if allow_hires && !reverted { self.hires.read().unwrap().clone() } else { Vec::new() };
+        let hires = if allow_hires && !reverted && self.addons_may_play() { self.hires.read().unwrap().clone() } else { Vec::new() };
         if let Some(track) = track
             && !hires.is_empty()
         {
@@ -1678,6 +1680,17 @@ impl Backend {
         self.atmos.store(on, Ordering::Relaxed);
     }
 
+    /// Keep the addons' lossless copies to Wi-Fi, or off for now (`Lossless::Always` is the
+    /// way it was before the setting).
+    pub fn set_lossless(&self, rule: crate::lossless::Lossless) {
+        *self.lossless.write().unwrap() = rule;
+    }
+
+    /// May an addon's copy play on the connection the phone has right now?
+    fn addons_may_play(&self) -> bool {
+        self.lossless.read().unwrap().allows(crate::platform::network())
+    }
+
     /// Play YouTube immediately and upgrade to hi-res in the background.
     pub fn set_disable_direct_stream(&self, on: bool) {
         self.disable_direct.store(on, Ordering::Relaxed);
@@ -1703,7 +1716,7 @@ impl Backend {
             return;
         }
         let hires = self.hires.read().unwrap().clone();
-        if hires.is_empty() {
+        if hires.is_empty() || !self.addons_may_play() {
             return;
         }
 

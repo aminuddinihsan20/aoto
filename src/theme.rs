@@ -39,6 +39,11 @@ pub fn set_mode(ctx: &egui::Context, light: bool) -> bool {
     was
 }
 
+/// Redraw egui's colours after the scheme changed under the same mode (Pure black).
+pub fn restyle(ctx: &egui::Context) {
+    ctx.global_style_mut(|s| s.visuals = visuals());
+}
+
 /// The Material scheme, while Material You is the look being drawn: the colour helpers
 /// below then answer with its roles (see `Scheme::tone`).
 fn material() -> Option<&'static crate::material::Scheme> {
