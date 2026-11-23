@@ -695,6 +695,7 @@ impl App {
         crate::downloads::init(backend.data_dir(), &get("download_dir").unwrap_or_default());
         let downloads = downloading::Downloading::load(backend.data_dir(), get("download_wifi_only").is_none_or(|v| v == "1"));
         crate::local::init(backend.data_dir());
+        crate::webdav::init(backend.data_dir());
         crate::lastfm::init(backend.data_dir());
         let listening = crate::stats::Log::open(backend.data_dir(), stats::today());
         let logged_in = backend.is_logged_in();

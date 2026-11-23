@@ -1018,7 +1018,7 @@ fn addon_err(e: reqwest::Error) -> anyhow::Error {
 }
 
 /// How many bytes the stream holds, from a HEAD or a one-byte range request.
-async fn content_size(http: &reqwest::Client, url: &str) -> Option<u64> {
+pub(crate) async fn content_size(http: &reqwest::Client, url: &str) -> Option<u64> {
     if let Ok(response) = http.head(url).timeout(PROBE_TIMEOUT).header("User-Agent", agent()).send().await
         && response.status().is_success()
         && let Some(size) = response.content_length().filter(|n| *n > 0)
