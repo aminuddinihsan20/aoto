@@ -31,7 +31,6 @@ impl App {
             Dialog::EditPlaylist { .. } => "Edit playlist",
             Dialog::ConfirmDelete { .. } => "Delete playlist",
             Dialog::Collaborate { .. } => "Collaborate",
-            Dialog::AddWebDav { .. } => "Add a WebDAV server",
         };
         // The same modal card as "Delete playlist?" and the update dialog.
         let modal = egui::Modal::new(egui::Id::unique("playlist-dialog")).frame(notes::surface()).backdrop_color(theme::shade(0.55)).show(ctx, |ui| {
@@ -97,31 +96,6 @@ impl App {
                         done |= cancel;
                     }
                     Dialog::Collaborate { info, busy, confirm_off, .. } => done = self.collaborate_dialog(ui, info, busy, confirm_off, accent),
-                    Dialog::AddWebDav { name, url, user, password, busy, error } => {
-                        text_field(ui, "Name", name, false, "My NAS");
-                        ui.add_space(12.0);
-                        text_field(ui, "Address", url, false, "https://nas.local/dav/Music/");
-                        ui.add_space(12.0);
-                        text_field(ui, "User name", user, false, "Leave empty if there is none");
-                        ui.add_space(12.0);
-                        text_field_with(ui, "Password", password, false, true, "");
-                        ui.add_space(10.0);
-                        let note = if *busy { Some(("Connecting and looking for music\u{2026}".to_owned(), theme::text_dim())) } else { error.clone().map(|e| (e, theme::RED)) };
-                        if let Some((text, colour)) = note {
-                            ui.label(egui::RichText::new(text).font(theme::regular(13.0)).color(colour));
-                        }
-                        ui.add_space(16.0);
-                        let ready = !*busy && !name.trim().is_empty() && !url.trim().is_empty();
-                        let (ok, cancel) = dialog_buttons(ui, "Add", ready, accent);
-                        if ok && ready {
-                            let server = crate::webdav::Server { id: crate::webdav::server_id(url, user), name: name.trim().to_owned(), url: url.trim().to_owned(), user: user.trim().to_owned() };
-                            self.dav_busy.insert(server.id.clone());
-                            self.backend.request(Req::AddWebDav { server, password: password.clone() });
-                            *busy = true;
-                            *error = None;
-                        }
-                        done |= cancel;
-                    }
                     Dialog::ConfirmDelete { .. } => unreachable!("drawn by confirm_delete"),
                 }
             });
@@ -213,7 +187,6 @@ pub(super) fn dev_hooks(app: &mut App) {
         Some("new") => Some(Dialog::NewPlaylist { title: String::new(), tracks: Vec::new() }),
         Some("edit") => Some(Dialog::EditPlaylist { id: "dev".into(), title: "Pop Indonesia 90an".into(), description: String::new(), privacy: Some("PRIVATE".into()) }),
         Some("delete") => Some(Dialog::ConfirmDelete { id: "dev".into(), title: "Pop Indonesia 90an".into() }),
-        Some("webdav") => Some(Dialog::AddWebDav { name: "Rumah NAS".into(), url: "https://nas.local/dav/Music/".into(), user: "ani".into(), password: "rahasia".into(), busy: false, error: Some("the user name or password was refused".into()) }),
         _ => return,
     };
 }
@@ -232,23 +205,18 @@ fn field_label(ui: &mut Ui, label: &str) {
 
 /// A labelled text box on a glass fill, like the jam and transfer pages' inputs.
 pub(super) fn text_field(ui: &mut Ui, label: &str, text: &mut String, multiline: bool, hint: &str) -> egui::Response {
-    text_field_with(ui, label, text, multiline, false, hint)
-}
-
-/// [`text_field`]; `secret`: what is typed shows as dots (a password).
-pub(super) fn text_field_with(ui: &mut Ui, label: &str, text: &mut String, multiline: bool, secret: bool, hint: &str) -> egui::Response {
     use egui::{Sense, vec2};
     if !label.is_empty() {
         field_label(ui, label);
     }
     if m3::on() {
-        return m3::text_field_with(ui, text, hint, multiline, secret);
+        return m3::text_field(ui, text, hint, multiline);
     }
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), if multiline { 96.0 } else { 42.0 }), Sense::hover());
     // Painted first, so the text box draws over it.
     let bg = ui.painter().add(egui::Shape::Noop);
     let inner = rect.shrink2(vec2(14.0, if multiline { 10.0 } else { 4.0 }));
-    let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER).password(secret) };
+    let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER) };
     let resp = ui.put(
         inner,
         edit.hint_text(egui::RichText::new(hint).color(theme::text_faint())).font(theme::regular(14.0)).frame(egui::Frame::NONE).desired_width(inner.width()),

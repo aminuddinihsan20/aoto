@@ -31,7 +31,7 @@ impl Tab {
             Page::Home | Page::New => Tab::Home,
             Page::Search(_) => Tab::Search,
             Page::Library(_) => Tab::Library,
-            Page::Downloads | Page::LocalFolder(_) | Page::WebDav(_) | Page::LocalAlbum(_) | Page::LocalSongs | Page::Downloaded(_) => Tab::Downloads,
+            Page::Downloads | Page::LocalFolder(_) | Page::LocalAlbum(_) | Page::LocalSongs | Page::Downloaded(_) => Tab::Downloads,
             Page::Album(_) | Page::Playlist(_) | Page::Artist(_) | Page::Settings | Page::SettingsCategory(_) | Page::Transfer | Page::Equalizer | Page::Stats => last,
         }
     }
@@ -556,8 +556,6 @@ mod tests {
         assert_eq!(Tab::of(&Page::LocalFolder("content://t/jp".into()), Tab::Home), Tab::Downloads);
         assert_eq!(Tab::of(&Page::Downloaded("PL123".into()), Tab::Home), Tab::Downloads);
         assert!(!Tab::is_root(&Page::LocalFolder("content://t/jp".into())));
-        assert_eq!(Tab::of(&Page::WebDav("abc".into()), Tab::Home), Tab::Downloads);
-        assert!(!Tab::is_root(&Page::WebDav("abc".into())));
     }
 
     #[test]

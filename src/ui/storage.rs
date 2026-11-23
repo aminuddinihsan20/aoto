@@ -70,34 +70,6 @@ impl App {
         });
     }
 
-    /// A WebDAV server's answer: how many songs it holds, or why not. A server being added
-    /// closes its dialog on success and shows the reason in it on failure.
-    pub(super) fn webdav_scanned(&mut self, id: String, added: bool, result: Result<usize, String>) {
-        self.dav_busy.remove(&id);
-        match result {
-            Ok(n) => {
-                if added && matches!(self.dialog, Some(super::Dialog::AddWebDav { .. })) {
-                    self.dialog = None;
-                }
-                self.toast(if n == 1 { "Found 1 song on the server".to_owned() } else { format!("Found {n} songs on the server") });
-            }
-            Err(e) => match &mut self.dialog {
-                Some(super::Dialog::AddWebDav { busy, error, .. }) if added => {
-                    *busy = false;
-                    *error = Some(e);
-                }
-                _ => self.toast(format!("Couldn't read the server: {e}")),
-            },
-        }
-    }
-
-    /// Look through a kept WebDAV server again.
-    pub(super) fn scan_webdav(&mut self, id: &str) {
-        if self.dav_busy.insert(id.to_owned()) {
-            self.backend.request(crate::backend::Req::ScanWebDav { id: id.to_owned() });
-        }
-    }
-
     pub(super) fn scanning(&self, uri: &str) -> bool {
         self.storage.lock().unwrap_or_else(|e| e.into_inner()).scanning.iter().any(|u| u == uri)
     }

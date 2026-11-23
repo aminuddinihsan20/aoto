@@ -72,10 +72,6 @@ pub enum Req {
     CheckHiResSource { key: String, link: String },
     /// A playlist that was downloaded whole: its songs as they are now, for the ones added since.
     SyncPlaylist { id: String },
-    /// A WebDAV server to add: test it, keep it, look for music on it.
-    AddWebDav { server: crate::webdav::Server, password: String },
-    /// Look for music on a kept WebDAV server again.
-    ScanWebDav { id: String },
     /// Radio seeded from a track (`seed`, its id); appended to the queue. `song_of`: the
     /// track, when it's a music video to play as its song: the song's radio is asked for.
     Radio { seed: String, song_of: Option<Track> },
@@ -141,7 +137,6 @@ impl Req {
             Req::ArtistSignature { .. } => "Artist signature",
             Req::CheckHiResSource { .. } => "Testing source",
             Req::SyncPlaylist { .. } => "Updating a downloaded playlist",
-            Req::AddWebDav { .. } | Req::ScanWebDav { .. } => "Looking for music on a server",
             Req::Radio { .. } => "Loading radio",
             Req::PlayCollection { .. } => "Playback",
             Req::Play { .. } => "Playback",
@@ -164,7 +159,7 @@ impl Req {
 
     /// Background requests fail quietly (logged, no toast).
     fn quiet(&self) -> bool {
-        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::SyncPlaylist { .. } | Req::AddWebDav { .. } | Req::ScanWebDav { .. } | Req::Prefetch { .. } | Req::Standby { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
+        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::SyncPlaylist { .. } | Req::Prefetch { .. } | Req::Standby { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
     }
 }
 
@@ -290,8 +285,6 @@ pub enum Resp {
     CollectionMore { id: String, load: u64, tracks: Vec<Track>, set_ids: Vec<Option<String>>, more: bool },
     /// A downloaded playlist as it is now (see `Req::SyncPlaylist`).
     PlaylistSynced(Collection),
-    /// A WebDAV server was looked through: how many songs, or why not.
-    WebDavScanned { id: String, added: bool, result: Result<usize, String> },
     Artist(ArtistPage),
     Library(Library),
     History(Vec<Track>),
@@ -759,18 +752,6 @@ impl Backend {
                 Req::Playlist { id, load, stream: false } => Resp::Collection { load, c: ytm::playlist(api, &id, me, None).await?, more: false },
                 Req::Playlist { id, load, stream: true } => self.stream_playlist(id, load, me).await?,
                 Req::SyncPlaylist { id } => Resp::PlaylistSynced(ytm::playlist(api, &id, me, None).await?),
-                Req::AddWebDav { server, password } => {
-                    let id = server.id.clone();
-                    let result = self.add_webdav(&server, &password).await.map_err(|e| format!("{e:#}"));
-                    Resp::WebDavScanned { id, added: true, result }
-                }
-                Req::ScanWebDav { id } => {
-                    let result = match crate::webdav::server_with_password(&id) {
-                        Some((server, password)) => self.scan_webdav(&server, &password).await.map_err(|e| format!("{e:#}")),
-                        None => Err("that server is not added any more".to_owned()),
-                    };
-                    Resp::WebDavScanned { id, added: false, result }
-                }
                 Req::Artist(id) => Resp::Artist(ytm::artist(api, &id).await?),
                 Req::Library => self.library().await?,
                 Req::History => Resp::History(ytm::history(api).await?),
@@ -1510,28 +1491,6 @@ impl Backend {
             }
         };
         crate::lyric_tag::text(crate::lyric_tag::choose(&set)?)
-    }
-
-    /// Test a WebDAV server, keep it, and look for music on it. A server that fails its test
-    /// is not kept; one whose scan fails after a good test is taken out again.
-    async fn add_webdav(&self, server: &crate::webdav::Server, password: &str) -> anyhow::Result<usize> {
-        let http = self.http();
-        crate::webdav::list(&http, server, password, &crate::webdav::root_path(server)?).await?;
-        crate::webdav::add_server(server.clone(), password)?;
-        match self.scan_webdav(server, password).await {
-            Ok(n) => Ok(n),
-            Err(e) => {
-                crate::webdav::remove_server(&server.id);
-                Err(e)
-            }
-        }
-    }
-
-    async fn scan_webdav(&self, server: &crate::webdav::Server, password: &str) -> anyhow::Result<usize> {
-        let files = crate::webdav::scan(&self.http(), server, password).await?;
-        let n = files.len();
-        crate::webdav::set_files(&server.id, files);
-        Ok(n)
     }
 
     /// An addon's FLAC copy of `t` to save, when one has it and the rules allow. Only a FLAC
