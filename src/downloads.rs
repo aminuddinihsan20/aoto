@@ -344,6 +344,26 @@ pub fn remove(video_id: &str) -> bool {
     }
 }
 
+/// The key a saved copy of `id` has in `index`: `id` itself, or the song that was saved
+/// for the music video `id`. Only a file that is still there counts.
+fn saved_key_in(index: &HashMap<String, Entry>, id: &str) -> Option<String> {
+    if index.get(id).is_some_and(|e| e.path.is_file()) {
+        return Some(id.to_owned());
+    }
+    index.iter().find(|(_, e)| e.stands_for.as_deref() == Some(id) && e.path.is_file()).map(|(k, _)| k.clone())
+}
+
+/// The key `id`'s saved copy has, whether `id` is the song or the music video it was saved
+/// for (the same song, shown under another id). `None`: not saved.
+pub fn saved_key(id: &str) -> Option<String> {
+    saved_key_in(&STATE.read().unwrap().index, id)
+}
+
+/// Is a copy of this song saved on the phone, under whichever id it is shown?
+pub fn is_saved(id: &str) -> bool {
+    saved_key(id).is_some()
+}
+
 /// The downloaded song version of the music video `video_id`, if its file is still there.
 pub fn song_for(video_id: &str) -> Option<Track> {
     let st = STATE.read().unwrap();
@@ -630,6 +650,31 @@ mod tests {
         let mut index = HashMap::from([("a".to_owned(), entry_at(path.clone()))]);
         assert!(forget(&mut index, "a").is_err());
         assert!(index.contains_key("a"), "still listed: its file is still there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_song_saved_for_a_music_video_is_found_under_the_videos_id_too() {
+        let dir = temp_dir("saved-key");
+        let file = dir.join("a.m4a");
+        std::fs::write(&file, b"x").unwrap();
+        let mut entry = entry_at(file.clone());
+        entry.stands_for = Some("videoX".into());
+        let index = HashMap::from([("songA".to_owned(), entry), ("songB".to_owned(), entry_at(dir.join("gone.m4a")))]);
+        assert_eq!(saved_key_in(&index, "songA").as_deref(), Some("songA"), "by its own id");
+        assert_eq!(saved_key_in(&index, "videoX").as_deref(), Some("songA"), "by the video it stands for");
+        assert_eq!(saved_key_in(&index, "songB"), None, "its file is gone");
+        assert_eq!(saved_key_in(&index, "other"), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_saved_song_whose_file_is_gone_is_not_found_by_the_video_either() {
+        let dir = temp_dir("saved-key-gone");
+        let mut entry = entry_at(dir.join("gone.m4a"));
+        entry.stands_for = Some("videoX".into());
+        let index = HashMap::from([("songA".to_owned(), entry)]);
+        assert_eq!(saved_key_in(&index, "videoX"), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

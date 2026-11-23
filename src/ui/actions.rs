@@ -141,7 +141,9 @@ impl App {
             }
             Action::Download(track) => self.download_song(track),
             Action::RemoveDownload(track) => {
-                if crate::downloads::remove(&track.id) {
+                // The song may be shown under the id of a music video it was saved for.
+                let key = crate::downloads::saved_key(&track.id).unwrap_or_else(|| track.id.clone());
+                if crate::downloads::remove(&key) {
                     self.toast(format!("Removed \u{201c}{}\u{201d} from downloads", track.title));
                 } else {
                     self.toast("Couldn't remove the download");

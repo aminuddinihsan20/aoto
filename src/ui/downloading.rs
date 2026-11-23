@@ -44,7 +44,7 @@ struct SheetFor {
 
 /// Is this song saved (and its file still there)?
 fn downloaded(video_id: &str) -> bool {
-    crate::downloads::path(video_id).is_some()
+    crate::downloads::is_saved(video_id)
 }
 
 /// Keep the queue in `file` for the next launch; an empty one leaves no file.
@@ -128,6 +128,10 @@ impl App {
 
     /// Download one song (its menu's Download).
     pub(super) fn download_song(&mut self, track: Track) {
+        if downloaded(&track.id) {
+            self.toast(format!("\u{201c}{}\u{201d} is already downloaded", track.title));
+            return;
+        }
         // The song version playing for a music video: that video plays the file too.
         let for_video = if self.playing_as().is_some_and(|s| s.id == track.id) { self.current_id().map(str::to_owned) } else { None };
         self.ask_download(Ask { kind: Kind::Song, key: track.id.clone(), title: track.title.clone(), thumbs: track.thumbs.clone(), songs: vec![Song { track, for_video }] });

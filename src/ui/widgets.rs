@@ -756,10 +756,10 @@ pub fn song_actions(ui: &mut Ui, t: &Track, liked: bool, remove: Option<usize>, 
     {
         acts.push(Action::RemoveFromPlaylist(vec![i]));
     }
-    match crate::downloads::path(&t.id) {
+    match crate::downloads::is_saved(&t.id).then_some(()) {
         // The file is in the app's own storage, where "show in folder" leads nowhere on a
         // phone: what a listener can do with a saved song is take it off the phone.
-        Some(_) => {
+        Some(()) => {
             if menu_action(ui, Some(icon::TRASH_2), "Remove download") {
                 acts.push(Action::RemoveDownload(t.clone()));
             }
