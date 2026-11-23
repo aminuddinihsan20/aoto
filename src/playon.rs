@@ -36,6 +36,18 @@ impl Kind {
         }
     }
 
+    /// What to tell the listener about a lossless song on this output, or `None` when
+    /// there is nothing true to add. Only what is known: Aoto sees how the sound leaves
+    /// the phone (the kind of output), not which Bluetooth codec carries it.
+    pub fn lossless_note(self) -> Option<&'static str> {
+        match self {
+            Kind::Wired | Kind::Usb | Kind::External => Some("Leaves the phone uncompressed."),
+            Kind::Bluetooth => Some("Bluetooth compresses the sound. LDAC, LHDC and aptX Lossless come close; Aoto can't see which one this device uses."),
+            Kind::Phone => Some("Plays uncompressed, but a phone speaker can't show the difference."),
+            Kind::HearingAid | Kind::Other => None,
+        }
+    }
+
     pub fn from_code(code: i32) -> Option<Kind> {
         Some(match code {
             0 => Kind::Phone,
@@ -302,5 +314,22 @@ mod tests {
         let mut s = Slider::default();
         assert_eq!(s.shown(4, 0.0), 4);
         assert_eq!(s.shown(6, 5.0), 6);
+    }
+
+    #[test]
+    fn a_lossless_song_is_told_what_the_output_does_to_it() {
+        for kind in [Kind::Wired, Kind::Usb, Kind::External] {
+            assert!(Kind::lossless_note(kind).unwrap().contains("uncompressed"), "{kind:?}");
+        }
+        let bluetooth = Kind::Bluetooth.lossless_note().unwrap();
+        assert!(bluetooth.contains("compresses") && bluetooth.contains("can't see"), "it does not claim to know the codec");
+        assert!(Kind::Phone.lossless_note().unwrap().contains("speaker"));
+        assert_eq!(Kind::HearingAid.lossless_note(), None);
+        assert_eq!(Kind::Other.lossless_note(), None);
+    }
+
+    #[test]
+    fn bluetooth_is_never_said_to_be_uncompressed() {
+        assert!(!Kind::Bluetooth.lossless_note().unwrap().contains("uncompressed"));
     }
 }

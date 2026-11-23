@@ -100,6 +100,9 @@ pub struct AudioStatus {
     automix: AtomicBool,
     /// Spatial audio for headphones (see `crate::spatial`).
     spatial: AtomicBool,
+    /// How wide spatial audio makes the image: 0 until a level is chosen (then the default
+    /// one), else the level's index + 1 (see `crate::spatial::Level`).
+    spatial_level: std::sync::atomic::AtomicU8,
     /// The equalizer's settings (see `crate::eq`), read by every song that plays.
     eq: crate::eq::Shared,
     /// The playback speed (see `crate::speed`), read by every song that plays.
@@ -117,6 +120,14 @@ pub struct AudioStatus {
 }
 
 impl AudioStatus {
+    /// The chosen spatial audio level (the default until one is chosen).
+    fn spatial_level(&self) -> crate::spatial::Level {
+        match self.spatial_level.load(Ordering::Relaxed) {
+            0 => crate::spatial::Level::default(),
+            n => crate::spatial::Level::from_index(n - 1),
+        }
+    }
+
     pub fn position(&self) -> Duration {
         Duration::from_millis(self.position_ms.load(Ordering::Relaxed))
     }
@@ -552,6 +563,7 @@ impl<S: rodio::Source> Iterator for Meter<S> {
         if self.n.is_multiple_of(EQ_POLL) {
             self.eq.set(self.status.eq.get());
             self.gain_now = f32::from_bits(self.gain.load(Ordering::Relaxed));
+            self.spatial.set_level(self.status.spatial_level());
         }
         let mut s = match self.spatial_right.take() {
             Some(right) => right,
@@ -691,6 +703,11 @@ impl AudioHandle {
     /// Spatial audio for headphones, from the next sound on.
     pub fn set_spatial(&self, on: bool) {
         self.status.spatial.store(on, Ordering::Relaxed);
+    }
+
+    /// How wide spatial audio makes the image, from the next sound on.
+    pub fn set_spatial_level(&self, level: crate::spatial::Level) {
+        self.status.spatial_level.store(level.index() + 1, Ordering::Relaxed);
     }
 
     /// The equalizer, for the songs playing and every one after: they glide to it.
@@ -1636,6 +1653,17 @@ mod tests {
         let out: Vec<f32> = std::iter::from_fn(|| meter.next()).collect();
         assert_eq!(out.len(), 8_000, "as many samples out as in");
         out.chunks(2).skip(500).map(|f| f[1] * f[1]).sum()
+    }
+
+    #[test]
+    fn the_spatial_level_is_strong_until_one_is_chosen_then_what_was_chosen() {
+        use crate::spatial::Level;
+        let status = AudioStatus::default();
+        assert_eq!(status.spatial_level(), Level::Strong);
+        for level in Level::ALL {
+            status.spatial_level.store(level.index() + 1, Ordering::Relaxed);
+            assert_eq!(status.spatial_level(), level);
+        }
     }
 
     #[test]
