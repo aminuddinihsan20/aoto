@@ -60,7 +60,6 @@ mod tray;
 mod turnstile;
 mod ui;
 mod update;
-mod webdav;
 mod webmusic;
 mod ytdlp;
 mod ytm;
