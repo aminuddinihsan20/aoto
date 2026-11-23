@@ -1243,6 +1243,51 @@ mod tests {
         }
     }
 
+    /// A real addon, end to end, with Aoto's own pieces: the settings row's check, the
+    /// search and the match, the stream answer, the ranged download and the decoder. Set
+    /// YTM_FLAC_ADDON to the addon's link and YTM_FLAC_TRACK to "title|artist|seconds|rate|channels"
+    /// (what the file is). Run: cargo test --lib live_addon_plays -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn live_addon_plays_a_flac_end_to_end() {
+        let (Ok(link), Ok(spec)) = (std::env::var("YTM_FLAC_ADDON"), std::env::var("YTM_FLAC_TRACK")) else { return };
+        let f: Vec<&str> = spec.split('|').collect();
+        let (title, artist, secs, rate, channels) = (f[0], f[1], f[2].parse::<u32>().unwrap(), f[3].parse::<u32>().unwrap(), f[4].parse::<u16>().unwrap());
+        let http = reqwest::Client::builder().user_agent(USER_AGENT).build().unwrap();
+        let summary = check(&http, &link).await.expect("the settings row's check");
+        println!("check: {summary}");
+        let client = std::sync::Arc::new(Client::new(&link).expect("an addon link"));
+        let track: crate::model::Track = serde_json::from_value(serde_json::json!({
+            "id": "t1", "title": title, "artists": [{"name": artist, "id": null}], "album": null,
+            "duration": secs, "thumbs": [], "track_nr": null, "plays": null,
+        }))
+        .unwrap();
+        let found = find_all(&http, std::slice::from_ref(&client), &track, false, false).await.expect("the addon has the song");
+        println!("found: {} {}", found.info.badge(), found.info.details_line());
+        assert!(found.info.lossless());
+        assert_eq!(found.info.sample_rate, Some(rate));
+        // The same steps the backend takes for a stream.
+        let shared = crate::stream::Shared::new(found.size, found.duration_ms, None, found.format.clone(), Some(found.info.clone()), false);
+        crate::stream::download(http.clone(), found.url.clone(), agent().to_owned(), shared.clone(), None, crate::stream::Ranging::Header).await;
+        assert!(shared.error().is_none(), "download failed: {:?}", shared.error());
+        assert!(shared.is_complete());
+        let decoder = crate::stream::decoder(shared.clone(), true).expect("Aoto's decoder opens the FLAC");
+        use rodio::Source;
+        assert_eq!((decoder.sample_rate().get(), decoder.channels().get()), (rate, channels));
+        let samples: Vec<f32> = decoder.collect();
+        let seconds = samples.len() as f64 / (rate as f64 * channels as f64);
+        let loud = (samples.iter().map(|s| (*s as f64).powi(2)).sum::<f64>() / samples.len() as f64).sqrt();
+        println!("decoded {} samples = {seconds:.3} s, rms {loud:.3}", samples.len());
+        assert!((seconds - secs as f64).abs() < 0.05, "{seconds} s decoded, {secs} s expected");
+        assert!(loud > 0.05, "the decoded audio is silent");
+        // Dragging the seek bar: half way in, half of the song is left.
+        let mut again = crate::stream::decoder(shared, true).expect("a second decoder");
+        again.try_seek(std::time::Duration::from_secs_f64(secs as f64 / 2.0)).expect("the FLAC seeks");
+        let left = again.count() as f64 / (rate as f64 * channels as f64);
+        println!("after a seek to {:.1} s: {left:.3} s left", secs as f64 / 2.0);
+        assert!((left - secs as f64 / 2.0).abs() < 0.2, "{left} s left after seeking to the middle");
+    }
+
     #[test]
     fn atmos_rows_are_read_off_the_names_addons_use() {
         let row = |json: Value| json_is_atmos(&json);
