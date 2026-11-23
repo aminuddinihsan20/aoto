@@ -27,10 +27,11 @@
 
 **Playback**
 - **YouTube Music, natively**: search, browse, albums, playlists, artist pages, radio, mixes, charts and your library.
-- **Lossless / Hi-Res / Dolby Atmos** from configured addon sources when a matching copy exists, with YouTube audio as the fallback.
+- **Lossless / Hi-Res / Dolby Atmos** from configured addon sources when a matching copy exists, with YouTube audio as the fallback. You choose when an addon's copy may play (always, Wi-Fi only, off), and `addons/flac-library` is a small addon server for your own FLAC files, with a guide for writing others.
+- **Stream quality** (Low, Normal, High) chosen separately for Wi-Fi and for mobile data.
 - **Gapless playback, crossfade and Automix** between songs.
 - **Playback speed** from 0.5× to 2×, with or without keeping the pitch.
-- **Equalizer**: seven bands, presets and a bass boost, plus volume normalization and spatial audio for headphones.
+- **Equalizer**: seven bands, presets and a bass boost, plus volume normalization and spatial audio for headphones, in three strengths.
 - **Sleep timer**: after a time, at the end of the song or of the queue, with a fade-out.
 - **Play on**: names where the sound goes and opens Android's own output switcher.
 
@@ -39,13 +40,14 @@
 - **Lyric cards**: pick up to four lines and save or share them as a picture.
 
 **Your music**
-- **Downloads** for offline playback, including a whole album or playlist at once, on Wi-Fi only if you like.
+- **Downloads** for offline playback, including a whole album or playlist at once, on Wi-Fi only if you like. They can be saved as the addon's **FLAC** copy with tags, cover and lyrics, downloaded playlists keep up with new songs, and a download can be removed from the menu.
 - **Music on your phone**: add folders and play what is in them.
 - **Listening stats**, kept on the device only.
 - **Last.fm** scrobbling, **Listen together** sessions, and **Spotify transfer** for bringing playlists over.
 
 **Android**
-- Material You throughout, a media notification, home-screen widgets (4×2, 2×2 and 4×1) and Android Auto.
+- Material You throughout (with an optional pure black theme), a media notification, home-screen widgets (4×2, 2×2 and 4×1) and Android Auto.
+- **Update notifications**: a newer release is announced, and installs over the old one without uninstalling.
 
 ## Status
 
