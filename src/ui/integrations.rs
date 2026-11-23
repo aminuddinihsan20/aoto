@@ -102,6 +102,29 @@ impl App {
         }
     }
 
+    /// Downloaded playlists: shortly after launch and every six hours, ask for each one's
+    /// songs as they are now, so the ones added since get downloaded (see `playlist_sync`).
+    /// Not offline, and only when the setting is on.
+    pub(super) fn tick_playlist_sync(&mut self, ctx: &egui::Context, now: f64) {
+        if !self.sync_playlists {
+            return;
+        }
+        if crate::playlist_sync::due(now, self.sync_checked) {
+            if crate::platform::network() == crate::platform::Network::Offline {
+                // Nothing to ask over; try again in a minute.
+                ctx.request_repaint_after(Duration::from_secs(60));
+                return;
+            }
+            self.sync_checked = Some(now);
+            for kept in crate::downloads::kept_playlists() {
+                self.backend.request(crate::backend::Req::SyncPlaylist { id: kept.id });
+            }
+        }
+        // An idle app doesn't repaint on its own: wake up when the next look is due.
+        let wait = (crate::playlist_sync::next_at(self.sync_checked) - now).max(1.0);
+        ctx.request_repaint_after(Duration::from_secs_f64(wait.min(3600.0)));
+    }
+
     /// Close the app so the downloaded update installs, then relaunch it.
     pub(super) fn restart_to_update(&mut self, ctx: &egui::Context) {
         self.restart_for_update = true;

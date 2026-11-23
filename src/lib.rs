@@ -37,6 +37,7 @@ mod media;
 mod model;
 mod motion;
 pub mod platform;
+mod playlist_sync;
 pub mod playon;
 mod opus;
 mod material;

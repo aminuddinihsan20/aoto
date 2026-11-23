@@ -120,6 +120,7 @@ pub enum Row {
     PlaySongs,
     LosslessDownloads,
     LyricsInFiles,
+    SyncPlaylists,
     DownloadFolder,
     Romanization,
     Translation,
@@ -146,7 +147,7 @@ pub enum Row {
 }
 
 impl Row {
-    pub const ALL: [Row; 49] = [
+    pub const ALL: [Row; 50] = [
         Row::Account,
         Row::Channel,
         Row::ListenTogether,
@@ -173,6 +174,7 @@ impl Row {
         Row::PlaySongs,
         Row::LosslessDownloads,
         Row::LyricsInFiles,
+        Row::SyncPlaylists,
         Row::DownloadFolder,
         Row::Romanization,
         Row::Translation,
@@ -216,7 +218,7 @@ impl Row {
             Row::Autoplay | Row::Gapless | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, "Between songs"),
             Row::Equalizer | Row::SpatialAudio | Row::SpatialStrength | Row::Normalize | Row::LogVolume => (C::Sound, "Sound"),
             Row::QualityWifi | Row::QualityMobile | Row::HiRes | Row::Lossless | Row::PreferAtmos | Row::DisableDirect | Row::PlaySongs => (C::Sound, "Quality"),
-            Row::LosslessDownloads | Row::LyricsInFiles | Row::DownloadFolder => (C::Downloads, ""),
+            Row::LosslessDownloads | Row::LyricsInFiles | Row::SyncPlaylists | Row::DownloadFolder => (C::Downloads, ""),
             Row::Romanization | Row::Translation | Row::TranslateInto | Row::TextSize => (C::Lyrics, "Text"),
             Row::TimingOffset | Row::WordTrim | Row::LineTrim => (C::Lyrics, "Timing"),
             Row::LyricsSources => (C::Lyrics, "Sources"),
@@ -412,7 +414,7 @@ mod tests {
         assert_eq!(rows(C::Account), [Row::Account, Row::Channel, Row::ListenTogether, Row::ClearHistory]);
         assert_eq!(rows(C::Playback), [Row::PlaybackSpeed, Row::KeepPitch, Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic]);
         assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::SpatialStrength, Row::Normalize, Row::QualityWifi, Row::QualityMobile, Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
-        assert_eq!(rows(C::Downloads), [Row::LosslessDownloads, Row::LyricsInFiles, Row::DownloadFolder]);
+        assert_eq!(rows(C::Downloads), [Row::LosslessDownloads, Row::LyricsInFiles, Row::SyncPlaylists, Row::DownloadFolder]);
         assert_eq!(rows(C::Lyrics), [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim, Row::LyricsSources]);
         assert_eq!(rows(C::Appearance), [Row::Mode, Row::PureBlack, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork, Row::StatsForNerds, Row::SignatureService]);
         assert_eq!(rows(C::Stats), [Row::ListeningStats]);

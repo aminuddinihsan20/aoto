@@ -2993,6 +2993,11 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 }
             });
         }
+        Row::SyncPlaylists => {
+            setting_row(ui, "Keep downloaded playlists up to date", Some("Every six hours and when the app opens, a playlist you downloaded whole is checked, and the songs added to it since are downloaded too (on Wi-Fi only, if that is on). A song you took off the phone is not fetched again, and a song taken out of the playlist keeps its file until you remove it."), |ui| {
+                toggle(ui, &mut app.sync_playlists, "Keep downloaded playlists up to date");
+            });
+        }
         Row::DownloadFolder => {
             if crate::platform::HAS_SAF {
                 // Android: a folder chosen once; every download is copied into it.
@@ -3540,6 +3545,8 @@ fn settings_downloads(app: &mut App, ui: &mut Ui) {
         settings_row(app, ui, Row::LosslessDownloads);
         divider(ui);
         settings_row(app, ui, Row::LyricsInFiles);
+        divider(ui);
+        settings_row(app, ui, Row::SyncPlaylists);
         divider(ui);
         settings_row(app, ui, Row::DownloadFolder);
     });

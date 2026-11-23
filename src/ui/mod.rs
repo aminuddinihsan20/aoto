@@ -489,6 +489,10 @@ pub struct App {
     lossless_downloads: bool,
     /// A download carries the song's lyrics in its tag (Settings › Downloads).
     lyrics_in_files: bool,
+    /// Downloaded playlists are checked for new songs (Settings › Downloads).
+    sync_playlists: bool,
+    /// When the playlists were last checked (app time).
+    sync_checked: Option<f64>,
     /// What the playing stream is (codec, rate, depth, size), when a hi-res source
     /// supplied it, with the generation it belongs to.
     audio_info: Option<(u64, crate::hires::Info)>,
@@ -715,6 +719,7 @@ impl App {
         backend.set_lossless_downloads(lossless_downloads);
         let lyrics_in_files = get("lyrics_in_files").is_none_or(|v| v == "1");
         backend.set_lyrics_in_files(lyrics_in_files);
+        let sync_playlists = get("sync_playlists").is_none_or(|v| v == "1");
         let show_nerd_stats = get("show_nerd_stats").is_some_and(|v| v == "1");
         let disable_direct_stream = get("disable_direct_stream").is_some_and(|v| v == "1");
         backend.set_disable_direct_stream(disable_direct_stream);
@@ -888,6 +893,8 @@ impl App {
             quality,
             lossless_downloads,
             lyrics_in_files,
+            sync_playlists,
+            sync_checked: None,
             audio_info: None,
             show_nerd_stats,
             stream_stats: None,
@@ -1441,6 +1448,7 @@ impl eframe::App for App {
         self.sync_lastfm();
         self.sync_server_queue(ctx, now);
         self.tick_updates(ctx, now);
+        self.tick_playlist_sync(ctx, now);
         if let Some(wait) = self.sleep_wake() {
             ctx.request_repaint_after(wait);
         }
@@ -1839,6 +1847,7 @@ impl eframe::App for App {
         storage.set_string("lossless", self.lossless.code().to_owned());
         storage.set_string("lossless_downloads", b(self.lossless_downloads));
         storage.set_string("lyrics_in_files", b(self.lyrics_in_files));
+        storage.set_string("sync_playlists", b(self.sync_playlists));
         storage.set_string("quality_wifi", self.quality.wifi.code().to_owned());
         storage.set_string("quality_mobile", self.quality.mobile.code().to_owned());
         storage.set_string("show_nerd_stats", b(self.show_nerd_stats));

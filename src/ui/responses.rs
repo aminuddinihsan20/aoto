@@ -246,6 +246,7 @@ impl App {
                 }
             }
             Resp::Collection { load, c, more } => self.collection_in(load, c, more),
+            Resp::PlaylistSynced(c) => self.playlist_synced(c),
             Resp::CollectionMore { id, load, tracks, set_ids, more } => self.collection_more(id, load, tracks, set_ids, more),
             Resp::Artist(a) => {
                 // A slow answer for an artist left meanwhile doesn't replace the one on screen.

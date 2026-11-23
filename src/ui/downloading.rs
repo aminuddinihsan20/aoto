@@ -142,6 +142,23 @@ impl App {
         }
     }
 
+    /// A downloaded playlist as it is now: its new songs are downloaded, and what is kept of
+    /// the playlist is brought up to date. Nothing new, nothing changes.
+    pub(super) fn playlist_synced(&mut self, c: Collection) {
+        let Some(kept) = crate::downloads::kept_playlists().into_iter().find(|k| k.id == c.id) else { return };
+        let plan = crate::playlist_sync::plan(&kept, &c.tracks);
+        if plan.new.is_empty() {
+            return;
+        }
+        log::info!("downloads: {} new song(s) in \u{201c}{}\u{201d}", plan.new.len(), c.title);
+        let ask = Ask { kind: Kind::Playlist, key: c.id.clone(), title: c.title.clone(), thumbs: c.thumbs.clone(), songs: plan.new.into_iter().map(|track| Song { track, for_video: None }).collect() };
+        self.ask_download(ask);
+        // The queue kept only the new songs; what is kept is the playlist as it is now.
+        let mut seen = std::collections::HashSet::new();
+        let songs = c.tracks.iter().map(|t| t.id.clone()).filter(|id| seen.insert(id.clone())).collect();
+        crate::downloads::keep_collection(Kept { id: c.id, title: c.title, is_album: false, thumbs: c.thumbs, songs });
+    }
+
     pub(super) fn queue_download(&mut self, ask: Ask) {
         let (kind, title) = (ask.kind, ask.title.clone());
         if kind != Kind::Song {

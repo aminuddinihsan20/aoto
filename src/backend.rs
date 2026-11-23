@@ -70,6 +70,8 @@ pub enum Req {
     ArtistSignature { key: String, endpoint: String, name: String },
     /// Test a pasted hi-res source `link`; `key` is what the UI asked for.
     CheckHiResSource { key: String, link: String },
+    /// A playlist that was downloaded whole: its songs as they are now, for the ones added since.
+    SyncPlaylist { id: String },
     /// Radio seeded from a track (`seed`, its id); appended to the queue. `song_of`: the
     /// track, when it's a music video to play as its song: the song's radio is asked for.
     Radio { seed: String, song_of: Option<Track> },
@@ -134,6 +136,7 @@ impl Req {
             Req::AppleCover { .. } => "Apple artwork",
             Req::ArtistSignature { .. } => "Artist signature",
             Req::CheckHiResSource { .. } => "Testing source",
+            Req::SyncPlaylist { .. } => "Updating a downloaded playlist",
             Req::Radio { .. } => "Loading radio",
             Req::PlayCollection { .. } => "Playback",
             Req::Play { .. } => "Playback",
@@ -156,7 +159,7 @@ impl Req {
 
     /// Background requests fail quietly (logged, no toast).
     fn quiet(&self) -> bool {
-        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::Prefetch { .. } | Req::Standby { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
+        matches!(self, Req::Suggest { .. } | Req::Account | Req::Channels | Req::ServerQueue | Req::Art { .. } | Req::AppleArtist { .. } | Req::AppleCover { .. } | Req::ArtistSignature { .. } | Req::CheckHiResSource { .. } | Req::SyncPlaylist { .. } | Req::Prefetch { .. } | Req::Standby { .. } | Req::HomeMore(_) | Req::Lyrics(_) | Req::Segments { .. } | Req::LyricsExtras { .. })
     }
 }
 
@@ -280,6 +283,8 @@ pub enum Resp {
     Collection { load: u64, c: Collection, more: bool },
     /// The next page of a playlist sent as `Collection` with the same `load`.
     CollectionMore { id: String, load: u64, tracks: Vec<Track>, set_ids: Vec<Option<String>>, more: bool },
+    /// A downloaded playlist as it is now (see `Req::SyncPlaylist`).
+    PlaylistSynced(Collection),
     Artist(ArtistPage),
     Library(Library),
     History(Vec<Track>),
@@ -746,6 +751,7 @@ impl Backend {
                 Req::Album { id, load } => Resp::Collection { load, c: ytm::album(api, &id).await?, more: false },
                 Req::Playlist { id, load, stream: false } => Resp::Collection { load, c: ytm::playlist(api, &id, me, None).await?, more: false },
                 Req::Playlist { id, load, stream: true } => self.stream_playlist(id, load, me).await?,
+                Req::SyncPlaylist { id } => Resp::PlaylistSynced(ytm::playlist(api, &id, me, None).await?),
                 Req::Artist(id) => Resp::Artist(ytm::artist(api, &id).await?),
                 Req::Library => self.library().await?,
                 Req::History => Resp::History(ytm::history(api).await?),

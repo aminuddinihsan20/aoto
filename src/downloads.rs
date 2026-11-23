@@ -160,6 +160,11 @@ pub fn keep_collection(kept: Kept) {
     }
 }
 
+/// The playlists (not albums) that were downloaded whole, with the songs they had then.
+pub fn kept_playlists() -> Vec<Kept> {
+    STATE.read().unwrap().kept.iter().filter(|k| !k.is_album).cloned().collect()
+}
+
 /// The albums and playlists downloaded whole that have a song saved, newest first.
 pub fn collections() -> Vec<Saved> {
     let st = STATE.read().unwrap();
