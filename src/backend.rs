@@ -1428,20 +1428,6 @@ impl Backend {
         if let Some(shared) = tokio::task::spawn_blocking(move || crate::local::open(&id).or_else(|| crate::downloads::open(&id))).await? {
             return Ok(shared);
         }
-        // A song on a WebDAV server streams from there, with Range requests (starts at once, seeks).
-        let id = video_id.to_owned();
-        if let Some(remote) = tokio::task::spawn_blocking(move || crate::webdav::remote(&id)).await? {
-            let http = self.http();
-            let size = match remote.size {
-                0 => hires::content_size(&http, &remote.url).await.ok_or_else(|| anyhow::anyhow!("the server did not say how big the file is"))?,
-                n => n,
-            };
-            let format = stream::Format::File { hint: remote.hint, mime: Some(crate::webdav::mime_of(remote.hint).to_owned()) };
-            let shared = Shared::new(size, 0, None, format, None, prefetch);
-            log::info!("{video_id}: streaming from a WebDAV server");
-            self.rt.spawn(stream::download(http, remote.url, "Aoto".to_owned(), shared.clone(), None, stream::Ranging::Header));
-            return Ok(shared);
-        }
         let (source, s) = self.resolve(video_id, false, track, !self.disable_direct.load(Ordering::Relaxed), prefetch).await?;
         // Atmos arrives already decoded: a complete buffer, no download to run.
         if let Some(data) = s.data {
@@ -2243,45 +2229,6 @@ mod download_stop_tests {
         println!("{} lines; starts: {head}", text.lines().count());
         assert!(text.lines().count() > 10);
         assert!(text.starts_with('['), "timed lyrics come as LRC: {head}");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A WebDAV song played through the backend's own open path: found in the library the
-    /// scan filled, streamed with Range requests and decoded. Start tools/webdav_test_server.py
-    /// over a folder with one FLAC, then YTM_WEBDAV_TEST="http://127.0.0.1:8801/music/|ani|secret|44100|2|6"
-    /// `cargo test --lib live_webdav_through_the_backend -- --ignored --nocapture`
-    #[test]
-    #[ignore]
-    fn live_webdav_through_the_backend() {
-        use rodio::Source;
-        let Ok(spec) = std::env::var("YTM_WEBDAV_TEST") else { return };
-        let f: Vec<&str> = spec.split('|').collect();
-        let (url, user, pass) = (f[0], f[1], f[2]);
-        let (rate, channels, secs) = (f[3].parse::<u32>().unwrap(), f[4].parse::<u16>().unwrap(), f[5].parse::<f64>().unwrap());
-        let dir = std::env::temp_dir().join(format!("aoto-test-webdav-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let (audio_tx, _audio_rx) = crossbeam_channel::unbounded();
-        let audio = crate::audio::spawn(0.0, false, None, audio_tx, || {});
-        let (resp_tx, _resp_rx) = crossbeam_channel::unbounded();
-        let backend = Backend::new(dir.clone(), resp_tx, audio, Arc::new(|| {})).unwrap();
-        crate::webdav::init(&dir);
-        let server = crate::webdav::Server { id: "live".into(), name: "test".into(), url: url.into(), user: user.into() };
-        crate::webdav::add_server(server.clone(), pass).expect("the server is kept");
-        let files = backend.rt.block_on(crate::webdav::scan(&backend.http(), &server, pass)).expect("the scan");
-        crate::webdav::set_files("live", files);
-        let tracks = crate::webdav::tracks("live");
-        println!("songs: {:?}", tracks.iter().map(|t| (t.title.as_str(), t.artists.first().map(|a| a.name.as_str()))).collect::<Vec<_>>());
-        let track = tracks.iter().find(|t| t.title.contains("Hujan")).expect("a song with a title from its name");
-        assert_eq!(track.artists.first().map(|a| a.name.as_str()), Some("Senja Kala"));
-        let shared = backend.rt.block_on(backend.open_stream(&track.id, false, Some(track))).expect("it opens");
-        backend.rt.block_on(shared.finished());
-        assert!(shared.error().is_none(), "{:?}", shared.error());
-        let decoder = crate::stream::decoder(shared, true).expect("it decodes");
-        assert_eq!((decoder.sample_rate().get(), decoder.channels().get()), (rate, channels));
-        let seconds = decoder.count() as f64 / (rate as f64 * channels as f64);
-        println!("played {seconds:.3} s");
-        assert!((seconds - secs).abs() < 0.05);
-        crate::webdav::remove_server("live");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
