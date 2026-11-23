@@ -2862,6 +2862,34 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 }
             });
         }
+        Row::SpatialStrength => {
+            let mut pick = None;
+            setting_row(ui, "Spatial audio strength", Some("How wide the image is made. Strong is the widest and the easiest to hear; Light is gentler, for listeners who find it too much."), |ui| {
+                if m3::on() {
+                    let labels = crate::spatial::Level::ALL.map(|l| l.label());
+                    let chosen = crate::spatial::Level::ALL.iter().position(|l| *l == app.spatial_level).unwrap_or(0);
+                    pick = m3::segmented(ui, &labels, chosen).map(|i| crate::spatial::Level::ALL[i]);
+                    return;
+                }
+                let btn = dropdown_button(ui, app.spatial_level.label(), 160.0, "Spatial audio strength");
+                egui::Popup::menu(&btn).show(|ui| {
+                    ui.set_width(160.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    ui.add_space(4.0);
+                    for l in crate::spatial::Level::ALL {
+                        if option_row(ui, l.label(), l == app.spatial_level).clicked() {
+                            pick = Some(l);
+                            ui.close();
+                        }
+                    }
+                    ui.add_space(4.0);
+                });
+            });
+            if let Some(l) = pick {
+                app.spatial_level = l;
+                app.set_crossfade();
+            }
+        }
         Row::Automix => {
             setting_row(ui, "Automix", Some("Slide from one song into the next the way a DJ would: both hold their level for a moment, then swap in one smooth move, instead of a straight fade. The mix picks its own length, in phrases of 8 or 16 bars (16 on long songs), following the beat it hears."), |ui| {
                 if toggle(ui, &mut app.automix, "Automix").changed() {
@@ -2906,6 +2934,8 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 ui.add_space(10.0);
             }
         }
+        Row::QualityWifi => quality_row(app, ui, true),
+        Row::QualityMobile => quality_row(app, ui, false),
         Row::Lossless => {
             let desc = "When an addon's lossless copy (FLAC and the like) may play instead of YouTube's. Those files are several times larger, so Wi-Fi only keeps mobile data for YouTube's stream. Off leaves the addons in the list, unused.";
             let mut pick = None;
@@ -2946,6 +2976,20 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
             setting_row(ui, "Disable direct source stream", Some("Play YouTube audio immediately and upgrade to hi-res in the background, instead of waiting for the addon to answer first."), |ui| {
                 if toggle(ui, &mut app.disable_direct_stream, "Disable direct source stream").changed() {
                     app.backend.set_disable_direct_stream(app.disable_direct_stream);
+                }
+            });
+        }
+        Row::LosslessDownloads => {
+            setting_row(ui, "Save lossless when an addon has it", Some("When a hi-res addon has a song as FLAC, a download saves that file, with the song's tags and cover, instead of YouTube's audio. FLAC files are 4 to 8 times larger, so mind your storage. Songs no addon has are saved as before."), |ui| {
+                if toggle(ui, &mut app.lossless_downloads, "Save lossless when an addon has it").changed() {
+                    app.backend.set_lossless_downloads(app.lossless_downloads);
+                }
+            });
+        }
+        Row::LyricsInFiles => {
+            setting_row(ui, "Save lyrics in the file", Some("A download carries the song's lyrics in its tag: timed ones when a source has them (as LRC, which players that show synced lyrics read), else plain text. The download waits a few seconds at most for them."), |ui| {
+                if toggle(ui, &mut app.lyrics_in_files, "Save lyrics in the file").changed() {
+                    app.backend.set_lyrics_in_files(app.lyrics_in_files);
                 }
             });
         }
@@ -3341,6 +3385,7 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         settings_row(app, ui, Row::Equalizer);
         divider(ui);
         settings_row(app, ui, Row::SpatialAudio);
+        settings_row(app, ui, Row::SpatialStrength);
         divider(ui);
         settings_row(app, ui, Row::Gapless);
         divider(ui);
@@ -3356,6 +3401,8 @@ fn settings_playback(app: &mut App, ui: &mut Ui) {
         divider(ui);
         settings_row(app, ui, Row::SkipNonMusic);
         divider(ui);
+        settings_row(app, ui, Row::QualityWifi);
+        settings_row(app, ui, Row::QualityMobile);
         settings_row(app, ui, Row::HiRes);
         settings_row(app, ui, Row::Lossless);
         settings_row(app, ui, Row::PreferAtmos);
@@ -3433,6 +3480,47 @@ fn hires_sources_editor(app: &mut App, ui: &mut Ui) {
     }
 }
 
+/// The quality YouTube's stream is played at, on Wi-Fi or on mobile data.
+fn quality_row(app: &mut App, ui: &mut Ui, wifi: bool) {
+    use crate::quality::Quality;
+    let (title, desc) = if wifi {
+        ("Quality on Wi-Fi", "How good YouTube's stream is when you are on Wi-Fi. High is the best your account gets (Opus, about 130 to 160 kbps; with Premium, AAC 256 kbps). Downloads are always the best.")
+    } else {
+        ("Quality on mobile data", "How good YouTube's stream is on mobile data. Normal is AAC 128 kbps, about 1 MB a minute; Low is about 48 kbps, a third of that. Downloads are always the best.")
+    };
+    let current = if wifi { app.quality.wifi } else { app.quality.mobile };
+    let mut pick = None;
+    setting_row(ui, title, Some(desc), |ui| {
+        if m3::on() {
+            let labels = Quality::ALL.map(|q| q.label());
+            let chosen = Quality::ALL.iter().position(|q| *q == current).unwrap_or(0);
+            pick = m3::segmented(ui, &labels, chosen).map(|i| Quality::ALL[i]);
+            return;
+        }
+        let btn = dropdown_button(ui, current.label(), 160.0, title);
+        egui::Popup::menu(&btn).show(|ui| {
+            ui.set_width(160.0);
+            ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+            ui.add_space(4.0);
+            for q in Quality::ALL {
+                if option_row(ui, q.label(), q == current).clicked() {
+                    pick = Some(q);
+                    ui.close();
+                }
+            }
+            ui.add_space(4.0);
+        });
+    });
+    if let Some(q) = pick {
+        if wifi {
+            app.quality.wifi = q;
+        } else {
+            app.quality.mobile = q;
+        }
+        app.backend.set_quality(app.quality);
+    }
+}
+
 /// The non-empty links as one newline-separated list, the way the backend reads them.
 fn live_sources(app: &App) -> String {
     app.hires_sources.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n")
@@ -3448,7 +3536,13 @@ fn settings_downloads(app: &mut App, ui: &mut Ui) {
         ui.label(RichText::new(DOWNLOADS_NOTE).font(theme::regular(13.0)).color(theme::text_dim()));
         ui.add_space(12.0);
     }
-    settings_card(ui, |ui| settings_row(app, ui, Row::DownloadFolder));
+    settings_card(ui, |ui| {
+        settings_row(app, ui, Row::LosslessDownloads);
+        divider(ui);
+        settings_row(app, ui, Row::LyricsInFiles);
+        divider(ui);
+        settings_row(app, ui, Row::DownloadFolder);
+    });
 }
 
 /// Settings › Lyrics: the better-lyrics extension's options.

@@ -108,13 +108,18 @@ pub enum Row {
     SkipNonMusic,
     Equalizer,
     SpatialAudio,
+    SpatialStrength,
     Normalize,
     LogVolume,
+    QualityWifi,
+    QualityMobile,
     HiRes,
     Lossless,
     PreferAtmos,
     DisableDirect,
     PlaySongs,
+    LosslessDownloads,
+    LyricsInFiles,
     DownloadFolder,
     Romanization,
     Translation,
@@ -141,7 +146,7 @@ pub enum Row {
 }
 
 impl Row {
-    pub const ALL: [Row; 44] = [
+    pub const ALL: [Row; 49] = [
         Row::Account,
         Row::Channel,
         Row::ListenTogether,
@@ -156,13 +161,18 @@ impl Row {
         Row::SkipNonMusic,
         Row::Equalizer,
         Row::SpatialAudio,
+        Row::SpatialStrength,
         Row::Normalize,
         Row::LogVolume,
+        Row::QualityWifi,
+        Row::QualityMobile,
         Row::HiRes,
         Row::Lossless,
         Row::PreferAtmos,
         Row::DisableDirect,
         Row::PlaySongs,
+        Row::LosslessDownloads,
+        Row::LyricsInFiles,
         Row::DownloadFolder,
         Row::Romanization,
         Row::Translation,
@@ -204,9 +214,9 @@ impl Row {
             Row::ClearHistory => (C::Account, "Listening history"),
             Row::PlaybackSpeed | Row::KeepPitch => (C::Playback, super::speed::SETTINGS_GROUP),
             Row::Autoplay | Row::Gapless | Row::Automix | Row::Crossfade | Row::CrossfadeLength | Row::SkipNonMusic => (C::Playback, "Between songs"),
-            Row::Equalizer | Row::SpatialAudio | Row::Normalize | Row::LogVolume => (C::Sound, "Sound"),
-            Row::HiRes | Row::Lossless | Row::PreferAtmos | Row::DisableDirect | Row::PlaySongs => (C::Sound, "Quality"),
-            Row::DownloadFolder => (C::Downloads, ""),
+            Row::Equalizer | Row::SpatialAudio | Row::SpatialStrength | Row::Normalize | Row::LogVolume => (C::Sound, "Sound"),
+            Row::QualityWifi | Row::QualityMobile | Row::HiRes | Row::Lossless | Row::PreferAtmos | Row::DisableDirect | Row::PlaySongs => (C::Sound, "Quality"),
+            Row::LosslessDownloads | Row::LyricsInFiles | Row::DownloadFolder => (C::Downloads, ""),
             Row::Romanization | Row::Translation | Row::TranslateInto | Row::TextSize => (C::Lyrics, "Text"),
             Row::TimingOffset | Row::WordTrim | Row::LineTrim => (C::Lyrics, "Timing"),
             Row::LyricsSources => (C::Lyrics, "Sources"),
@@ -401,8 +411,8 @@ mod tests {
         let rows = |c: Category| c.rows().collect::<Vec<_>>();
         assert_eq!(rows(C::Account), [Row::Account, Row::Channel, Row::ListenTogether, Row::ClearHistory]);
         assert_eq!(rows(C::Playback), [Row::PlaybackSpeed, Row::KeepPitch, Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic]);
-        assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::Normalize, Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
-        assert_eq!(rows(C::Downloads), [Row::DownloadFolder]);
+        assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::SpatialStrength, Row::Normalize, Row::QualityWifi, Row::QualityMobile, Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
+        assert_eq!(rows(C::Downloads), [Row::LosslessDownloads, Row::LyricsInFiles, Row::DownloadFolder]);
         assert_eq!(rows(C::Lyrics), [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim, Row::LyricsSources]);
         assert_eq!(rows(C::Appearance), [Row::Mode, Row::PureBlack, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork, Row::StatsForNerds, Row::SignatureService]);
         assert_eq!(rows(C::Stats), [Row::ListeningStats]);
@@ -432,7 +442,7 @@ mod tests {
 
     #[test]
     fn a_categorys_page_keeps_its_rows_in_their_groups() {
-        assert_eq!(groups(Category::Sound), [("Sound", vec![Row::Equalizer, Row::SpatialAudio, Row::Normalize]), ("Quality", vec![Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs])]);
+        assert_eq!(groups(Category::Sound), [("Sound", vec![Row::Equalizer, Row::SpatialAudio, Row::SpatialStrength, Row::Normalize]), ("Quality", vec![Row::QualityWifi, Row::QualityMobile, Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs])]);
         assert_eq!(groups(Category::Playback), [("Playback speed", vec![Row::PlaybackSpeed, Row::KeepPitch]), ("Between songs", vec![Row::Autoplay, Row::Gapless, Row::Automix, Row::Crossfade, Row::CrossfadeLength, Row::SkipNonMusic])], "the speed and its pitch switch are a card of their own");
         assert_eq!(groups(Category::Downloads).len(), 1, "a page of one group");
         assert_eq!(groups(Category::Appearance).iter().map(|g| g.0).collect::<Vec<_>>(), ["Theme", "Motion", "More", "Artist pages"]);

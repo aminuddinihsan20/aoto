@@ -1273,6 +1273,18 @@ fn audio_info_menu(ui: &mut Ui, info: &crate::hires::Info) {
     if info.duration_ms > 0 {
         info_row(ui, "Duration", &super::fmt_time((info.duration_ms / 1000) as u32));
     }
+    // What the output does to a lossless song: the badge is about the file, not the ears.
+    let out = crate::playon::output();
+    if info.lossless()
+        && !info.atmos
+        && let Some(note) = out.kind.lossless_note()
+    {
+        info_row(ui, "Output", out.detail());
+        let ink = if super::m3::on() { crate::material::scheme().on_surface_variant } else { theme::text_dim() };
+        let g = widgets::galley(ui, note, theme::regular(12.0), ink, 276.0);
+        let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), g.size().y + 6.0), Sense::hover());
+        ui.painter().galley(pos2(r.left() + 12.0, r.top()), g, ink);
+    }
     ui.add_space(6.0);
 }
 

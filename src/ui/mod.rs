@@ -483,6 +483,12 @@ pub struct App {
     prefer_atmos: bool,
     /// When an addon's lossless copy may play (Always, Wi-Fi only, Off).
     lossless: crate::lossless::Lossless,
+    /// The quality of YouTube's stream on Wi-Fi and on mobile data.
+    quality: crate::quality::Ceilings,
+    /// Downloads save an addon's FLAC copy when it has one (Settings › Downloads).
+    lossless_downloads: bool,
+    /// A download carries the song's lyrics in its tag (Settings › Downloads).
+    lyrics_in_files: bool,
     /// What the playing stream is (codec, rate, depth, size), when a hi-res source
     /// supplied it, with the generation it belongs to.
     audio_info: Option<(u64, crate::hires::Info)>,
@@ -515,6 +521,8 @@ pub struct App {
     automix: bool,
     /// Spatial audio for headphones (`crate::spatial`).
     spatial: bool,
+    /// How wide spatial audio makes the image (Settings › Sound & quality).
+    spatial_level: crate::spatial::Level,
     /// The equalizer as the listener set it (`crate::eq`).
     eq: crate::eq::Tuning,
     crossfade_secs: u32,
@@ -698,6 +706,15 @@ impl App {
         backend.set_prefer_atmos(prefer_atmos);
         let lossless = crate::lossless::Lossless::from_code(&get("lossless").unwrap_or_default());
         backend.set_lossless(lossless);
+        let quality = crate::quality::Ceilings {
+            wifi: crate::quality::Quality::from_code(&get("quality_wifi").unwrap_or_default()),
+            mobile: crate::quality::Quality::from_code(&get("quality_mobile").unwrap_or_default()),
+        };
+        backend.set_quality(quality);
+        let lossless_downloads = get("lossless_downloads").is_some_and(|v| v == "1");
+        backend.set_lossless_downloads(lossless_downloads);
+        let lyrics_in_files = get("lyrics_in_files").is_none_or(|v| v == "1");
+        backend.set_lyrics_in_files(lyrics_in_files);
         let show_nerd_stats = get("show_nerd_stats").is_some_and(|v| v == "1");
         let disable_direct_stream = get("disable_direct_stream").is_some_and(|v| v == "1");
         backend.set_disable_direct_stream(disable_direct_stream);
@@ -868,6 +885,9 @@ impl App {
             hires_checking: Default::default(),
             prefer_atmos,
             lossless,
+            quality,
+            lossless_downloads,
+            lyrics_in_files,
             audio_info: None,
             show_nerd_stats,
             stream_stats: None,
@@ -889,6 +909,7 @@ impl App {
             crossfade: get("crossfade").is_some_and(|v| v == "1"),
             automix: get("automix").is_some_and(|v| v == "1"),
             spatial: get("spatial").is_some_and(|v| v == "1"),
+            spatial_level: crate::spatial::Level::from_code(&get("spatial_level").unwrap_or_default()),
             eq: crate::eq::Tuning::load(get("eq").as_deref(), get("eq_preset").as_deref(), get("eq_custom").as_deref(), get("eq_bass").as_deref()),
             handoff: false,
             pending_mix: None,
@@ -1816,12 +1837,17 @@ impl eframe::App for App {
         storage.set_string("hires_source", self.hires_sources.join("\n"));
         storage.set_string("prefer_atmos", b(self.prefer_atmos));
         storage.set_string("lossless", self.lossless.code().to_owned());
+        storage.set_string("lossless_downloads", b(self.lossless_downloads));
+        storage.set_string("lyrics_in_files", b(self.lyrics_in_files));
+        storage.set_string("quality_wifi", self.quality.wifi.code().to_owned());
+        storage.set_string("quality_mobile", self.quality.mobile.code().to_owned());
         storage.set_string("show_nerd_stats", b(self.show_nerd_stats));
         storage.set_string("disable_direct_stream", b(self.disable_direct_stream));
         storage.set_string("sponsorblock", b(self.sponsorblock));
         storage.set_string("crossfade", b(self.crossfade));
         storage.set_string("automix", b(self.automix));
         storage.set_string("spatial", b(self.spatial));
+        storage.set_string("spatial_level", self.spatial_level.code().to_owned());
         storage.set_string("eq", b(self.eq.enabled));
         storage.set_string("eq_preset", self.eq.preset.key().to_owned());
         storage.set_string("eq_custom", self.eq.custom_text());
