@@ -92,6 +92,7 @@ fn parse_tree(text: &str) -> Option<(String, String)> {
 fn export_mime(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
         Some("m4a") => "audio/mp4",
+        Some("flac") => "audio/flac",
         Some("webm") => "audio/webm",
         _ => "application/octet-stream",
     }
@@ -344,20 +345,42 @@ pub fn song_for(video_id: &str) -> Option<Track> {
     st.index.values().find(|e| e.stands_for.as_deref() == Some(video_id) && e.path.is_file()).and_then(|e| e.song.clone())
 }
 
+/// How a saved file is decoded, when it is not the AAC that downloads are by default.
+fn playback_format(path: &Path) -> Option<crate::stream::Format> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("flac") => Some(crate::stream::Format::File { hint: "flac", mime: Some("audio/flac".to_owned()) }),
+        _ => None,
+    }
+}
+
+/// The extension a downloaded file gets, from what it is.
+fn extension_of(audio: &[u8]) -> &'static str {
+    if audio.get(4..8) == Some(b"ftyp") {
+        "m4a"
+    } else if audio.starts_with(b"fLaC") {
+        "flac"
+    } else {
+        "webm"
+    }
+}
+
 /// A downloaded song's audio, as a complete stream buffer for playback.
 pub fn open(video_id: &str) -> Option<Arc<Shared>> {
     let entry = STATE.read().unwrap().index.get(video_id).cloned()?;
     let data = std::fs::read(&entry.path).ok()?;
     log::info!("{video_id}: playing the downloaded file");
-    Some(Shared::from_bytes(data, entry.duration_ms, entry.loudness_db))
+    Some(match playback_format(&entry.path) {
+        Some(format) => Shared::from_bytes_with_format(data, entry.duration_ms, entry.loudness_db, format, None),
+        None => Shared::from_bytes(data, entry.duration_ms, entry.loudness_db),
+    })
 }
 
 /// Write a downloaded song into the folder and remember it. Returns the file.
 /// `stands_for`: the music video `t` is the song version of.
-pub fn save(t: &Track, audio: &[u8], duration_ms: u64, loudness_db: Option<f32>, cover: Option<Vec<u8>>, stands_for: Option<String>) -> anyhow::Result<PathBuf> {
+pub fn save(t: &Track, audio: &[u8], duration_ms: u64, loudness_db: Option<f32>, cover: Option<Vec<u8>>, lyrics: Option<&str>, stands_for: Option<String>) -> anyhow::Result<PathBuf> {
     let folder = folder();
     std::fs::create_dir_all(&folder)?;
-    let ext = if audio.get(4..8) == Some(b"ftyp") { "m4a" } else { "webm" };
+    let ext = extension_of(audio);
     // A file already there for this song is replaced; another song's isn't.
     let mine = STATE.read().unwrap().index.get(&t.id).map(|e| e.path.clone());
     let stem = file_stem(t);
@@ -374,9 +397,17 @@ pub fn save(t: &Track, audio: &[u8], duration_ms: u64, loudness_db: Option<f32>,
     if audio.get(8..12) == Some(b"dash") {
         audio[8..12].copy_from_slice(b"M4A ");
     }
+    // A FLAC's tags go in its metadata blocks; the sound after them is copied as it is.
+    if ext == "flac" {
+        match tag_flac(&audio, t, cover.as_deref(), lyrics) {
+            Ok(tagged) => audio = tagged,
+            // Untagged audio still plays; keep it.
+            Err(e) => log::warn!("couldn't tag {}: {e:#}", path.display()),
+        }
+    }
     std::fs::write(&part, &audio)?;
     if ext == "m4a"
-        && let Err(e) = tag(&part, t, cover)
+        && let Err(e) = tag(&part, t, cover, lyrics)
     {
         // Untagged audio still plays; keep it.
         log::warn!("couldn't tag {}: {e:#}", path.display());
@@ -402,7 +433,13 @@ fn file_stem(t: &Track) -> String {
     if clean.is_empty() { t.id.clone() } else { clean }
 }
 
-fn tag(path: &Path, t: &Track, cover: Option<Vec<u8>>) -> anyhow::Result<()> {
+/// The FLAC in `audio` with `t`'s title, artists, album, track number and `cover` in it.
+fn tag_flac(audio: &[u8], t: &Track, cover: Option<&[u8]>, lyrics: Option<&str>) -> anyhow::Result<Vec<u8>> {
+    let artists: Vec<String> = t.artists.iter().map(|a| a.name.clone()).collect();
+    crate::flac_tags::write(audio, &crate::flac_tags::Tags { title: &t.title, artists: &artists, album: t.album.as_ref().map(|a| a.name.as_str()), track_nr: t.track_nr, cover, lyrics })
+}
+
+fn tag(path: &Path, t: &Track, cover: Option<Vec<u8>>, lyrics: Option<&str>) -> anyhow::Result<()> {
     let mut tag = mp4ameta::Tag::read_from_path(path)?;
     tag.set_title(&t.title);
     for (i, a) in t.artists.iter().enumerate() {
@@ -428,6 +465,9 @@ fn tag(path: &Path, t: &Track, cover: Option<Vec<u8>>) -> anyhow::Result<()> {
     });
     if let Some(img) = img {
         tag.set_artwork(img);
+    }
+    if let Some(text) = lyrics {
+        tag.set_lyrics(text);
     }
     tag.write_to_path(path)?;
     Ok(())
@@ -513,6 +553,7 @@ mod tests {
     fn an_exported_file_is_named_and_typed_by_its_extension() {
         assert_eq!(export_mime(Path::new("/d/Adele - Hello.m4a")), "audio/mp4");
         assert_eq!(export_mime(Path::new("/d/x.webm")), "audio/webm");
+        assert_eq!(export_mime(Path::new("/d/Adele - Hello.flac")), "audio/flac");
         assert_eq!(export_mime(Path::new("/d/x")), "application/octet-stream");
     }
 
@@ -584,6 +625,73 @@ mod tests {
         let mut index = HashMap::from([("a".to_owned(), entry_at(path.clone()))]);
         assert!(forget(&mut index, "a").is_err());
         assert!(index.contains_key("a"), "still listed: its file is still there");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_file_gets_the_extension_of_what_it_is() {
+        assert_eq!(extension_of(b"\0\0\0\x20ftypM4A "), "m4a");
+        assert_eq!(extension_of(b"fLaC\0\0\0\x22"), "flac");
+        assert_eq!(extension_of(b"\x1aE\xdf\xa3 webm"), "webm");
+        assert_eq!(extension_of(b""), "webm");
+    }
+
+    #[test]
+    fn a_saved_flac_is_played_as_flac_and_other_files_as_before() {
+        assert!(matches!(playback_format(Path::new("/d/a.flac")), Some(crate::stream::Format::File { hint: "flac", .. })));
+        assert!(playback_format(Path::new("/d/a.m4a")).is_none());
+        assert!(playback_format(Path::new("/d/a.webm")).is_none());
+    }
+
+    #[test]
+    fn a_flac_download_gets_the_songs_tags() {
+        let mut t = song("x");
+        t.title = "Hujan di Kemang".into();
+        t.artists = vec![Link { name: "Senja Kala".into(), id: None }];
+        t.album = Some(Link { name: "Musim".into(), id: None });
+        t.track_nr = Some(4);
+        let tagged = tag_flac(&crate::flac_tags::tests::flac(500, &[], &[]), &t, None, Some("[00:01.00]Hujan")).unwrap();
+        let (_, at) = read_flac_blocks(&tagged);
+        assert!(tagged.len() > at);
+        let text = String::from_utf8_lossy(&tagged[..at]).into_owned();
+        for want in ["TITLE=Hujan di Kemang", "ARTIST=Senja Kala", "ALBUM=Musim", "TRACKNUMBER=4", "LYRICS=[00:01.00]Hujan"] {
+            assert!(text.contains(want), "{want}");
+        }
+    }
+
+    /// (blocks, where the audio starts) of a FLAC, by the header bytes.
+    fn read_flac_blocks(file: &[u8]) -> (usize, usize) {
+        let (mut at, mut n) = (4usize, 0usize);
+        loop {
+            let last = file[at] & 0x80 != 0;
+            at += 4 + u32::from_be_bytes([0, file[at + 1], file[at + 2], file[at + 3]]) as usize;
+            n += 1;
+            if last {
+                return (n, at);
+            }
+        }
+    }
+
+    /// A FLAC saved, listed, played back from its file and removed, through the real functions.
+    #[test]
+    fn a_flac_is_saved_tagged_found_played_and_removed() {
+        use rodio::Source;
+        let dir = std::env::temp_dir().join(format!("aoto-test-flac-save-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        init(&dir, dir.join("songs").to_str().unwrap());
+        let mut t = song("flac1");
+        t.artists = vec![Link { name: "Senja Kala".into(), id: None }];
+        let audio = crate::flac_tags::tests::flac(9000, &[], &[]);
+        let path = save(&t, &audio, 204, None, None, None, None).unwrap();
+        assert_eq!(path.extension().unwrap(), "flac");
+        assert_eq!(super::path("flac1"), Some(path.clone()));
+        let shared = open("flac1").expect("the saved file opens");
+        let decoder = crate::stream::decoder(shared, true).expect("and decodes as a FLAC");
+        assert_eq!(decoder.sample_rate().get(), 44_100);
+        assert_eq!(decoder.count(), 9000, "every sample of the song is there");
+        assert!(remove("flac1"));
+        assert!(!path.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

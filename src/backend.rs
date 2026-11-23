@@ -512,6 +512,12 @@ pub struct Backend {
     atmos: Arc<std::sync::atomic::AtomicBool>,
     /// When the addons' lossless copies may play (the Sound & quality setting).
     lossless: Arc<std::sync::RwLock<crate::lossless::Lossless>>,
+    /// The quality of YouTube's stream on Wi-Fi and on mobile data.
+    quality: Arc<std::sync::RwLock<crate::quality::Ceilings>>,
+    /// Downloads take an addon's FLAC copy when it has one (Settings › Downloads).
+    lossless_downloads: Arc<std::sync::atomic::AtomicBool>,
+    /// A download carries the song's lyrics in its tag (Settings › Downloads).
+    lyrics_in_files: Arc<std::sync::atomic::AtomicBool>,
     /// Play YouTube first and upgrade to hi-res in the background.
     disable_direct: Arc<std::sync::atomic::AtomicBool>,
     /// Songs the listener sent back to YouTube audio: no addon copy until they leave.
@@ -546,7 +552,7 @@ impl Backend {
         {
             log::warn!("proxy relay: {e:#}");
         }
-        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), hires: Default::default(), atmos: Default::default(), lossless: Default::default(), disable_direct: Default::default(), reverted: Default::default(), songs: Default::default() };
+        let backend = Self { rt: Arc::new(rt), api, tx, audio, wake, prefetched: Default::default(), current: Default::default(), data_dir, lyrics, translate, jsc, premium: Arc::new(tokio::sync::Mutex::new(Err(None))), hq: Default::default(), hires: Default::default(), atmos: Default::default(), lossless: Default::default(), quality: Default::default(), lossless_downloads: Default::default(), lyrics_in_files: Default::default(), disable_direct: Default::default(), reverted: Default::default(), songs: Default::default() };
         backend.keep_signed_in();
         Ok(backend)
     }
@@ -1427,20 +1433,20 @@ impl Backend {
             s.url,
             s.user_agent,
             shared.clone(),
-            Some(self.refresher(source, video_id, s.format, track.cloned())),
+            Some(self.refresher(source, video_id, s.format, s.quality, track.cloned())),
             s.ranging,
         ));
         Ok(shared)
     }
 
     /// Resolves a fresh URL from the same source and format, for a download that got a 403.
-    fn refresher(&self, source: Source, video_id: &str, format: stream::Format, track: Option<Track>) -> stream::Refresh {
+    fn refresher(&self, source: Source, video_id: &str, format: stream::Format, quality: crate::quality::Quality, track: Option<Track>) -> stream::Refresh {
         let (this, id) = (self.clone(), video_id.to_owned());
         Arc::new(move || {
             let (this, id, track) = (this.clone(), id.clone(), track.clone());
             let format = format.clone();
             Box::pin(async move {
-                let s = this.resolve_from(source, &id, format.clone(), track.as_ref()).await?;
+                let s = this.resolve_from(source, &id, format.clone(), quality, track.as_ref()).await?;
                 // The buffer is laid out for the format it started with.
                 anyhow::ensure!(s.format == format, "the stream changed format");
                 Ok(s.url)
@@ -1448,13 +1454,57 @@ impl Backend {
         })
     }
 
+    /// The lyrics for a downloaded file's tag: timed ones when a source has them, else plain.
+    /// Never holds the download up for long, and a miss is `None`: the song saves without.
+    async fn lyrics_for_file(&self, t: &Track) -> Option<String> {
+        let artist = t.artist_line();
+        let query = lyrics::Query { video_id: &t.id, song: &t.title, artist: &artist, album: t.album.as_ref().map(|a| a.name.as_str()), duration: t.duration };
+        let set = match tokio::time::timeout(std::time::Duration::from_secs(12), self.lyrics.fetch(&query)).await {
+            Ok(Ok(set)) => set,
+            Ok(Err(e)) => {
+                log::info!("download {}: no lyrics for the tag ({e:#})", t.id);
+                return None;
+            }
+            Err(_) => {
+                log::info!("download {}: the lyrics took too long; saving without", t.id);
+                return None;
+            }
+        };
+        crate::lyric_tag::text(crate::lyric_tag::choose(&set)?)
+    }
+
+    /// An addon's FLAC copy of `t` to save, when one has it and the rules allow. Only a FLAC
+    /// file can be tagged and saved as one, so anything else (Atmos, ALAC, a stream that
+    /// comes decoded) is left for YouTube's audio. A miss is `None`, never an error: the
+    /// download goes on from YouTube.
+    async fn lossless_for_download(&self, t: &Track) -> Option<(Source, ResolvedStream)> {
+        if !self.addons_may_play() || self.reverted.lock().unwrap().contains(&t.id) {
+            return None;
+        }
+        let sources = self.hires.read().unwrap().clone();
+        if sources.is_empty() {
+            return None;
+        }
+        let found = tokio::time::timeout(HIRES_WAIT, self.from_hires(&sources, t, false)).await.ok()??;
+        if found.data.is_some() || !matches!(&found.format, stream::Format::File { hint, .. } if *hint == "flac") {
+            log::info!("download {}: the addon's copy is not a FLAC file; saving YouTube's", t.id);
+            return None;
+        }
+        log::info!("download {}: saving the addon's FLAC copy", t.id);
+        Some((Source::HiRes, found))
+    }
+
     /// Download a song into the downloads folder, at the best quality the account gets.
     /// Dropped before it is done (see `told_to_stop`), it fetches no more.
     async fn download(&self, t: &Track, for_video: Option<String>) -> anyhow::Result<PathBuf> {
-        let (source, s) = self.resolve(&t.id, true, Some(t), false, false).await?;
+        let lossless = if self.lossless_downloads.load(Ordering::Relaxed) { self.lossless_for_download(t).await } else { None };
+        let (source, s) = match lossless {
+            Some(found) => found,
+            None => self.resolve(&t.id, true, Some(t), false, false).await?,
+        };
         log::info!("download {}: {} bytes from {source:?}", t.id, s.size);
         let shared = Shared::new(s.size, s.duration_ms, s.loudness_db, s.format.clone(), s.info, false);
-        stream::download(self.http(), s.url, s.user_agent, shared.clone(), Some(self.refresher(source, &t.id, s.format, None)), s.ranging).await;
+        stream::download(self.http(), s.url, s.user_agent, shared.clone(), Some(self.refresher(source, &t.id, s.format, s.quality, Some(t.clone()))), s.ranging).await;
         if let Some(e) = shared.error() {
             anyhow::bail!("{e}");
         }
@@ -1463,8 +1513,9 @@ impl Backend {
             Some(url) => async { self.http().get(url).send().await?.error_for_status()?.bytes().await }.await.ok().map(|b| b.to_vec()),
             None => None,
         };
+        let lyrics = if self.lyrics_in_files.load(Ordering::Relaxed) { self.lyrics_for_file(t).await } else { None };
         let (t, duration_ms, loudness) = (t.clone(), shared.duration_ms, shared.loudness_db);
-        tokio::task::spawn_blocking(move || crate::downloads::save(&t, &audio, duration_ms, loudness, cover, for_video)).await?
+        tokio::task::spawn_blocking(move || crate::downloads::save(&t, &audio, duration_ms, loudness, cover, lyrics.as_deref(), for_video)).await?
     }
 
     /// Find a stream URL, trying the fastest source that can play the song. `best`
@@ -1492,6 +1543,8 @@ impl Backend {
                 Err(_) => log::info!("{video_id}: the hi-res sources gave no answer in {HIRES_WAIT:?}"),
             }
         }
+        // Downloads take the best whatever the setting; a song plays at the choice for this connection.
+        let quality = if best { crate::quality::Quality::High } else { self.stream_quality() };
         let hq = best || self.hq.load(Ordering::Relaxed);
         if best
             && !self.jsc.ready()
@@ -1510,30 +1563,31 @@ impl Backend {
             self.warm_signed_in();
         }
         if hq
+            && quality.takes_premium_stream()
             && solver_ready
             && let Some(session) = self.api.account()
             && self.is_premium(&session).await
         {
-            match self.resolve_from(Source::WebMusic, video_id, stream::Format::Aac, None).await {
+            match self.resolve_from(Source::WebMusic, video_id, stream::Format::Aac, crate::quality::Quality::High, None).await {
                 Ok(s) => return Ok((Source::WebMusic, s)),
                 // Not fatal: the usual 128 kbps stream still plays.
                 Err(e) => log::warn!("high quality stream failed for {video_id} ({e:#}); using standard quality"),
             }
         }
         let opus = if best { stream::Format::Aac } else { stream::Format::Opus };
-        match self.resolve_from(Source::VisionOs, video_id, opus, None).await {
+        match self.resolve_from(Source::VisionOs, video_id, opus, quality, None).await {
             Ok(s) => Ok((Source::VisionOs, s)),
             // Age-restricted or Premium-only: only signed-in web players get it.
             Err(e) if needs_account(&e) => {
                 log::info!("{video_id} needs a signed-in player ({e:#})");
                 let session = self.api.account().ok_or_else(|| anyhow::anyhow!("sign in to play this song"))?;
                 if self.is_premium(&session).await {
-                    match self.resolve_from(Source::WebMusic, video_id, stream::Format::Aac, None).await {
+                    match self.resolve_from(Source::WebMusic, video_id, stream::Format::Aac, crate::quality::Quality::High, None).await {
                         Ok(s) => return Ok((Source::WebMusic, s)),
                         Err(e) => log::warn!("web music player failed ({e:#}); using yt-dlp"),
                     }
                 }
-                Ok((Source::YtDlp, self.resolve_from(Source::YtDlp, video_id, stream::Format::Aac, None).await?))
+                Ok((Source::YtDlp, self.resolve_from(Source::YtDlp, video_id, stream::Format::Aac, crate::quality::Quality::High, None).await?))
             }
             Err(e) => Err(e),
         }
@@ -1541,8 +1595,9 @@ impl Backend {
 
     /// `format`: the container the caller needs (the visionOS player picks Opus or AAC
     /// from it). The hi-res source re-resolves by searching for `track` again.
-    async fn resolve_from(&self, source: Source, video_id: &str, format: stream::Format, track: Option<&Track>) -> anyhow::Result<ResolvedStream> {
+    async fn resolve_from(&self, source: Source, video_id: &str, format: stream::Format, quality: crate::quality::Quality, track: Option<&Track>) -> anyhow::Result<ResolvedStream> {
         let plain = |s: innertube::Stream, ua: &str| ResolvedStream {
+            quality,
             url: s.url,
             size: s.size,
             duration_ms: s.duration_ms,
@@ -1554,7 +1609,7 @@ impl Backend {
             data: None,
         };
         Ok(match source {
-            Source::VisionOs => plain(self.visionos_stream(video_id, format == stream::Format::Opus).await?, innertube::UA),
+            Source::VisionOs => plain(self.visionos_stream(video_id, format == stream::Format::Opus, quality).await?, innertube::UA),
             Source::WebMusic => {
                 let session = self.api.account().ok_or_else(|| anyhow::anyhow!("signed out"))?;
                 plain(session.audio_stream(&self.http(), &self.jsc, video_id).await?, webmusic::UA)
@@ -1565,7 +1620,7 @@ impl Backend {
                 // Cookies Google replaced while yt-dlp used the session.
                 self.api.keep(&session, s.replaced.iter().map(String::as_str));
                 // yt-dlp's JSON doesn't carry YouTube's loudness figure.
-                ResolvedStream { url: s.url, size: s.size, duration_ms: s.duration_ms, user_agent: s.user_agent, loudness_db: None, format: stream::Format::Aac, info: None, ranging: stream::Ranging::Query, data: None }
+                ResolvedStream { url: s.url, size: s.size, duration_ms: s.duration_ms, user_agent: s.user_agent, loudness_db: None, format: stream::Format::Aac, info: None, ranging: stream::Ranging::Query, data: None, quality }
             }
             Source::HiRes => {
                 let track = track.ok_or_else(|| anyhow::anyhow!("no song to look up"))?;
@@ -1595,6 +1650,7 @@ impl Backend {
             info: Some(found.info),
             ranging: stream::Ranging::Header,
             data: found.data,
+            quality: crate::quality::Quality::High,
         })
     }
 
@@ -1642,16 +1698,16 @@ impl Backend {
         }
     }
 
-    async fn visionos_stream(&self, video_id: &str, opus: bool) -> anyhow::Result<innertube::Stream> {
+    async fn visionos_stream(&self, video_id: &str, opus: bool, quality: crate::quality::Quality) -> anyhow::Result<innertube::Stream> {
         let vd = self.api.visitor_data(false).await?;
-        match innertube::audio_stream(&self.http(), video_id, &vd, opus).await {
+        match innertube::audio_stream_at(&self.http(), video_id, &vd, opus, quality).await {
             Ok(s) => Ok(s),
             Err(e) if needs_account(&e) => Err(e),
             Err(e) => {
                 // A stale/flagged visitor ID is the usual cause; retry once with a fresh one.
                 log::info!("visionOS player: {e:#}; retrying with new visitor data");
                 let vd = self.api.visitor_data(true).await?;
-                innertube::audio_stream(&self.http(), video_id, &vd, opus).await
+                innertube::audio_stream_at(&self.http(), video_id, &vd, opus, quality).await
             }
         }
     }
@@ -1684,6 +1740,27 @@ impl Backend {
     /// way it was before the setting).
     pub fn set_lossless(&self, rule: crate::lossless::Lossless) {
         *self.lossless.write().unwrap() = rule;
+    }
+
+    /// Put the song's lyrics in the tag of what a download saves.
+    pub fn set_lyrics_in_files(&self, on: bool) {
+        self.lyrics_in_files.store(on, Ordering::Relaxed);
+    }
+
+    /// Save an addon's FLAC copy of a song when it has one, instead of YouTube's audio.
+    pub fn set_lossless_downloads(&self, on: bool) {
+        self.lossless_downloads.store(on, Ordering::Relaxed);
+    }
+
+    /// The quality of YouTube's stream on Wi-Fi and on mobile data (both High is how the app
+    /// always played).
+    pub fn set_quality(&self, ceilings: crate::quality::Ceilings) {
+        *self.quality.write().unwrap() = ceilings;
+    }
+
+    /// The quality to play at on the connection the phone has right now.
+    fn stream_quality(&self) -> crate::quality::Quality {
+        self.quality.read().unwrap().for_network(crate::platform::network())
     }
 
     /// May an addon's copy play on the connection the phone has right now?
@@ -1770,7 +1847,7 @@ impl Backend {
                 s.url,
                 s.user_agent,
                 shared.clone(),
-                Some(self.refresher(source, &video_id, s.format.clone(), Some(track.clone()))),
+                Some(self.refresher(source, &video_id, s.format.clone(), s.quality, Some(track.clone()))),
                 s.ranging,
             ));
             shared
@@ -1946,6 +2023,9 @@ struct ResolvedStream {
     ranging: stream::Ranging,
     /// Already-decoded audio (Dolby Atmos out of DASH): no download to run.
     data: Option<Vec<u8>>,
+    /// The quality YouTube's stream was asked for at, so that a refreshed address is for the
+    /// same stream (a different one has other bytes).
+    quality: crate::quality::Quality,
 }
 
 /// The anonymous visionOS player refused because the song needs an account:
@@ -2061,5 +2141,88 @@ mod download_stop_tests {
         let (stop, told) = tokio::sync::watch::channel(false);
         drop(stop);
         assert!(tokio::time::timeout(Duration::from_millis(50), told_to_stop(told)).await.is_err());
+    }
+
+    /// A real addon, end to end through the backend's own download: the addon's FLAC copy is
+    /// found, fetched, tagged and saved, and then plays from its file. YTM_FLAC_ADDON is the
+    /// addon's link and YTM_FLAC_TRACK "title|artist|seconds|rate|channels".
+    /// `cargo test --lib live_lossless_download -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_lossless_download_from_an_addon() {
+        use rodio::Source;
+        let (Ok(link), Ok(spec)) = (std::env::var("YTM_FLAC_ADDON"), std::env::var("YTM_FLAC_TRACK")) else { return };
+        let f: Vec<&str> = spec.split('|').collect();
+        let (title, artist, secs, rate, channels) = (f[0], f[1], f[2].parse::<u32>().unwrap(), f[3].parse::<u32>().unwrap(), f[4].parse::<u16>().unwrap());
+        let dir = std::env::temp_dir().join(format!("aoto-test-lossless-dl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (audio_tx, _audio_rx) = crossbeam_channel::unbounded();
+        let audio = crate::audio::spawn(0.0, false, None, audio_tx, || {});
+        let (resp_tx, _resp_rx) = crossbeam_channel::unbounded();
+        let backend = Backend::new(dir.clone(), resp_tx, audio, Arc::new(|| {})).unwrap();
+        crate::downloads::init(&dir, dir.join("songs").to_str().unwrap());
+        backend.set_hires_source(&link);
+        let track: Track = serde_json::from_value(serde_json::json!({
+            "id": "dl1", "title": title, "artists": [{"name": artist, "id": null}], "album": {"name": "After Hours", "id": null},
+            "duration": secs, "thumbs": [], "track_nr": 5, "plays": null,
+        }))
+        .unwrap();
+
+        // Off, the addon is not asked: the download would go to YouTube (not run here).
+        backend.set_lossless_downloads(false);
+        assert!(backend.rt.block_on(backend.lossless_for_download(&track)).is_some(), "the helper itself only finds a copy");
+        // Rules: Off keeps the addons out of it.
+        backend.set_lossless(crate::lossless::Lossless::Off);
+        assert!(backend.rt.block_on(backend.lossless_for_download(&track)).is_none(), "Lossless from addons: Off");
+        backend.set_lossless(crate::lossless::Lossless::Always);
+        // A song the addon does not have is a miss, not an error.
+        let other: Track = serde_json::from_value(serde_json::json!({
+            "id": "dl2", "title": "A Song Nobody Has", "artists": [{"name": "Nobody", "id": null}], "album": null,
+            "duration": 200, "thumbs": [], "track_nr": null, "plays": null,
+        }))
+        .unwrap();
+        assert!(backend.rt.block_on(backend.lossless_for_download(&other)).is_none());
+        // A copy of the wrong length is not the same recording.
+        let mut long = track.clone();
+        long.duration = Some(secs + 30);
+        assert!(backend.rt.block_on(backend.lossless_for_download(&long)).is_none(), "30 s off is another version");
+
+        backend.set_lossless_downloads(true);
+        let path = backend.rt.block_on(backend.download(&track, None)).expect("the download");
+        println!("saved {}", path.display());
+        assert_eq!(path.extension().unwrap(), "flac");
+        let bytes = std::fs::read(&path).unwrap();
+        let text = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).into_owned();
+        assert!(text.contains("TITLE=") && text.contains(&format!("ARTIST={artist}")) && text.contains("ALBUM=After Hours") && text.contains("TRACKNUMBER=5"), "tagged");
+        let shared = crate::downloads::open("dl1").expect("plays from the file");
+        let decoder = crate::stream::decoder(shared, true).unwrap();
+        assert_eq!((decoder.sample_rate().get(), decoder.channels().get()), (rate, channels));
+        let seconds = decoder.count() as f64 / (rate as f64 * channels as f64);
+        println!("the saved file plays {seconds:.3} s");
+        assert!((seconds - secs as f64).abs() < 0.05);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Lyrics for a download's tag, from the real sources.
+    /// `cargo test --lib live_lyrics_for_a_tag -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_lyrics_for_a_tag() {
+        let dir = std::env::temp_dir().join(format!("aoto-test-lyrics-tag-{}", std::process::id()));
+        let (audio_tx, _audio_rx) = crossbeam_channel::unbounded();
+        let audio = crate::audio::spawn(0.0, false, None, audio_tx, || {});
+        let (resp_tx, _resp_rx) = crossbeam_channel::unbounded();
+        let backend = Backend::new(dir.clone(), resp_tx, audio, Arc::new(|| {})).unwrap();
+        let track: Track = serde_json::from_value(serde_json::json!({
+            "id": "4NRXx6U8ABQ", "title": "Blinding Lights", "artists": [{"name": "The Weeknd", "id": null}],
+            "album": {"name": "After Hours", "id": null}, "duration": 200, "thumbs": [], "track_nr": null, "plays": null,
+        }))
+        .unwrap();
+        let text = backend.rt.block_on(backend.lyrics_for_file(&track)).expect("lyrics for a famous song");
+        let head: String = text.lines().take(4).collect::<Vec<_>>().join(" | ");
+        println!("{} lines; starts: {head}", text.lines().count());
+        assert!(text.lines().count() > 10);
+        assert!(text.starts_with('['), "timed lyrics come as LRC: {head}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
