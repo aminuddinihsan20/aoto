@@ -82,6 +82,7 @@ pub fn page(app: &mut App, ui: &mut Ui, now: f64) {
             Page::Settings | Page::SettingsCategory(_) => settings(app, ui),
             Page::Transfer => super::transfer::page(app, ui, now),
             Page::LocalFolder(uri) => local_folder(app, ui, uri, now),
+            Page::WebDav(id) => webdav_server(app, ui, id, now),
             Page::LocalAlbum(key) => local_album(app, ui, key, now),
             Page::LocalSongs => local_songs(app, ui, now),
             Page::Downloaded(id) => super::downloading::saved_page(app, ui, id, now),
@@ -2219,6 +2220,7 @@ fn downloads_phone(app: &mut App, ui: &mut Ui, now: f64) {
         LocalTab::Albums => album_list(app, ui),
         LocalTab::Songs => song_preview(app, ui),
     }
+    network_section(app, ui);
     ui.add_space(20.0);
     phone_section(ui, "Downloaded", "");
     if songs.is_empty() {
@@ -2454,6 +2456,63 @@ fn nothing_saved(ui: &mut Ui) {
         ui.add_space(4.0);
         ui.label(RichText::new("Open a song's menu (the three dots) and choose Download. Saved songs play without internet.").font(Type::BodyMedium.font()).color(m.on_surface_variant));
     });
+}
+
+/// WebDAV servers as long cards (a NAS, Nextcloud, a shared folder), and a button to add one.
+fn network_section(app: &mut App, ui: &mut Ui) {
+    ui.add_space(20.0);
+    phone_section(ui, "Network music", "Songs on a WebDAV server, played from there.");
+    for (i, (server, songs)) in crate::webdav::servers().iter().enumerate() {
+        let sub = if app.dav_busy.contains(&server.id) { "Looking for music\u{2026}".to_owned() } else { count_text(*songs, "song") };
+        if ui.push_id(("dav-card", i), |ui| long_card(ui, icon::FOLDER_OPEN, &server.name, &sub)).inner.clicked() {
+            app.actions.push(Action::Go(Page::WebDav(server.id.clone())));
+        }
+    }
+    ui.add_space(4.0);
+    if pill(ui, "Add a WebDAV server", None, false).clicked() {
+        app.dialog = Some(super::Dialog::AddWebDav { name: String::new(), url: String::new(), user: String::new(), password: String::new(), busy: false, error: None });
+    }
+}
+
+/// One WebDAV server: its songs, and ways to look through it again or take it out.
+fn webdav_server(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
+    use crate::material::Type;
+    let Some((server, count)) = crate::webdav::servers().into_iter().find(|(s, _)| s.id == id) else {
+        page_title(ui, "Server");
+        ui.label(RichText::new("This server isn't added any more.").font(Type::BodyMedium.font()).color(theme::text_dim()));
+        return;
+    };
+    page_title(ui, &server.name);
+    let songs = crate::webdav::tracks(id);
+    let looking = app.dav_busy.contains(id);
+    ui.add_space(2.0);
+    let sub = if looking { "Looking for music\u{2026}".to_owned() } else { count_text(count, "song") };
+    ui.label(RichText::new(sub).font(Type::BodyMedium.font()).color(theme::text_dim()));
+    ui.add_space(12.0);
+    if !songs.is_empty() {
+        play_shuffle(app, ui, &songs);
+        ui.add_space(4.0);
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        if !looking && pill(ui, "Refresh", None, false).clicked() {
+            app.scan_webdav(id);
+        }
+        if pill(ui, "Remove server", Some(icon::X), false).clicked() {
+            crate::webdav::remove_server(id);
+            app.toast(format!("{} removed from Aoto. Nothing on the server was changed.", server.name));
+            app.nav_back();
+        }
+    });
+    ui.add_space(8.0);
+    if songs.is_empty() {
+        if !looking {
+            ui.label(RichText::new("No music found on this server.").font(Type::BodyLarge.font()).color(theme::text()));
+        }
+        return;
+    }
+    let rows = Rows::new(app, now);
+    list(ui, &rows, &app.liked, &songs, true, |_, _| None, ListCtx { sel: &mut app.selection, page: &app.page, own: false }, &mut app.actions);
 }
 
 /// One folder of local music: its songs, and ways to keep it up to date.

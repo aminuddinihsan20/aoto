@@ -171,6 +171,16 @@ pub fn song_id(server_id: &str, path: &str) -> String {
     format!("dav:{h:016x}")
 }
 
+/// The id a server has: stable for the same address and user, so adding it again replaces it.
+pub fn server_id(url: &str, user: &str) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in url.trim().trim_end_matches('/').bytes().chain(std::iter::once(0)).chain(user.bytes()) {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
 pub fn is_dav(id: &str) -> bool {
     id.starts_with("dav:")
 }
@@ -214,7 +224,7 @@ pub fn file_url(server: &Server, password: &str, path: &str) -> anyhow::Result<S
 }
 
 /// The path of the folder a server's address names.
-fn root_path(server: &Server) -> anyhow::Result<String> {
+pub fn root_path(server: &Server) -> anyhow::Result<String> {
     let url = url::Url::parse(&server.url)?;
     Ok(decode(url.path()))
 }
@@ -489,6 +499,14 @@ mod tests {
     fn a_file_on_the_top_level_has_no_artist_or_album() {
         assert_eq!(meta_from_path("/music/Pulang.flac", "/music"), ("Pulang".into(), String::new(), String::new()));
         assert_eq!(meta_from_path("/m/Rona Jingga/Pulang.flac", "/m"), ("Pulang".into(), "Rona Jingga".into(), String::new()), "one folder is the artist");
+    }
+
+    #[test]
+    fn a_server_id_is_the_same_for_the_same_address_whatever_the_trailing_slash() {
+        assert_eq!(server_id("https://nas/dav/", "ani"), server_id("https://nas/dav", "ani"));
+        assert_eq!(server_id(" https://nas/dav ", "ani"), server_id("https://nas/dav", "ani"));
+        assert_ne!(server_id("https://nas/dav", "ani"), server_id("https://nas/dav", "budi"));
+        assert_ne!(server_id("https://nas/dav", "ani"), server_id("https://nas/other", "ani"));
     }
 
     #[test]

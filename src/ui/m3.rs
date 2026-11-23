@@ -884,12 +884,17 @@ pub fn dialog_text(ui: &mut Ui, body: &str) {
 /// A text field across the layout's width: an outline that takes the primary colour
 /// while it is typed in. `multiline`: a few rows tall.
 pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, multiline: bool) -> Response {
+    text_field_with(ui, text, hint, multiline, false)
+}
+
+/// [`text_field`]; `secret`: what is typed shows as dots (a password).
+pub fn text_field_with(ui: &mut Ui, text: &mut String, hint: &str, multiline: bool, secret: bool) -> Response {
     let m = material::scheme();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), if multiline { 112.0 } else { 56.0 }), Sense::hover());
     // Painted first, so the text draws over it.
     let outline = ui.painter().add(egui::Shape::Noop);
     let inner = rect.shrink2(vec2(16.0, if multiline { 12.0 } else { 4.0 }));
-    let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER) };
+    let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER).password(secret) };
     let resp = ui.put(inner, edit.hint_text(egui::RichText::new(hint).color(m.on_surface_variant)).font(Type::BodyLarge.font()).text_color(m.on_surface).frame(egui::Frame::NONE).desired_width(inner.width()));
     let focus = theme::anim_bool(ui.ctx(), resp.id.with("focus"), resp.has_focus(), 0.15);
     ui.painter().set(outline, egui::Shape::rect_stroke(rect, shape::TILE_SMALL, Stroke::new(1.0 + focus, theme::lerp_color(m.outline, m.primary, focus)), StrokeKind::Inside));

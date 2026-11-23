@@ -90,6 +90,8 @@ pub enum Page {
     Transfer,
     /// Music from one folder the listener chose (its address).
     LocalFolder(String),
+    /// Music on one WebDAV server (its id).
+    WebDav(String),
     /// One album of local music, across the folders (its key, see `local::album_key`).
     LocalAlbum(String),
     /// Every local song of every folder, as one list.
@@ -175,6 +177,8 @@ enum Dialog {
     /// `info` until it loads; `busy` while a change is on its way; `confirm_off` asks
     /// before turning collaboration off (that removes the collaborators).
     Collaborate { id: String, info: Option<crate::ytm::Collaboration>, busy: bool, confirm_off: bool },
+    /// Add a WebDAV server: what is typed, whether it is being tested, and why it failed.
+    AddWebDav { name: String, url: String, user: String, password: String, busy: bool, error: Option<String> },
 }
 
 /// Songs picked in a list for a batch action: Ctrl-click toggles one, Shift-click a range,
@@ -493,6 +497,8 @@ pub struct App {
     sync_playlists: bool,
     /// When the playlists were last checked (app time).
     sync_checked: Option<f64>,
+    /// WebDAV servers being looked through (their ids).
+    dav_busy: std::collections::HashSet<String>,
     /// What the playing stream is (codec, rate, depth, size), when a hi-res source
     /// supplied it, with the generation it belongs to.
     audio_info: Option<(u64, crate::hires::Info)>,
@@ -896,6 +902,7 @@ impl App {
             lyrics_in_files,
             sync_playlists,
             sync_checked: None,
+            dav_busy: Default::default(),
             audio_info: None,
             show_nerd_stats,
             stream_stats: None,
