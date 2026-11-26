@@ -46,7 +46,7 @@
 - **Last.fm** scrobbling, **Listen together** sessions, and **Spotify transfer** for bringing playlists over.
 
 **Android**
-- Material You throughout (with an optional pure black theme), a media notification, home-screen widgets (4×2, 2×2 and 4×1) and Android Auto.
+- Material You throughout (with an optional pure black theme), a second theme (**Sticker**: outlined pastel cards, light and dark), a choice of five app icons, a media notification, home-screen widgets (4×2, 2×2 and 4×1) and Android Auto.
 - **Update notifications**: a newer release is announced, and installs over the old one without uninstalling.
 
 ## Status
