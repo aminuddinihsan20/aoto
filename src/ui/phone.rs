@@ -98,7 +98,7 @@ pub fn frame(app: &mut App, ui: &mut Ui, now: f64, screen: Rect) {
     egui::Panel::bottom("phone-nav")
         .resizable(false)
         .exact_size(if nav { NAV_H + insets.bottom } else { 0.0 })
-        .frame(egui::Frame::new().fill(material::scheme().surface_container))
+        .frame(egui::Frame::new().fill(if material::style().outlined() { material::scheme().surface } else { material::scheme().surface_container }))
         .show_separator_line(false)
         .show(ui, |ui| {
             if nav {
@@ -397,13 +397,43 @@ fn nav_cells(row: Rect) -> [NavCell; 4] {
     })
 }
 
+/// The accent bar Sticker's navigation stands on: the row, drawn in from the screen's
+/// sides and from its own top and bottom, leaving room for the card behind it.
+fn nav_plate(row: Rect) -> Rect {
+    Rect::from_min_max(pos2(row.left() + 12.0, row.top() + 4.0), pos2(row.right() - 16.0, row.bottom() - 8.0))
+}
+
 fn nav_bar(app: &mut App, ui: &mut Ui, insets: Insets) {
     let m = material::scheme();
     let full = ui.max_rect();
     let row = Rect::from_min_max(pos2(full.left() + insets.left, full.top()), pos2(full.right() - insets.right, full.top() + NAV_H));
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: the destinations stand on one accent bar, itself on a second card.
+        m3::plate(ui, nav_plate(row), 14.0, look.accent, m3::Stack::Card);
+    }
     for (i, (tab, c)) in Tab::ALL.into_iter().zip(nav_cells(row)).enumerate() {
         let resp = named(ui.interact(c.cell, ui.scope_id().with(("phone-tab", i)), Sense::click()), tab.label());
         let on = app.phone_tab == tab;
+        if look.outlined() {
+            let s = theme::anim_bool(ui.ctx(), ("phone-tab-on", i), on, 0.2);
+            if s > 0.0 {
+                let pill = Rect::from_center_size(c.pill.center(), vec2(egui::lerp(32.0..=c.pill.width(), s), c.pill.height()));
+                ui.painter().rect_filled(pill, 8.0, m.secondary_container.gamma_multiply(s));
+                ui.painter().rect_stroke(pill, 8.0, egui::Stroke::new(look.outline, look.line.gamma_multiply(s)), egui::StrokeKind::Inside);
+            }
+            if resp.is_pointer_button_down_on() {
+                ui.painter().rect_filled(c.pill, 8.0, look.on_accent.gamma_multiply(0.1));
+            }
+            glyphs::draw(ui, c.pill.center(), 24.0, tab.glyph(), look.on_accent);
+            let role = if on { Type::LabelMedium.spec().weight(Weight::Bold) } else { Type::LabelMedium.spec() };
+            let label = m3::galley(ui, tab.label(), role, look.on_accent, c.cell.width());
+            ui.painter().galley(c.label - label.size() / 2.0, label, look.on_accent);
+            if resp.clicked() {
+                app.actions.push(Action::Go(tab.page()));
+            }
+            continue;
+        }
         // The pill opens out from the icon as its destination becomes the active one.
         let s = theme::anim_bool(ui.ctx(), ("phone-tab-on", i), on, 0.2);
         if s > 0.0 {
@@ -746,5 +776,16 @@ mod tests {
         assert_eq!(bar_title(true, &Page::SettingsCategory(Category::Account)), Some("Listen together"), "the section opened inside it");
         assert_eq!(bar_title(true, &Page::Home), None);
         assert_eq!(bar_title(false, &Page::Stats), None);
+    }
+
+    #[test]
+    fn stickers_navigation_bar_keeps_every_destination_on_it_and_stays_in_the_row() {
+        let row = Rect::from_min_size(pos2(0.0, 800.0), vec2(412.0, NAV_H));
+        let plate = nav_plate(row);
+        assert!(row.contains_rect(plate.translate(egui::Vec2::splat(4.0))), "the card behind it stays inside the row too");
+        for c in nav_cells(row) {
+            assert!(plate.contains_rect(c.pill), "{:?} is off the bar", c.pill);
+            assert!(plate.contains(c.label), "the label is on the bar");
+        }
     }
 }

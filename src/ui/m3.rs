@@ -75,6 +75,14 @@ pub fn plate(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>, fill: Color32
     ui.painter().add(plate_shape(rect, radius, fill, stack));
 }
 
+/// The look's line round `rect`, in a look that draws one: the frame of a cover or a tile.
+pub fn outline(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>) {
+    let style = material::style();
+    if style.outlined() {
+        ui.painter().rect_stroke(rect, radius, Stroke::new(style.outline, style.line), StrokeKind::Inside);
+    }
+}
+
 /// A corner as the look rounds it (Sticker's are squarer).
 pub fn round(corner: f32) -> f32 {
     material::style().round(corner)
@@ -1065,6 +1073,18 @@ pub fn slider(ui: &mut Ui, value: &mut u32, range: std::ops::RangeInclusive<u32>
     resp.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), shown as f64, name));
     let g = slider_geom(rect, (shown.saturating_sub(lo)) as f32 / hi.saturating_sub(lo).max(1) as f32);
     let p = ui.painter();
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: one outlined track, filled with the accent up to an outlined handle.
+        let line = Stroke::new(look.outline, look.line);
+        let track = Rect::from_min_max(pos2(g.active.left(), g.active.center().y - 7.0), pos2(g.rest.right().max(g.active.right()), g.active.center().y + 7.0));
+        p.rect_filled(track, 7.0, m.surface_container);
+        p.rect_filled(Rect::from_min_max(track.min, pos2(g.handle.center().x, track.bottom())), 7.0, look.accent);
+        p.rect_stroke(track, 7.0, line, StrokeKind::Inside);
+        p.rect_filled(g.handle.expand2(vec2(4.0, 0.0)), 6.0, m.secondary_container);
+        p.rect_stroke(g.handle.expand2(vec2(4.0, 0.0)), 6.0, line, StrokeKind::Inside);
+        return resp;
+    }
     if g.active.width() > 0.0 {
         p.rect_filled(g.active, CornerRadius { nw: 8, sw: 8, ne: 2, se: 2 }, m.primary);
     }
@@ -1105,7 +1125,11 @@ pub fn dropdown(ui: &mut Ui, value: &str, width: f32, name: &str) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(width.min(ui.available_width()), TOUCH), Sense::click());
     let resp = named(resp, name);
     let open = egui::Popup::is_id_open(ui.ctx(), egui::Popup::default_response_id(&resp));
-    ui.painter().rect_filled(rect, shape::TILE_SMALL, m.surface_container_highest);
+    if material::style().outlined() {
+        plate(ui, rect, shape::TILE_SMALL, m.surface_container, Stack::Card);
+    } else {
+        ui.painter().rect_filled(rect, shape::TILE_SMALL, m.surface_container_highest);
+    }
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, shape::TILE_SMALL, m.on_surface.gamma_multiply(PRESSED));
     }
@@ -1440,8 +1464,9 @@ pub fn carousel(ui: &mut Ui, id: &str, nudge: i32, cards: &[Card], liked: &HashS
 /// is how clearly its label shows.
 fn carousel_item(ui: &mut Ui, id: egui::Id, rect: Rect, c: &Card, focus: f32, liked: &HashSet<String>, acts: &mut Vec<Action>) {
     let resp = named(ui.interact(rect, id, Sense::click()), &c.title);
-    let radius = shape::CARD.min(rect.width() / 2.0);
+    let radius = round(shape::CARD).min(rect.width() / 2.0);
     widgets::paint_cover_cropped(ui, rect, &c.thumbs, CornerRadius::same(radius as u8));
+    outline(ui, rect, radius);
     if focus > 0.01 {
         scrim_bottom(ui, rect, radius, rect.top() + rect.height() * 0.35, 0.75 * focus);
         let ink = Color32::WHITE.gamma_multiply(focus);
@@ -1485,8 +1510,8 @@ pub fn song_tile(ui: &mut Ui, width: f32, t: &Track, o: &widgets::RowOpts, acts:
     if !ui.is_rect_visible(rect) {
         return resp;
     }
-    let r = shape::TILE as u8;
-    ui.painter().rect_filled(rect, shape::TILE, m.surface_container_high);
+    let r = round(shape::TILE) as u8;
+    plate(ui, rect, r, if material::style().outlined() { m.surface_container } else { m.surface_container_high }, Stack::None);
     let cover = Rect::from_min_size(rect.min, Vec2::splat(TILE_H));
     let corners = CornerRadius { nw: r, sw: r, ne: 0, se: 0 };
     widgets::paint_cover_cropped(ui, cover, &t.thumbs, corners);
@@ -1553,13 +1578,17 @@ pub fn hero_card(ui: &mut Ui, overline: &str, c: &Card, acts: &mut Vec<Action>) 
         return;
     }
     let g = hero_geom(rect);
-    ui.painter().rect_filled(rect, shape::CARD, m.primary_container);
+    plate(ui, rect, round(shape::CARD), m.primary_container, Stack::Card);
     // A paler disc behind the cover; it leaves the card through its straight edges only.
     let disc = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     disc.circle_filled(pos2(rect.right() - 150.0, rect.center().y), 140.0, m.on_primary_container.gamma_multiply(0.09));
-    widgets::soft_shadow(ui, g.cover, 24.0, 18.0, 0.35);
-    widgets::paint_cover(ui, g.cover, &c.thumbs, 24.0, 1.0);
-    ui.painter().rect_stroke(g.cover, 24.0, Stroke::new(2.0, m.primary_container), StrokeKind::Outside);
+    if material::style().outlined() {
+        widgets::paint_cover(ui, g.cover, &c.thumbs, round(24.0), 1.0);
+    } else {
+        widgets::soft_shadow(ui, g.cover, 24.0, 18.0, 0.35);
+        widgets::paint_cover(ui, g.cover, &c.thumbs, 24.0, 1.0);
+        ui.painter().rect_stroke(g.cover, 24.0, Stroke::new(2.0, m.primary_container), StrokeKind::Outside);
+    }
 
     let ink = m.on_primary_container;
     let over = text(ui, g.text.min, &overline.to_uppercase(), Type::LabelMedium, ink.gamma_multiply(0.8), g.text.width());

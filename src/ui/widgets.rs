@@ -380,6 +380,7 @@ pub fn paint_cover_xfade_px(ui: &Ui, site: egui::Id, rect: Rect, thumbs: &[Thumb
     }
     let url = steady_url(ui.ctx(), &t.url, px);
     cover_xfade(ui, site, rect, radius, &url, uv, Color32::WHITE);
+    super::m3::outline(ui, rect, radius);
 }
 
 /// [`paint_cover`] fetching the image at `px` rather than the drawn size. A cover that
@@ -404,6 +405,8 @@ pub fn paint_cover_px(ui: &Ui, rect: Rect, thumbs: &[Thumb], radius: f32, zoom: 
     }
     let url = steady_url(ui.ctx(), &t.url, px);
     paint_remote(ui, &url, rect, radius, uv, Color32::WHITE);
+    // Sticker frames every cover with its line.
+    super::m3::outline(ui, rect, radius);
 }
 
 /// Paint the cover cropped to fill `rect` (any aspect), tinted, for full-bleed backdrops.
