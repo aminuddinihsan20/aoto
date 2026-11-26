@@ -1296,13 +1296,20 @@ pub fn option_pill(ui: &Ui, rect: Rect, id: egui::Id, label: &str, icon: Option<
     let m = material::scheme();
     let resp = named(ui.interact(rect, id, Sense::click()), label);
     let t = theme::anim_bool(ui.ctx(), id.with("on"), on, 0.15);
-    let radius = egui::lerp(rect.height() / 2.0..=shape::TILE, t);
-    let off = if outlined { Color32::TRANSPARENT } else { m.surface_container_highest };
-    ui.painter().rect_filled(rect, radius, theme::lerp_color(off, m.primary, t));
-    if outlined && t < 1.0 {
-        ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, m.outline.gamma_multiply(1.0 - t)), StrokeKind::Inside);
-    }
-    let ink = theme::lerp_color(m.on_surface, m.on_primary, t);
+    let lined = material::style().outlined();
+    let radius = if lined { round(shape::TILE) } else { egui::lerp(rect.height() / 2.0..=shape::TILE, t) };
+    let ink = if lined {
+        // A lined look: every option is a card, and the one chosen is the tonal colour.
+        plate(ui, rect, radius, theme::lerp_color(m.surface_container, m.secondary_container, t), Stack::None);
+        theme::lerp_color(m.on_surface, m.on_secondary_container, t)
+    } else {
+        let off = if outlined { Color32::TRANSPARENT } else { m.surface_container_highest };
+        ui.painter().rect_filled(rect, radius, theme::lerp_color(off, m.primary, t));
+        if outlined && t < 1.0 {
+            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, m.outline.gamma_multiply(1.0 - t)), StrokeKind::Inside);
+        }
+        theme::lerp_color(m.on_surface, m.on_primary, t)
+    };
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, radius, ink.gamma_multiply(PRESSED));
     }

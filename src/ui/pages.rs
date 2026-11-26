@@ -404,8 +404,12 @@ fn selection_bar(app: &mut App, ctx: &egui::Context, page: &Page, area: Rect) {
         let bar = Rect::from_min_size(pos2(area.center().x - width / 2.0, area.bottom() - 12.0 - lift - height), vec2(width, height));
         egui::Area::new(egui::Id::unique("selection-bar")).order(egui::Order::Foreground).fixed_pos(bar.min).show(ctx, |ui| {
             ui.allocate_exact_size(bar.size(), Sense::click());
-            widgets::soft_shadow(ui, bar, crate::material::shape::CARD, 16.0, 0.35);
-            ui.painter().rect_filled(bar, crate::material::shape::CARD, m.surface_container_high);
+            if crate::material::style().outlined() {
+                m3::plate(ui, bar, m3::round(crate::material::shape::CARD), m.surface_container_high, m3::Stack::Ink);
+            } else {
+                widgets::soft_shadow(ui, bar, crate::material::shape::CARD, 16.0, 0.35);
+                ui.painter().rect_filled(bar, crate::material::shape::CARD, m.surface_container_high);
+            }
             let cy = bar.top() + 8.0 + m3::TOUCH / 2.0;
             let mut tapped = None;
             // The first row from its right end: done, select all, and (when they fit) the actions.
@@ -1442,10 +1446,16 @@ fn collection(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
         ui.add_space(4.0);
         let (band, _) = ui.allocate_exact_size(vec2(w, side), Sense::hover());
         let img = Rect::from_center_size(band.center(), Vec2::splat(side));
-        widgets::soft_shadow(ui, img, shape::CARD, 28.0, 0.45);
-        paint_cover(ui, img, &c.thumbs, shape::CARD, 1.0);
+        // A lined look stands the cover on a second card instead of a shadow.
+        let cover_radius = m3::round(shape::CARD);
+        if crate::material::style().outlined() {
+            m3::plate(ui, img, cover_radius, crate::material::scheme().surface_container, m3::Stack::Card);
+        } else {
+            widgets::soft_shadow(ui, img, shape::CARD, 28.0, 0.45);
+        }
+        paint_cover(ui, img, &c.thumbs, cover_radius, 1.0);
         if let Some(s) = &sprite {
-            widgets::paint_motion(ui, img, shape::CARD, s);
+            widgets::paint_motion(ui, img, cover_radius, s);
         }
         ui.add_space(20.0);
         let centred = |ui: &mut Ui, g: std::sync::Arc<egui::Galley>, color: Color32| {
@@ -1659,7 +1669,7 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     let acts = &mut app.actions;
     let top = &a.top;
     let material = m3::on();
-    let hero_radius = if material { crate::material::shape::CARD } else { 14.0 };
+    let hero_radius = if material { m3::round(crate::material::shape::CARD) } else { 14.0 };
     // Hero banner fading into the page.
     let w = ui.available_width();
     let hero_h = (w * 0.34).clamp(240.0, 380.0);
@@ -1677,6 +1687,7 @@ fn artist(app: &mut App, ui: &mut Ui, id: &str, now: f64) {
     if material {
         // The darkening keeps to the picture's round corners.
         m3::scrim_bottom(ui, hero, hero_radius, hero.center().y - 40.0, 0.85);
+        m3::outline(ui, hero, hero_radius);
     } else {
         super::shell::vgradient(ui.painter(), Rect::from_min_max(pos2(hero.left(), hero.center().y - 40.0), hero.max), Color32::TRANSPARENT, theme::shade(0.85));
     }

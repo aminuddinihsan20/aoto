@@ -81,6 +81,8 @@ pub fn show(ctx: &egui::Context, key: &str, open: &mut bool, add: impl FnOnce(&m
         if crate::material::on() {
             // Material's sheet is its surface alone, with the handle in the outline colour.
             ui.painter().rect_filled(handle, 2.0, crate::material::scheme().outline);
+            // A lined look draws the sheet's edge (its foot is under the screen's).
+            super::m3::outline(ui, rect.with_max_y(rect.bottom() + RADIUS as f32), corners);
         } else {
             ui.painter().rect_stroke(rect, corners, egui::Stroke::new(1.0, theme::glass(0.08)), egui::StrokeKind::Inside);
             ui.painter().rect_filled(handle, 2.0, theme::glass(0.32));
