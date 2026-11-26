@@ -650,7 +650,7 @@ pub(super) fn on_their_way(app: &mut App, ui: &mut Ui) {
         let whole = job.kind != Kind::Song;
         let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), job_height(whole, lines.len())), Sense::hover());
         let g = job_geom(rect, whole, lines.len());
-        ui.painter().rect_filled(rect, shape::CARD, m.primary_container);
+        super::m3::plate(ui, rect, super::m3::round(shape::CARD), m.primary_container, super::m3::Stack::Card);
         widgets::paint_cover(ui, g.cover, &job.thumbs, shape::TILE, 1.0);
         m3::text(ui, g.text.min, &job.title, Type::TitleMedium.spec().weight(Weight::Bold), ink, g.text.width());
         for (i, line) in lines.iter().enumerate() {

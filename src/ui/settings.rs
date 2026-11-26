@@ -298,7 +298,7 @@ fn account_card(app: &mut App, ui: &mut Ui) {
     let m = material::scheme();
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 76.0), Sense::click());
     let resp = named(resp, Category::Account.title());
-    ui.painter().rect_filled(rect, shape::CARD, m.primary_container);
+    super::m3::plate(ui, rect, super::m3::round(shape::CARD), m.primary_container, super::m3::Stack::Card);
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, shape::CARD, m.on_primary_container.gamma_multiply(0.08));
     }

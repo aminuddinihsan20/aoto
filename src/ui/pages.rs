@@ -847,7 +847,7 @@ fn top_result_material(ui: &mut Ui, c: &Card, pick: bool, liked: bool, acts: &mu
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), TOP_RESULT_H), Sense::click());
     let resp = named(resp, &c.title);
     let g = top_result_geom(rect);
-    ui.painter().rect_filled(rect, shape::CARD, m.surface_container_high);
+    super::m3::plate(ui, rect, super::m3::round(shape::CARD), m.surface_container_high, super::m3::Stack::Card);
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, shape::CARD, m.on_surface.gamma_multiply(0.08));
     }
@@ -2297,7 +2297,7 @@ fn storage_card(app: &mut App, ui: &mut Ui, count: usize) {
     let change = crate::platform::HAS_SAF;
     let (card, _) = ui.allocate_exact_size(vec2(ui.available_width(), storage_height(disk.is_some(), change)), Sense::hover());
     let g = storage_geom(card, disk.is_some(), change);
-    ui.painter().rect_filled(card, shape::CARD, m.surface_container_high);
+    super::m3::plate(ui, card, super::m3::round(shape::CARD), m.surface_container_high, super::m3::Stack::Card);
     let songs = m3::galley(ui, &count_text(count, "song"), Type::LabelLarge, m.primary, 140.0);
     let size_w = g.count_right.x - songs.size().x - 12.0 - g.size.x;
     m3::text(ui, g.size, &crate::downloads::human_size(used), Type::DisplaySmall, m.on_surface, size_w);

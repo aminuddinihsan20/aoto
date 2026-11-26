@@ -510,7 +510,7 @@ fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
     let playing = app.playing();
     let g = mini_geom(rect);
     widgets::soft_shadow(ui, rect, shape::CARD_SMALL, 14.0, 0.3);
-    ui.painter().rect_filled(rect, shape::CARD_SMALL, m.secondary_container);
+    super::m3::plate(ui, rect, super::m3::round(shape::CARD_SMALL), m.secondary_container, super::m3::Stack::Card);
 
     let open = named(ui.interact(rect, ui.scope_id().with("mini-open"), Sense::click()), "Open now playing");
     if open.clicked() {

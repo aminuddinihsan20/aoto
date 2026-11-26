@@ -478,11 +478,11 @@ fn card_page(ui: &mut Ui, area: Rect, v: &CardView) -> Option<Ask> {
             ui.painter().add(egui::epaint::RectShape::filled(g.card, CornerRadius::same(shape::CARD as u8), Color32::WHITE).with_texture(*texture, whole));
         }
         Preview::Drawing => {
-            ui.painter().rect_filled(g.card, shape::CARD, m.surface_container_high);
+            super::m3::plate(ui, g.card, super::m3::round(shape::CARD), m.surface_container_high, super::m3::Stack::Card);
             egui::Spinner::new().color(m.primary).paint_at(ui, Rect::from_center_size(g.card.center(), Vec2::splat(32.0)));
         }
         Preview::Failed(why) => {
-            ui.painter().rect_filled(g.card, shape::CARD, m.surface_container_high);
+            super::m3::plate(ui, g.card, super::m3::round(shape::CARD), m.surface_container_high, super::m3::Stack::Card);
             let width = g.card.width() - 32.0;
             let title = m3::galley(ui, "The picture could not be drawn", Type::TitleMedium, m.on_surface, width);
             let reason = m3::galley_wrapped(ui, why, Type::BodyMedium, m.on_surface_variant, width, 4);

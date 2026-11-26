@@ -168,7 +168,7 @@ fn contents(ui: &mut Ui, s: &Showing, slider: &mut Slider, now: f64) -> Option<A
 
     // Where the music plays now.
     let (card, _) = ui.allocate_exact_size(vec2(w, 80.0), Sense::hover());
-    ui.painter().rect_filled(card, shape::CARD, m.primary_container);
+    super::m3::plate(ui, card, super::m3::round(shape::CARD), m.primary_container, super::m3::Stack::Card);
     let tile = Rect::from_center_size(pos2(card.left() + 16.0 + 24.0, card.center().y), vec2(48.0, 48.0));
     ui.painter().rect_filled(tile, shape::TILE, m.primary);
     kind_icon(ui, tile.center(), 24.0, s.output.kind, m.on_primary);

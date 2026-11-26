@@ -222,7 +222,7 @@ fn bands(ui: &mut Ui, tuning: &mut Tuning, accent: Color32) {
     let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
     let (track, label_font) = if material { (m.surface_container_highest, Type::LabelMedium.font()) } else { (theme::glass(0.10), theme::regular(11.5)) };
     if material {
-        ui.painter().rect_filled(card, shape::CARD, m.surface_container);
+        super::m3::plate(ui, card, super::m3::round(shape::CARD), m.surface_container, super::m3::Stack::Card);
     } else {
         ui.painter().rect_filled(card, theme::panel_radius(), theme::glass(0.06));
     }

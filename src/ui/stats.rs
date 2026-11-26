@@ -269,7 +269,7 @@ fn hero(ui: &mut Ui, s: &Summary, accent: Color32) {
     if m3::on() {
         // Material: a tonal card in the primary container, its text in the colour for it.
         let m = material::scheme();
-        ui.painter().rect_filled(card, shape::CARD, m.primary_container);
+        super::m3::plate(ui, card, super::m3::round(shape::CARD), m.primary_container, super::m3::Stack::Card);
         let ink = m.on_primary_container;
         m3::text(ui, pos2(left, card.top() + 22.0), &name.to_uppercase(), Type::LabelLarge, ink.gamma_multiply(0.8), text_w);
         m3::text(ui, pos2(left, card.top() + 40.0), &time, Type::DisplaySmall.spec().weight(Weight::Bold), ink, text_w);
@@ -337,7 +337,7 @@ fn top_cards(ui: &mut Ui, s: &Summary) {
         if m3::on() {
             // Material: a card with one of its shapes in a corner, the text over it.
             let m = material::scheme();
-            ui.painter().rect_filled(r, shape::CARD, m.surface_container);
+            super::m3::plate(ui, r, super::m3::round(shape::CARD), m.surface_container, super::m3::Stack::Card);
             let corner = pos2(r.right() - 38.0, r.bottom() - 34.0);
             if card == 0 {
                 super::phone::cookie(ui, corner, 26.0, m.tertiary_container);
