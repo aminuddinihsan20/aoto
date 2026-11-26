@@ -3172,7 +3172,7 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
         }
         Row::AppIcon => {
             let mut pick = None;
-            setting_row(ui, "App icon", Some("The icon Aoto wears on the home screen. Some launchers take a moment to show the new one."), |ui| {
+            setting_row(ui, "App icon", Some("The icon Aoto wears on the home screen. It changes the next time you close Aoto (swipe it away from your recent apps), so the music is never cut off."), |ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
                 for icon in &crate::launcher_icon::ALL {
                     if m3::app_icon_tile(ui, icon, std::ptr::eq(icon, app.launcher_icon)) {

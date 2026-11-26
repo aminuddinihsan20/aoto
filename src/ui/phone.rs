@@ -403,6 +403,19 @@ fn nav_plate(row: Rect) -> Rect {
     Rect::from_min_max(pos2(row.left() + 12.0, row.top() + 4.0), pos2(row.right() - 16.0, row.bottom() - 8.0))
 }
 
+/// Sticker's destinations: spread across the bar, not the screen, and set closer
+/// together top to bottom, so that every label keeps clear of the bar's line.
+fn sticker_cells(row: Rect) -> [NavCell; 4] {
+    let plate = nav_plate(row);
+    let inner = plate.shrink2(vec2(8.0, 0.0));
+    let w = inner.width() / Tab::ALL.len() as f32;
+    std::array::from_fn(|i| {
+        let cell = Rect::from_min_size(pos2(inner.left() + w * i as f32, row.top()), vec2(w, row.height()));
+        let pill = Rect::from_min_size(pos2(cell.center().x - 28.0, plate.top() + 6.0), vec2(56.0, 28.0));
+        NavCell { cell, pill, label: pos2(cell.center().x, pill.bottom() + 3.0 + 8.0) }
+    })
+}
+
 fn nav_bar(app: &mut App, ui: &mut Ui, insets: Insets) {
     let m = material::scheme();
     let full = ui.max_rect();
@@ -412,7 +425,8 @@ fn nav_bar(app: &mut App, ui: &mut Ui, insets: Insets) {
         // Sticker: the destinations stand on one accent bar, itself on a second card.
         m3::plate(ui, nav_plate(row), 14.0, look.accent, m3::Stack::Card);
     }
-    for (i, (tab, c)) in Tab::ALL.into_iter().zip(nav_cells(row)).enumerate() {
+    let cells = if look.outlined() { sticker_cells(row) } else { nav_cells(row) };
+    for (i, (tab, c)) in Tab::ALL.into_iter().zip(cells).enumerate() {
         let resp = named(ui.interact(c.cell, ui.scope_id().with(("phone-tab", i)), Sense::click()), tab.label());
         let on = app.phone_tab == tab;
         if look.outlined() {
@@ -425,7 +439,7 @@ fn nav_bar(app: &mut App, ui: &mut Ui, insets: Insets) {
             if resp.is_pointer_button_down_on() {
                 ui.painter().rect_filled(c.pill, 8.0, look.on_accent.gamma_multiply(0.1));
             }
-            glyphs::draw(ui, c.pill.center(), 24.0, tab.glyph(), look.on_accent);
+            glyphs::draw(ui, c.pill.center(), 22.0, tab.glyph(), look.on_accent);
             let role = if on { Type::LabelMedium.spec().weight(Weight::Bold) } else { Type::LabelMedium.spec() };
             let label = m3::galley(ui, tab.label(), role, look.on_accent, c.cell.width());
             ui.painter().galley(c.label - label.size() / 2.0, label, look.on_accent);
@@ -786,9 +800,12 @@ mod tests {
         let row = Rect::from_min_size(pos2(0.0, 800.0), vec2(412.0, NAV_H));
         let plate = nav_plate(row);
         assert!(row.contains_rect(plate.translate(egui::Vec2::splat(4.0))), "the card behind it stays inside the row too");
-        for c in nav_cells(row) {
+        for c in sticker_cells(row) {
             assert!(plate.contains_rect(c.pill), "{:?} is off the bar", c.pill);
-            assert!(plate.contains(c.label), "the label is on the bar");
+            // A label is a line of text about 16 high and, at its longest ("Downloads",
+            // bold), about 72 wide: all of it keeps at least 4 clear of the bar's line.
+            let label = Rect::from_center_size(c.label, vec2(72.0, 16.0));
+            assert!(plate.shrink(4.0).contains_rect(label), "{label:?} touches the bar's edge {plate:?}");
         }
     }
 }

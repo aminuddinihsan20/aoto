@@ -199,7 +199,8 @@ public class MainActivity extends GameActivity {
             }
             case "icon":
                 // The icon chosen in Settings ("indigo", "sticker", …): the home screen shows that one.
-                done.finish(LauncherIcon.set(this, arg), "");
+                // Written down only: switching now would close the app (see LauncherIcon).
+                done.finish(LauncherIcon.wish(this, arg), "");
                 break;
             case "open-url":
                 // Web pages only: nothing the app hands over may start another kind of app.
@@ -339,6 +340,8 @@ public class MainActivity extends GameActivity {
         // The widgets outlive the process: they must not be left showing a song and
         // buttons for a player that is gone.
         NowPlayingWidget.clearNow(context);
+        // The app is closing: now the home screen's icon can change without cutting anything off.
+        LauncherIcon.applyWish(context);
         try {
             context.stopService(new Intent(context, PlaybackService.class));
         } catch (RuntimeException ignored) {
