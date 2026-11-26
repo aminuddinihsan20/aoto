@@ -689,7 +689,10 @@ pub fn list_row(ui: &mut Ui, r: &ListRow) -> ListRowOut {
     match r.tile {
         Some(icon) => {
             ui.painter().rect_filled(g.cover, radius, m.primary_container);
-            paint_icon(ui, g.cover.center(), cover * 0.43, icon, m.primary);
+            outline(ui, g.cover, radius);
+            // A lined look's primary is its text colour, which the pastel tile would lose in the dark.
+            let ink = if material::style().outlined() { m.on_primary_container } else { m.primary };
+            paint_icon(ui, g.cover.center(), cover * 0.43, icon, ink);
         }
         None => widgets::paint_cover(ui, g.cover, r.thumbs, radius, 1.0),
     }

@@ -1007,6 +1007,15 @@ fn visuals() -> egui::Visuals {
     v.menu_corner_radius = pr;
     v.window_stroke = egui::Stroke::new(1.0, glass(0.08));
     v.popup_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 28, spread: 0, color: shade(if light() { 0.16 } else { 0.5 }) };
+    // A lined look: menus and popups are outlined cards on a hard second card.
+    let look = crate::material::style();
+    if look.outlined() {
+        let corner = egui::CornerRadius::same(look.round(16.0) as u8);
+        v.window_corner_radius = corner;
+        v.menu_corner_radius = corner;
+        v.window_stroke = egui::Stroke::new(look.outline, look.line);
+        v.popup_shadow = egui::epaint::Shadow { offset: [4, 4], blur: 0, spread: 0, color: look.line };
+    }
     let r = egui::CornerRadius::same(p.chrome.radius.clamp(2.0, 28.0) as u8);
     for (w, fill) in [
         (&mut v.widgets.inactive, glass(0.08)),
