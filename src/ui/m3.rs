@@ -83,6 +83,16 @@ pub fn outline(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>) {
     }
 }
 
+/// The ground under the row that is playing (or the one chosen): a tonal wash, and in a
+/// look that draws lines an outlined card, since its wash alone is too near the page.
+pub fn row_wash(ui: &Ui, rect: Rect, fill: Color32) {
+    if material::style().outlined() {
+        plate(ui, rect, round(shape::CARD_SMALL), fill, Stack::None);
+    } else {
+        ui.painter().rect_filled(rect, shape::CARD_SMALL, fill);
+    }
+}
+
 /// A corner as the look rounds it (Sticker's are squarer).
 pub fn round(corner: f32) -> f32 {
     material::style().round(corner)
@@ -665,8 +675,12 @@ pub fn list_row(ui: &mut Ui, r: &ListRow) -> ListRowOut {
     let trailing_w = trailing.as_ref().map_or(if r.chevron { 20.0 } else { 0.0 }, |t| t.size().x);
     let g = row_geom(rect, cover, trailing_w, r.more.is_some());
     if r.active || row.is_pointer_button_down_on() {
-        let wash = if r.active { m.surface_container } else { m.on_surface.gamma_multiply(PRESSED) };
-        ui.painter().rect_filled(rect.expand2(vec2(8.0, 0.0)), shape::CARD_SMALL, wash);
+        let ground = rect.expand2(vec2(8.0, 0.0));
+        if r.active {
+            row_wash(ui, ground, m.surface_container);
+        } else {
+            ui.painter().rect_filled(ground, shape::CARD_SMALL, m.on_surface.gamma_multiply(PRESSED));
+        }
     }
     let radius = if r.round { cover / 2.0 } else { shape::TILE_SMALL };
     match r.tile {

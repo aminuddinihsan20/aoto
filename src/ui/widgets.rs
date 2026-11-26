@@ -1108,10 +1108,15 @@ fn track_row_material(ui: &mut Ui, t: &Track, o: &RowOpts, acts: &mut Vec<Action
     let resp = named(ui.interact(hit, base.id.with("play"), Sense::click()), &t.title);
     let wash = rect.expand2(vec2(8.0, 0.0));
     if o.current {
-        ui.painter().rect_filled(wash, shape::CARD_SMALL, m.surface_container);
+        m3::row_wash(ui, wash, m.surface_container);
     }
     if o.selected == Some(true) {
-        ui.painter().rect_filled(wash, shape::CARD_SMALL, m.secondary_container.gamma_multiply(0.7));
+        // A lined look frames the picked row: its pastel wash would take the text with it in the dark.
+        if material::style().outlined() {
+            m3::row_wash(ui, wash, m.surface_container_high);
+        } else {
+            ui.painter().rect_filled(wash, shape::CARD_SMALL, m.secondary_container.gamma_multiply(0.7));
+        }
     }
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(wash, shape::CARD_SMALL, m.on_surface.gamma_multiply(0.1));
