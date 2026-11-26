@@ -31,6 +31,55 @@ impl From<Type> for Spec {
     }
 }
 
+// ------------------------------------------------------------------ plates
+
+/// What stands behind a plate in a look that stacks its cards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stack {
+    /// Nothing: the plate alone (with its outline, in a look that draws one).
+    None,
+    /// A second card of the card colour: a card, a field, a quiet button.
+    Card,
+    /// A second card of the line colour: the one thing to press.
+    Ink,
+}
+
+/// Where a plate's second card is: `rect` set off right and down by the look's stack,
+/// or `None` in a look that draws none (or for a plate that asks for none).
+pub fn stack_rect(rect: Rect, stack: Stack, style: &material::Style) -> Option<Rect> {
+    (stack != Stack::None && style.stack > 0.0).then(|| rect.translate(Vec2::splat(style.stack.min(rect.height() / 8.0).max(2.0))))
+}
+
+/// The shapes of a filled plate as the look draws it: just the fill in Indigo; in
+/// Sticker the fill with an outline, over a second card when `stack` asks for one.
+pub fn plate_shape(rect: Rect, radius: impl Into<CornerRadius>, fill: Color32, stack: Stack) -> egui::Shape {
+    let (m, style) = (material::scheme(), material::style());
+    let radius = radius.into();
+    if !style.outlined() {
+        return egui::epaint::RectShape::filled(rect, radius, fill).into();
+    }
+    let line = Stroke::new(style.outline, style.line);
+    let mut shapes = Vec::with_capacity(4);
+    if let Some(back) = stack_rect(rect, stack, &style) {
+        let behind = if stack == Stack::Ink { style.line } else { m.surface_container };
+        shapes.push(egui::epaint::RectShape::filled(back, radius, behind).into());
+        shapes.push(egui::epaint::RectShape::stroke(back, radius, line, StrokeKind::Inside).into());
+    }
+    shapes.push(egui::epaint::RectShape::filled(rect, radius, fill).into());
+    shapes.push(egui::epaint::RectShape::stroke(rect, radius, line, StrokeKind::Inside).into());
+    egui::Shape::Vec(shapes)
+}
+
+/// Paint a plate (see [`plate_shape`]).
+pub fn plate(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>, fill: Color32, stack: Stack) {
+    ui.painter().add(plate_shape(rect, radius, fill, stack));
+}
+
+/// A corner as the look rounds it (Sticker's are squarer).
+pub fn round(corner: f32) -> f32 {
+    material::style().round(corner)
+}
+
 // ------------------------------------------------------------------ text
 
 /// One line in a type role, cut with an ellipsis at `width`.
@@ -214,14 +263,20 @@ pub fn filter_chip_size(ui: &Ui, label: &str, selected: bool) -> Vec2 {
 /// A filter chip: selected it is filled with the secondary container and led by a
 /// check, otherwise it is an outline.
 pub fn filter_chip(ui: &mut Ui, label: &str, selected: bool) -> Response {
-    let m = material::scheme();
-    let ink = if selected { m.on_secondary_container } else { m.on_surface_variant };
+    let (m, style) = (material::scheme(), material::style());
+    let ink = if selected { if style.outlined() { style.on_accent } else { m.on_secondary_container } } else if style.outlined() { m.on_surface } else { m.on_surface_variant };
     let label_g = galley(ui, label, Type::LabelLarge, ink, 240.0);
     let lead = chip_lead(selected);
     let (rect, resp) = ui.allocate_exact_size(vec2(lead + label_g.size().x + 16.0, TOUCH), Sense::click());
     let resp = named(resp, label);
     let chip = Rect::from_center_size(rect.center(), vec2(rect.width(), CHIP_H));
-    if selected {
+    if style.outlined() {
+        // Sticker: the chosen chip is the accent on a second card, the others plain cards.
+        plate(ui, chip, shape::CHIP, if selected { style.accent } else { m.surface_container }, if selected { Stack::Ink } else { Stack::None });
+        if selected {
+            widgets::icon_at(ui, pos2(chip.left() + 8.0 + 9.0, chip.center().y), icon::CHECK, 16.0, ink);
+        }
+    } else if selected {
         ui.painter().rect_filled(chip, shape::CHIP, m.secondary_container);
         widgets::icon_at(ui, pos2(chip.left() + 8.0 + 9.0, chip.center().y), icon::CHECK, 16.0, ink);
     } else {
@@ -333,9 +388,9 @@ pub enum ButtonStyle {
 /// A labelled button, 40 points tall in a touch target of 48, with an optional icon
 /// before its label.
 pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle) -> Response {
-    let m = material::scheme();
+    let (m, look) = (material::scheme(), material::style());
     let (fill, ink) = match style {
-        ButtonStyle::Filled => (m.primary, m.on_primary),
+        ButtonStyle::Filled => (look.accent, look.on_accent),
         ButtonStyle::Tonal => (m.secondary_container, m.on_secondary_container),
         ButtonStyle::Text => (Color32::TRANSPARENT, m.primary),
         ButtonStyle::Danger => (m.error, m.on_error),
@@ -348,9 +403,14 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
     let resp = named(resp, label);
     let body = Rect::from_center_size(rect.center(), vec2(rect.width(), 40.0));
     let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
-    ui.painter().rect_filled(body, 20.0, fill.gamma_multiply(fade));
+    let radius = look.round(20.0);
+    if style == ButtonStyle::Text {
+        ui.painter().rect_filled(body, radius, fill.gamma_multiply(fade));
+    } else {
+        plate(ui, body, radius, fill.gamma_multiply(fade), if style == ButtonStyle::Filled { Stack::Ink } else { Stack::Card });
+    }
     if resp.is_pointer_button_down_on() {
-        ui.painter().rect_filled(body, 20.0, ink.gamma_multiply(PRESSED));
+        ui.painter().rect_filled(body, radius, ink.gamma_multiply(PRESSED));
     }
     let ink = ink.gamma_multiply(fade);
     if let Some(glyph) = glyph {
@@ -363,17 +423,18 @@ pub fn button(ui: &mut Ui, label: &str, glyph: Option<char>, style: ButtonStyle)
 /// A page's one large button, filling `rect`: the Play of an album. Its label follows
 /// its icon, the pair centred.
 pub fn big_button(ui: &Ui, rect: Rect, label: &str, icon: impl Into<Icon>, id: egui::Id) -> Response {
-    let m = material::scheme();
+    let look = material::style();
+    let (fill, ink) = (look.accent, look.on_accent);
     let resp = named(ui.interact(rect, id, Sense::click()), label);
-    let radius = rect.height() / 2.0;
-    ui.painter().rect_filled(rect, radius, m.primary);
+    let radius = look.round(rect.height() / 2.0);
+    plate(ui, rect, radius, fill, Stack::Ink);
     if resp.is_pointer_button_down_on() {
-        ui.painter().rect_filled(rect, radius, m.on_primary.gamma_multiply(PRESSED));
+        ui.painter().rect_filled(rect, radius, ink.gamma_multiply(PRESSED));
     }
-    let g = galley(ui, label, Type::TitleMedium, m.on_primary, rect.width() - 52.0);
+    let g = galley(ui, label, Type::TitleMedium, ink, rect.width() - 52.0);
     let left = rect.center().x - (22.0 + 8.0 + g.size().x) / 2.0;
-    paint_icon(ui, pos2(left + 11.0, rect.center().y), 22.0, icon.into(), m.on_primary);
-    ui.painter().galley(pos2(left + 30.0, rect.center().y - g.size().y / 2.0), g, m.on_primary);
+    paint_icon(ui, pos2(left + 11.0, rect.center().y), 22.0, icon.into(), ink);
+    ui.painter().galley(pos2(left + 30.0, rect.center().y - g.size().y / 2.0), g, ink);
     resp
 }
 
@@ -448,17 +509,20 @@ impl<'a> IconButton<'a> {
         let m = material::scheme();
         let resp = named(ui.interact(Rect::from_center_size(center, Vec2::splat(self.target())), id, Sense::click()), self.name);
         let body = Rect::from_center_size(center, Vec2::splat(self.size));
-        let radius = self.radius.unwrap_or(self.size / 2.0);
+        let look = material::style();
+        let radius = look.round(self.radius.unwrap_or(self.size / 2.0));
         let (fill, ink) = match self.style {
             IconStyle::Standard => (None, m.on_surface_variant),
             IconStyle::Tonal => (Some(m.secondary_container), m.on_secondary_container),
             IconStyle::Surface => (Some(m.surface_container_high), m.on_surface_variant),
             IconStyle::Overlay => (Some(m.glass(0.1)), m.on_surface),
             IconStyle::Lit => (Some(m.glass(0.1)), m.primary),
-            IconStyle::Filled => (Some(m.primary), m.on_primary),
+            IconStyle::Filled => (Some(look.accent), look.on_accent),
         };
         if let Some(fill) = fill {
-            ui.painter().rect_filled(body, radius, fill);
+            // Sticker: a container is a small card; the filled one is the thing to press.
+            let fill = if look.outlined() && matches!(self.style, IconStyle::Surface | IconStyle::Overlay | IconStyle::Lit) { m.surface_container } else { fill };
+            plate(ui, body, radius, fill, if self.style == IconStyle::Filled { Stack::Ink } else if look.outlined() && self.size >= 40.0 { Stack::Card } else { Stack::None });
         }
         if resp.is_pointer_button_down_on() {
             ui.painter().rect_filled(body, radius, ink.gamma_multiply(PRESSED));
@@ -498,6 +562,17 @@ pub fn switch(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), value, name));
     let t = theme::anim_bool(ui.ctx(), resp.id.with("t"), value, 0.16);
     let fade = if ui.is_enabled() { 1.0 } else { 0.38 };
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: an outlined track that fills with the accent, and an outlined handle.
+        let line = Stroke::new(look.outline, look.line.gamma_multiply(fade));
+        ui.painter().rect_filled(rect, rect.height() / 2.0, theme::lerp_color(m.surface_container, look.accent, t).gamma_multiply(fade));
+        ui.painter().rect_stroke(rect, rect.height() / 2.0, line, StrokeKind::Inside);
+        let (center, radius) = switch_handle(rect, t, resp.is_pointer_button_down_on());
+        ui.painter().circle_filled(center, radius, theme::lerp_color(m.outline, m.surface_container_lowest, t).gamma_multiply(fade));
+        ui.painter().circle_stroke(center, radius, line);
+        return resp;
+    }
     let track = theme::lerp_color(m.surface_container_highest, m.primary, t);
     ui.painter().rect_filled(rect, rect.height() / 2.0, track.gamma_multiply(fade));
     if t < 1.0 {
@@ -650,7 +725,11 @@ pub struct SearchBarOut {
 pub fn search_bar(ui: &mut Ui, rect: Rect, text: &mut String, hint: &str, trailing: f32) -> SearchBarOut {
     let m = material::scheme();
     let g = search_bar_geom(rect, !text.is_empty(), trailing);
-    ui.painter().rect_filled(rect, rect.height() / 2.0, m.surface_container_high);
+    if material::style().outlined() {
+        plate(ui, rect, round(rect.height() / 2.0), m.surface_container, Stack::Card);
+    } else {
+        ui.painter().rect_filled(rect, rect.height() / 2.0, m.surface_container_high);
+    }
     widgets::icon_at(ui, g.icon, icon::SEARCH, 20.0, m.on_surface);
     let edit = ui.put(
         g.text,
@@ -682,7 +761,11 @@ pub fn assist_chip(ui: &mut Ui, label: &str, glyph: Option<char>) -> Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(lead + label_g.size().x + 16.0, TOUCH), Sense::click());
     let resp = named(resp, label);
     let chip = Rect::from_center_size(rect.center(), vec2(rect.width(), CHIP_H));
-    ui.painter().rect_stroke(chip, shape::CHIP, Stroke::new(1.0, m.outline_variant), StrokeKind::Inside);
+    if material::style().outlined() {
+        plate(ui, chip, shape::CHIP, m.surface_container, Stack::None);
+    } else {
+        ui.painter().rect_stroke(chip, shape::CHIP, Stroke::new(1.0, m.outline_variant), StrokeKind::Inside);
+    }
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(chip, shape::CHIP, m.on_surface.gamma_multiply(PRESSED));
     }
@@ -706,8 +789,12 @@ pub fn fab_rect(view: Rect, lifted: f32) -> Rect {
 pub fn fab(ui: &Ui, rect: Rect, icon: impl Into<Icon>, name: &str, id: egui::Id) -> Response {
     let m = material::scheme();
     let resp = named(ui.interact(rect, id, Sense::click()), name);
-    widgets::soft_shadow(ui, rect, shape::TILE, 12.0, 0.35);
-    ui.painter().rect_filled(rect, shape::TILE, m.primary_container);
+    if material::style().outlined() {
+        plate(ui, rect, round(shape::TILE), m.primary_container, Stack::Ink);
+    } else {
+        widgets::soft_shadow(ui, rect, shape::TILE, 12.0, 0.35);
+        ui.painter().rect_filled(rect, shape::TILE, m.primary_container);
+    }
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, shape::TILE, m.on_primary_container.gamma_multiply(PRESSED));
     }
@@ -744,7 +831,7 @@ pub fn card<R>(ui: &mut Ui, label: Option<GroupLabel>, fill: Color32, add: impl 
         return out;
     }
     let body = Rect::from_min_max(pos2(min.x, top), pos2(min.x + width, used.bottom() + CARD_PAD.y));
-    ui.painter().set(bg, egui::epaint::RectShape::filled(body, shape::CARD, fill));
+    ui.painter().set(bg, plate_shape(body, round(shape::CARD), fill, Stack::Card));
     if let Some(l) = label {
         let g = galley(ui, l.title, Type::LabelLarge, m.primary, width - 16.0);
         ui.painter().set(text, egui::epaint::TextShape::new(pos2(min.x + 8.0, min.y + 8.0), g, m.primary));
@@ -843,6 +930,20 @@ pub fn segment(ui: &Ui, body: Rect, label: &str, s: &Segment) {
         let (l, r) = (if s.first { round } else { flat }, if s.last { round } else { flat });
         CornerRadius { nw: l, sw: l, ne: r, se: r }
     };
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: every segment is a small card; the chosen one is sky blue.
+        let (fill, ink) = if s.on { (m.secondary_container, m.on_secondary_container) } else { (m.surface_container, m.on_surface) };
+        plate(ui, body.shrink2(vec2(1.0, 0.0)), shape::CHIP, fill.gamma_multiply(s.fade), Stack::None);
+        if s.pressed {
+            ui.painter().rect_filled(body, shape::CHIP, ink.gamma_multiply(PRESSED));
+        }
+        let ink = ink.gamma_multiply(s.fade);
+        let role = if body.width() < 46.0 { Type::LabelMedium } else { Type::LabelLarge };
+        let g = galley(ui, label, role, ink, body.width() - 4.0);
+        ui.painter().galley(body.center() - g.size() / 2.0, g, ink);
+        return;
+    }
     let (fill, ink) = if s.on { (m.primary, m.on_primary) } else { (s.rest, m.on_surface) };
     ui.painter().rect_filled(body, corners, fill.gamma_multiply(s.fade));
     if s.pressed {
@@ -859,6 +960,15 @@ pub fn segment(ui: &Ui, body: Rect, label: &str, s: &Segment) {
 
 /// The card a dialog stands on.
 pub fn dialog_frame() -> egui::Frame {
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: a card with its outline, and a hard shadow where the second card would be.
+        return egui::Frame::new()
+            .fill(material::scheme().surface_container)
+            .corner_radius(round(shape::CARD) as u8)
+            .stroke(Stroke::new(look.outline, look.line))
+            .shadow(egui::epaint::Shadow { offset: [5, 5], blur: 0, spread: 0, color: look.line });
+    }
     egui::Frame::new()
         .fill(material::scheme().surface_container_high)
         .corner_radius(shape::CARD as u8)
@@ -892,6 +1002,15 @@ pub fn text_field(ui: &mut Ui, text: &mut String, hint: &str, multiline: bool) -
     let edit = if multiline { egui::TextEdit::multiline(text).desired_rows(4) } else { egui::TextEdit::singleline(text).align(egui::Align2::LEFT_CENTER) };
     let resp = ui.put(inner, edit.hint_text(egui::RichText::new(hint).color(m.on_surface_variant)).font(Type::BodyLarge.font()).text_color(m.on_surface).frame(egui::Frame::NONE).desired_width(inner.width()));
     let focus = theme::anim_bool(ui.ctx(), resp.id.with("focus"), resp.has_focus(), 0.15);
+    let look = material::style();
+    if look.outlined() {
+        // Sticker: a card with the look's own line, a little heavier while typed in.
+        ui.painter().set(outline, egui::Shape::Vec(vec![
+            egui::Shape::rect_filled(rect, shape::TILE_SMALL, m.surface_container),
+            egui::Shape::rect_stroke(rect, shape::TILE_SMALL, Stroke::new(look.outline + focus * 0.5, look.line), StrokeKind::Inside),
+        ]));
+        return resp;
+    }
     ui.painter().set(outline, egui::Shape::rect_stroke(rect, shape::TILE_SMALL, Stroke::new(1.0 + focus, theme::lerp_color(m.outline, m.primary, focus)), StrokeKind::Inside));
     resp
 }
@@ -2168,5 +2287,32 @@ mod tests {
         });
         assert!(plain >= TOUCH && plain < 80.0, "with the room above it, its action has a finger's height: {plain}");
         assert!(over > plain, "an overline takes a line more");
+    }
+
+    #[test]
+    fn a_look_without_stacks_puts_nothing_behind_a_plate() {
+        let indigo = material::Style::of(material::Look::Indigo, &material::Scheme::DARK);
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(200.0, 48.0));
+        for stack in [Stack::None, Stack::Card, Stack::Ink] {
+            assert_eq!(stack_rect(rect, stack, &indigo), None);
+        }
+    }
+
+    #[test]
+    fn stickers_second_card_is_the_same_size_set_off_right_and_down() {
+        let sticker = material::Style::of(material::Look::Sticker, &material::Scheme::STICKER_LIGHT);
+        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(200.0, 48.0));
+        assert_eq!(stack_rect(rect, Stack::None, &sticker), None, "a plate can ask for none");
+        let back = stack_rect(rect, Stack::Card, &sticker).unwrap();
+        assert_eq!(back.size(), rect.size());
+        assert_eq!(back.min - rect.min, Vec2::splat(4.0));
+    }
+
+    #[test]
+    fn a_small_plates_second_card_peeks_out_less() {
+        let sticker = material::Style::of(material::Look::Sticker, &material::Scheme::STICKER_LIGHT);
+        let chip = Rect::from_min_size(pos2(0.0, 0.0), vec2(80.0, 24.0));
+        let off = stack_rect(chip, Stack::Ink, &sticker).unwrap().min - chip.min;
+        assert!(off.x >= 2.0 && off.x < 4.0, "{off:?}");
     }
 }

@@ -512,6 +512,8 @@ pub struct App {
     appearance: theme::Appearance,
     /// Dark pages on true black (Settings › Appearance).
     pure_black: bool,
+    /// Which look is drawn: Indigo or Sticker (Settings › Appearance › Theme).
+    look: crate::material::Look,
     anim_bg: bool,
     reactive_bg: bool,
     /// Apple's moving album art. Off unless asked for: a sleeve needs a decoder, a
@@ -705,6 +707,9 @@ impl App {
         let hires_sources: Vec<String> = dedupe_hires(hires_source.lines().map(str::trim).filter(|l| !l.is_empty()));
         backend.set_hires_source(&hires_sources.join("\n"));
         let pure_black = get("pure_black").is_some_and(|v| v == "1");
+        // Dev hook: YTM_LOOK=sticker tries a look without saving it.
+        let look = crate::material::Look::from_code(&dev_var("YTM_LOOK").map(str::to_owned).or_else(|| get("look")).unwrap_or_default());
+        crate::material::set_look(look);
         crate::material::set_pure_black(pure_black);
         let prefer_atmos = get("prefer_atmos").is_some_and(|v| v == "1");
         backend.set_prefer_atmos(prefer_atmos);
@@ -908,6 +913,7 @@ impl App {
             chrome_applied: None,
             // Dev hook: YTM_APPEARANCE=light|dark|system tries a mode without saving it.
             pure_black,
+            look,
             appearance: theme::Appearance::from_key(&dev_var("YTM_APPEARANCE").map(str::to_owned).or_else(|| get("appearance")).unwrap_or_default()),
             anim_bg: get("anim_bg").is_none_or(|v| v == "1"),
             reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
@@ -1319,6 +1325,13 @@ impl App {
 
     /// Whether pages draw light: only the ytm-rs theme has a light mode, and it follows
     /// Settings › Appearance › Mode.
+    /// Another look was chosen: draw in it from now on.
+    fn apply_look(&self, ctx: &egui::Context) {
+        if crate::material::set_look(self.look) {
+            theme::restyle(ctx);
+        }
+    }
+
     /// The Pure black switch was turned: draw with it from now on.
     fn apply_pure_black(&self, ctx: &egui::Context) {
         if crate::material::set_pure_black(self.pure_black) {
@@ -1831,6 +1844,9 @@ impl eframe::App for App {
         if dev_var("YTM_APPEARANCE").is_none() {
             storage.set_string("appearance", self.appearance.key().to_owned());
             storage.set_string("pure_black", b(self.pure_black));
+            if dev_var("YTM_LOOK").is_none() {
+                storage.set_string("look", self.look.code().to_owned());
+            }
         }
         if std::env::var_os("YTM_THEME").is_none() {
             storage.set_string("theme", self.theme_id.clone());

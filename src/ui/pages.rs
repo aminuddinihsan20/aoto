@@ -3130,6 +3130,35 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 app.appearance = a;
             }
         }
+        Row::Look => {
+            use crate::material::Look;
+            let mut pick = None;
+            setting_row(ui, "Theme", Some("Indigo is Aoto's own look. Sticker draws outlined cards with a second card behind them, in soft pastels."), |ui| {
+                if m3::on() {
+                    let labels = Look::ALL.map(|l| l.label());
+                    let chosen = Look::ALL.iter().position(|l| *l == app.look).unwrap_or(0);
+                    pick = m3::segmented(ui, &labels, chosen).map(|i| Look::ALL[i]);
+                    return;
+                }
+                let btn = dropdown_button(ui, app.look.label(), 160.0, "Theme");
+                egui::Popup::menu(&btn).show(|ui| {
+                    ui.set_width(160.0);
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    ui.add_space(4.0);
+                    for l in Look::ALL {
+                        if option_row(ui, l.label(), l == app.look).clicked() {
+                            pick = Some(l);
+                            ui.close();
+                        }
+                    }
+                    ui.add_space(4.0);
+                });
+            });
+            if let Some(l) = pick {
+                app.look = l;
+                app.apply_look(ui.ctx());
+            }
+        }
         Row::PureBlack => {
             setting_row(ui, "Pure black", Some("In dark mode, a true black background instead of dark grey. Saves battery on OLED screens. Cards and sheets stay dark grey so they can be told apart."), |ui| {
                 if toggle(ui, &mut app.pure_black, "Pure black").changed() {
