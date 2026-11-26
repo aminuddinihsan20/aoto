@@ -3170,6 +3170,8 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 app.apply_look(ui.ctx());
             }
         }
+        // Sticker's dark is its own near-black: there is nothing for this switch to change.
+        Row::PureBlack if app.look == crate::material::Look::Sticker => {}
         Row::PureBlack => {
             setting_row(ui, "Pure black", Some("In dark mode, a true black background instead of dark grey. Saves battery on OLED screens. Cards and sheets stay dark grey so they can be told apart."), |ui| {
                 if toggle(ui, &mut app.pure_black, "Pure black").changed() {

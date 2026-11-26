@@ -87,6 +87,9 @@ pub fn outline(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>) {
 /// look that draws lines an outlined card, since its wash alone is too near the page.
 pub fn row_wash(ui: &Ui, rect: Rect, fill: Color32) {
     if material::style().outlined() {
+        // Kept inside what the list shows, so the line's sides are not cut off.
+        let clip = ui.clip_rect();
+        let rect = Rect::from_min_max(pos2(rect.left().max(clip.left() + 1.0), rect.top()), pos2(rect.right().min(clip.right() - 1.0), rect.bottom()));
         plate(ui, rect, round(shape::CARD_SMALL), fill, Stack::None);
     } else {
         ui.painter().rect_filled(rect, shape::CARD_SMALL, fill);
