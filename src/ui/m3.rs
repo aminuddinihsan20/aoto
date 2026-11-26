@@ -483,11 +483,12 @@ pub struct IconButton<'a> {
     size: f32,
     radius: Option<f32>,
     glyph: Option<f32>,
+    ink: Option<Color32>,
 }
 
 impl<'a> IconButton<'a> {
     pub fn new(icon: impl Into<Icon>, name: &'a str) -> Self {
-        Self { icon: icon.into(), name, style: IconStyle::Standard, size: 40.0, radius: None, glyph: None }
+        Self { icon: icon.into(), name, style: IconStyle::Standard, size: 40.0, radius: None, glyph: None, ink: None }
     }
 
     /// How large its icon is drawn, when not the size that goes with its container.
@@ -498,6 +499,12 @@ impl<'a> IconButton<'a> {
 
     pub fn style(mut self, style: IconStyle) -> Self {
         self.style = style;
+        self
+    }
+
+    /// Its icon's colour, where it stands on something other than the page (a tonal bar).
+    pub fn ink(mut self, ink: Color32) -> Self {
+        self.ink = Some(ink);
         self
     }
 
@@ -540,6 +547,7 @@ impl<'a> IconButton<'a> {
             IconStyle::Lit => (Some(m.glass(0.1)), m.primary),
             IconStyle::Filled => (Some(look.accent), look.on_accent),
         };
+        let ink = self.ink.unwrap_or(ink);
         if let Some(fill) = fill {
             // Sticker: a container is a small card; the filled one is the thing to press.
             let fill = if look.outlined() && matches!(self.style, IconStyle::Surface | IconStyle::Overlay | IconStyle::Lit) { m.surface_container } else { fill };

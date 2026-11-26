@@ -546,7 +546,9 @@ fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
     if total > 0.0 {
         let frac = (pos / total).clamp(0.0, 1.0);
         let done = Rect::from_min_max(g.line.min, pos2(g.line.left() + g.line.width() * frac, g.line.bottom()));
-        ui.painter().rect_filled(done, CornerRadius::same(1), m.primary);
+        // A lined look's primary is its text colour: on the pastel bar the bar's own ink shows.
+        let line = if material::style().outlined() { ink } else { m.primary };
+        ui.painter().rect_filled(done, CornerRadius::same(1), line);
         if playing {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
         }
@@ -564,7 +566,11 @@ fn mini_player(app: &mut App, ui: &mut Ui, rect: Rect) {
     if play.clicked() {
         app.toggle();
     }
-    if m3::IconButton::new(glyphs::NEXT, "Next").show_at(ui, g.next.center(), ui.scope_id().with(("mini", "next"))).clicked() {
+    let mut next = m3::IconButton::new(glyphs::NEXT, "Next");
+    if material::style().outlined() {
+        next = next.ink(ink);
+    }
+    if next.show_at(ui, g.next.center(), ui.scope_id().with(("mini", "next"))).clicked() {
         app.next();
     }
 }
