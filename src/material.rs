@@ -83,6 +83,65 @@ impl Scheme {
         ..Scheme::DARK
     };
 
+    /// The Sticker look on light pages: a warm paper page, white cards, ink for text and
+    /// lines. The pastel fills are the containers (what is pressed is butter yellow, what is
+    /// chosen is sky blue); `primary` is the ink, so that accent text stays readable.
+    pub const STICKER_LIGHT: Scheme = Scheme {
+        primary: rgb(0x33314A),
+        on_primary: rgb(0xFFFCF7),
+        primary_container: rgb(0xFCE7A2),
+        on_primary_container: rgb(0x33314A),
+        secondary: rgb(0x5A5870),
+        on_secondary: rgb(0xFFFFFF),
+        secondary_container: rgb(0xBDE3F6),
+        on_secondary_container: rgb(0x33314A),
+        tertiary: rgb(0x7A5560),
+        on_tertiary: rgb(0xFFFFFF),
+        tertiary_container: rgb(0xF6B8BE),
+        on_tertiary_container: rgb(0x33314A),
+        surface: rgb(0xFFFCF7),
+        surface_container_lowest: rgb(0xFFFFFF),
+        surface_container_low: rgb(0xFFFFFF),
+        surface_container: rgb(0xFFFFFF),
+        surface_container_high: rgb(0xF6F2FA),
+        surface_container_highest: rgb(0xEDE8F2),
+        on_surface: rgb(0x33314A),
+        on_surface_variant: rgb(0x6A6780),
+        outline: rgb(0x8B889C),
+        outline_variant: rgb(0xD9D4E3),
+        error: rgb(0xB3261E),
+        on_error: rgb(0xFFFFFF),
+    };
+
+    /// The Sticker look on dark pages: a neutral black (no blue in it), cream for text and
+    /// lines, the same pastel fills with the same ink on them.
+    pub const STICKER_DARK: Scheme = Scheme {
+        primary: rgb(0xF5F2EB),
+        on_primary: rgb(0x141414),
+        primary_container: rgb(0xFCE7A2),
+        on_primary_container: rgb(0x33314A),
+        secondary: rgb(0xD6D2C8),
+        on_secondary: rgb(0x141414),
+        secondary_container: rgb(0xBDE3F6),
+        on_secondary_container: rgb(0x33314A),
+        tertiary: rgb(0xF6B8BE),
+        on_tertiary: rgb(0x33314A),
+        tertiary_container: rgb(0xF6B8BE),
+        on_tertiary_container: rgb(0x33314A),
+        surface: rgb(0x141414),
+        surface_container_lowest: rgb(0x0E0E0E),
+        surface_container_low: rgb(0x1B1B1B),
+        surface_container: rgb(0x212121),
+        surface_container_high: rgb(0x2A2A2A),
+        surface_container_highest: rgb(0x333333),
+        on_surface: rgb(0xF5F2EB),
+        on_surface_variant: rgb(0xA5A29B),
+        outline: rgb(0x7E7B75),
+        outline_variant: rgb(0x3A3A3A),
+        error: rgb(0xFFB4AB),
+        on_error: rgb(0x690005),
+    };
+
     /// The light scheme, from the same seed.
     pub const LIGHT: Scheme = Scheme {
         primary: rgb(0x545B8B),
@@ -165,7 +224,95 @@ pub fn scheme() -> &'static Scheme {
 
 /// The scheme for light pages or dark ones.
 pub fn scheme_for(light: bool) -> &'static Scheme {
-    pick(light, PURE_BLACK.load(std::sync::atomic::Ordering::Relaxed))
+    pick(look(), light, PURE_BLACK.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// Which of the app's looks is drawn (Settings › Appearance › Theme). Both use the
+/// Material layouts; they differ in colours and in how a card or a button is drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Look {
+    /// Aoto's own: Material You in indigo.
+    #[default]
+    Indigo,
+    /// Outlined cards with a second card behind them, in soft pastels.
+    Sticker,
+}
+
+impl Look {
+    pub const ALL: [Look; 2] = [Look::Indigo, Look::Sticker];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Look::Indigo => "Indigo",
+            Look::Sticker => "Sticker",
+        }
+    }
+
+    /// The stored form: a name, so a later reordering can't change what a saved choice means.
+    pub fn code(self) -> &'static str {
+        match self {
+            Look::Indigo => "indigo",
+            Look::Sticker => "sticker",
+        }
+    }
+
+    /// Anything unknown (or nothing) is Indigo: a damaged setting can't leave the app without a look.
+    pub fn from_code(code: &str) -> Look {
+        Look::ALL.into_iter().find(|l| l.code() == code.trim()).unwrap_or_default()
+    }
+}
+
+static LOOK: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// Draw in `look` from now on. Returns whether it changed, so the caller knows to restyle.
+pub fn set_look(look: Look) -> bool {
+    let i = Look::ALL.iter().position(|l| *l == look).unwrap_or(0) as u8;
+    LOOK.swap(i, std::sync::atomic::Ordering::Relaxed) != i
+}
+
+pub fn look() -> Look {
+    Look::ALL.get(LOOK.load(std::sync::atomic::Ordering::Relaxed) as usize).copied().unwrap_or_default()
+}
+
+/// How the look draws its shapes, beyond its colours.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Style {
+    /// The line around cards, buttons and fields; 0 for none.
+    pub outline: f32,
+    /// How far the second card behind a card is set off, right and down; 0 for none.
+    pub stack: f32,
+    /// The colour of those lines.
+    pub line: Color32,
+    /// The fill of what is pressed (a main button, the song that plays), and what is written on it.
+    pub accent: Color32,
+    pub on_accent: Color32,
+    /// The most a corner is rounded; `None` leaves the shape scale as it is.
+    pub corner: Option<f32>,
+}
+
+impl Style {
+    /// The style of `look` drawn with `scheme`.
+    pub fn of(look: Look, scheme: &Scheme) -> Style {
+        match look {
+            Look::Indigo => Style { outline: 0.0, stack: 0.0, line: scheme.outline_variant, accent: scheme.primary, on_accent: scheme.on_primary, corner: None },
+            Look::Sticker => Style { outline: 1.5, stack: 4.0, line: scheme.on_surface, accent: scheme.primary_container, on_accent: scheme.on_primary_container, corner: Some(12.0) },
+        }
+    }
+
+    /// Is this the look with outlines and stacked cards?
+    pub fn outlined(&self) -> bool {
+        self.outline > 0.0
+    }
+
+    /// A corner of the shape scale as this look rounds it.
+    pub fn round(&self, corner: f32) -> f32 {
+        self.corner.map_or(corner, |most| corner.min(most))
+    }
+}
+
+/// The style in use (see [`Style`]).
+pub fn style() -> Style {
+    Style::of(look(), scheme())
 }
 
 /// Settings › Appearance › Pure black: dark pages on a true black background.
@@ -179,11 +326,14 @@ pub fn set_pure_black(on: bool) -> bool {
 
 /// The scheme for light or dark pages; `black`: dark pages are pure black. Light pages
 /// are not affected.
-fn pick(light: bool, black: bool) -> &'static Scheme {
-    match (light, black) {
-        (true, _) => &Scheme::LIGHT,
-        (false, true) => &Scheme::BLACK,
-        (false, false) => &Scheme::DARK,
+fn pick(look: Look, light: bool, black: bool) -> &'static Scheme {
+    match (look, light, black) {
+        // Sticker's dark page is black already: Pure black changes nothing there.
+        (Look::Sticker, true, _) => &Scheme::STICKER_LIGHT,
+        (Look::Sticker, false, _) => &Scheme::STICKER_DARK,
+        (Look::Indigo, true, _) => &Scheme::LIGHT,
+        (Look::Indigo, false, true) => &Scheme::BLACK,
+        (Look::Indigo, false, false) => &Scheme::DARK,
     }
 }
 
@@ -203,6 +353,11 @@ pub fn song_backdrop(song: Color32) -> (Color32, Color32) {
 /// [`song_backdrop`] for light pages or dark ones. On light pages the top is a pale tint
 /// of the song's colour instead of a dark tone of it.
 pub fn song_backdrop_for(song: Color32, light: bool) -> (Color32, Color32) {
+    // Sticker keeps its own page behind the player: its colours are the look, not the song's.
+    if look() == Look::Sticker {
+        let page = scheme_for(light).surface;
+        return (page, page);
+    }
     if light {
         let [r, g, b] = [song.r(), song.g(), song.b()].map(|c| c as f32 / 255.0);
         let (max, min) = (r.max(g).max(b), r.min(g).min(b));
@@ -402,10 +557,10 @@ mod tests {
 
     #[test]
     fn pure_black_changes_only_dark_pages() {
-        assert_eq!(*pick(false, false), Scheme::DARK);
-        assert_eq!(*pick(false, true), Scheme::BLACK);
-        assert_eq!(*pick(true, true), Scheme::LIGHT, "light pages are left as they are");
-        assert_eq!(*pick(true, false), Scheme::LIGHT);
+        assert_eq!(*pick(Look::Indigo, false, false), Scheme::DARK);
+        assert_eq!(*pick(Look::Indigo, false, true), Scheme::BLACK);
+        assert_eq!(*pick(Look::Indigo, true, true), Scheme::LIGHT, "light pages are left as they are");
+        assert_eq!(*pick(Look::Indigo, true, false), Scheme::LIGHT);
     }
 
     #[test]
@@ -424,6 +579,74 @@ mod tests {
     fn the_black_scheme_keeps_the_dark_schemes_text_and_accents() {
         let (b, d) = (Scheme::BLACK, Scheme::DARK);
         assert_eq!((b.primary, b.on_primary, b.on_surface, b.on_surface_variant, b.outline, b.error), (d.primary, d.on_primary, d.on_surface, d.on_surface_variant, d.outline, d.error));
+    }
+
+    #[test]
+    fn the_look_picks_the_scheme_and_indigo_is_as_it_was() {
+        assert_eq!(*pick(Look::Indigo, true, false), Scheme::LIGHT);
+        assert_eq!(*pick(Look::Indigo, false, false), Scheme::DARK);
+        assert_eq!(*pick(Look::Indigo, false, true), Scheme::BLACK);
+        assert_eq!(*pick(Look::Sticker, true, false), Scheme::STICKER_LIGHT);
+        assert_eq!(*pick(Look::Sticker, false, false), Scheme::STICKER_DARK);
+        assert_eq!(*pick(Look::Sticker, false, true), Scheme::STICKER_DARK, "its dark page is black already");
+    }
+
+    #[test]
+    fn a_stored_look_comes_back_and_nonsense_is_indigo() {
+        for l in Look::ALL {
+            assert_eq!(Look::from_code(l.code()), l);
+        }
+        assert_eq!(Look::from_code(""), Look::Indigo);
+        assert_eq!(Look::from_code("neon"), Look::Indigo);
+        assert_eq!(Look::ALL.map(Look::label), ["Indigo", "Sticker"]);
+    }
+
+    fn ratio(a: Color32, b: Color32) -> f32 {
+        let lin = |c: u8| { let v = c as f32 / 255.0; if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) } };
+        let l = |c: Color32| 0.2126 * lin(c.r()) + 0.7152 * lin(c.g()) + 0.0722 * lin(c.b());
+        let (x, y) = (l(a), l(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn every_sticker_text_reads_on_what_it_is_written_on() {
+        for (s, name) in [(Scheme::STICKER_LIGHT, "light"), (Scheme::STICKER_DARK, "dark")] {
+            for (on, under, what) in [
+                (s.on_surface, s.surface, "text on the page"),
+                (s.on_surface, s.surface_container, "text on a card"),
+                (s.on_surface_variant, s.surface, "dim text on the page"),
+                (s.on_surface_variant, s.surface_container, "dim text on a card"),
+                (s.primary, s.surface, "accent text on the page"),
+                (s.on_primary, s.primary, "on a filled button"),
+                (s.on_primary_container, s.primary_container, "on butter yellow"),
+                (s.on_secondary_container, s.secondary_container, "on sky blue"),
+                (s.on_tertiary_container, s.tertiary_container, "on rose"),
+                (s.on_error, s.error, "on an error"),
+            ] {
+                assert!(ratio(on, under) >= 4.5, "{name}, {what}: {:.2}", ratio(on, under));
+            }
+        }
+    }
+
+    #[test]
+    fn the_sticker_dark_page_is_a_neutral_black() {
+        let s = Scheme::STICKER_DARK;
+        for c in [s.surface, s.surface_container_low, s.surface_container, s.surface_container_high, s.surface_container_highest] {
+            assert!(c.r() == c.g() && c.g() == c.b(), "{c:?} has a tint");
+        }
+    }
+
+    #[test]
+    fn indigo_draws_no_outlines_and_sticker_draws_them_stacked() {
+        let i = Style::of(Look::Indigo, &Scheme::DARK);
+        assert!(!i.outlined() && i.stack == 0.0);
+        assert_eq!((i.accent, i.on_accent), (Scheme::DARK.primary, Scheme::DARK.on_primary), "Indigo's buttons are as they were");
+        assert_eq!(i.round(shape::CARD), shape::CARD, "and so are its corners");
+        let s = Style::of(Look::Sticker, &Scheme::STICKER_LIGHT);
+        assert!(s.outlined() && s.stack > 0.0);
+        assert_eq!(s.accent, Scheme::STICKER_LIGHT.primary_container, "what is pressed is butter yellow");
+        assert_eq!(s.line, Scheme::STICKER_LIGHT.on_surface);
+        assert!(s.round(shape::CARD) <= 12.0 && s.round(shape::CHIP) == shape::CHIP, "big corners come down, small ones stay");
     }
 
     #[test]
