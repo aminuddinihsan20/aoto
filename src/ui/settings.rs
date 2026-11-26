@@ -131,6 +131,7 @@ pub enum Row {
     LineTrim,
     LyricsSources,
     Look,
+    AppIcon,
     Mode,
     PureBlack,
     AnimatedBackground,
@@ -148,7 +149,7 @@ pub enum Row {
 }
 
 impl Row {
-    pub const ALL: [Row; 51] = [
+    pub const ALL: [Row; 52] = [
         Row::Account,
         Row::Channel,
         Row::ListenTogether,
@@ -186,6 +187,7 @@ impl Row {
         Row::LineTrim,
         Row::LyricsSources,
         Row::Look,
+        Row::AppIcon,
         Row::Mode,
         Row::PureBlack,
         Row::AnimatedBackground,
@@ -224,7 +226,7 @@ impl Row {
             Row::Romanization | Row::Translation | Row::TranslateInto | Row::TextSize => (C::Lyrics, "Text"),
             Row::TimingOffset | Row::WordTrim | Row::LineTrim => (C::Lyrics, "Timing"),
             Row::LyricsSources => (C::Lyrics, "Sources"),
-            Row::Look | Row::Mode | Row::PureBlack => (C::Appearance, "Theme"),
+            Row::Look | Row::AppIcon | Row::Mode | Row::PureBlack => (C::Appearance, "Theme"),
             Row::AnimatedBackground | Row::PulseWithMusic | Row::AnimatedArtwork => (C::Appearance, "Motion"),
             Row::StatsForNerds => (C::Appearance, "More"),
             Row::SignatureService => (C::Appearance, "Artist pages"),
@@ -418,7 +420,7 @@ mod tests {
         assert_eq!(rows(C::Sound), [Row::Equalizer, Row::SpatialAudio, Row::SpatialStrength, Row::Normalize, Row::QualityWifi, Row::QualityMobile, Row::HiRes, Row::Lossless, Row::PreferAtmos, Row::DisableDirect, Row::PlaySongs]);
         assert_eq!(rows(C::Downloads), [Row::LosslessDownloads, Row::LyricsInFiles, Row::SyncPlaylists, Row::DownloadFolder]);
         assert_eq!(rows(C::Lyrics), [Row::Romanization, Row::Translation, Row::TranslateInto, Row::TextSize, Row::TimingOffset, Row::WordTrim, Row::LineTrim, Row::LyricsSources]);
-        assert_eq!(rows(C::Appearance), [Row::Look, Row::Mode, Row::PureBlack, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork, Row::StatsForNerds, Row::SignatureService]);
+        assert_eq!(rows(C::Appearance), [Row::Look, Row::AppIcon, Row::Mode, Row::PureBlack, Row::AnimatedBackground, Row::PulseWithMusic, Row::AnimatedArtwork, Row::StatsForNerds, Row::SignatureService]);
         assert_eq!(rows(C::Stats), [Row::ListeningStats]);
         assert_eq!(rows(C::Connections), [Row::LastFm]);
         assert_eq!(rows(C::Transfer), [Row::TransferFromSpotify, Row::SpotifyAccount]);

@@ -49,6 +49,26 @@ pub fn set_light_bars(light: bool) {
     });
 }
 
+/// The icon chosen for the home screen (`code`, one of `launcher_icon::ALL`). Called every frame: the activity is told only when it changes.
+pub fn set_launcher_icon(code: &'static str) {
+    static SAID: std::sync::Mutex<&str> = std::sync::Mutex::new("");
+    if !icon_changed(&SAID, code) {
+        return;
+    }
+    #[cfg(target_os = "android")]
+    std::thread::spawn(move || {
+        if let Err(e) = call("icon", code, std::time::Duration::from_secs(10)) {
+            log::warn!("couldn't set the home screen's icon: {e}");
+        }
+    });
+}
+
+/// Whether `code` differs from what was last said (kept in `said`; empty: nothing yet).
+fn icon_changed(said: &std::sync::Mutex<&'static str>, code: &'static str) -> bool {
+    let mut said = said.lock().unwrap_or_else(|e| e.into_inner());
+    std::mem::replace(&mut *said, code) != code
+}
+
 /// Whether `light` differs from what was last said (kept in `said`: 0 nothing yet, 1 dark, 2 light).
 fn bars_changed(said: &std::sync::atomic::AtomicU8, light: bool) -> bool {
     let now = if light { 2 } else { 1 };
@@ -590,6 +610,16 @@ impl LocalFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_home_screen_icon_is_told_once_for_each_change_of_look() {
+        let said = std::sync::Mutex::new("");
+        assert!(icon_changed(&said, "indigo"), "the first frame says which look");
+        assert!(!icon_changed(&said, "indigo"), "and not again");
+        assert!(icon_changed(&said, "sticker"), "Sticker is chosen");
+        assert!(!icon_changed(&said, "sticker"));
+        assert!(icon_changed(&said, "indigo"), "and Indigo again");
+    }
 
     #[test]
     fn the_system_bars_are_told_once_for_each_change_of_mode() {

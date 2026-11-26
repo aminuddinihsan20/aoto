@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Sticker look's icon: the drop as an outlined card, with a second one behind it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#33314A"
+        android:strokeColor="#33314A"
+        android:strokeWidth="3"
+        android:strokeLineJoin="round"
+        android:pathData="M58,29 C58,29 78.56,52.39 78.56,65.86 C78.56,76.85 69.34,85 58,85 C46.66,85 37.44,76.85 37.44,65.86 C37.44,52.39 58,29 58,29 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:strokeColor="#33314A"
+        android:strokeWidth="3"
+        android:strokeLineJoin="round"
+        android:pathData="M54,25 C54,25 74.56,48.39 74.56,61.86 C74.56,72.85 65.34,81 54,81 C42.66,81 33.44,72.85 33.44,61.86 C33.44,48.39 54,25 54,25 Z" />
+    <path
+        android:pathData="M38.41,63.28 Q42.3,56.9 46.2,63.28 Q50.1,69.66 54,63.28 Q57.9,56.9 61.8,63.28 Q65.7,69.66 69.59,63.28"
+        android:strokeColor="#33314A"
+        android:strokeWidth="4.61"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

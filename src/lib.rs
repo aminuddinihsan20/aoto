@@ -26,6 +26,7 @@ mod images;
 mod jam;
 mod innertube;
 mod jsc;
+mod launcher_icon;
 mod lastfm;
 mod local;
 mod lossless;

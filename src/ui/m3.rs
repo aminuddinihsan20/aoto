@@ -2377,3 +2377,68 @@ mod tests {
         assert!(off.x >= 2.0 && off.x < 4.0, "{off:?}");
     }
 }
+
+// ------------------------------------------------------------------ app icon
+
+/// A point of the launcher icon's 108-unit drawing in `rect` (which shows its middle 72
+/// units, as a launcher's mask does).
+fn icon_point(rect: Rect, x: f32, y: f32) -> Pos2 {
+    let k = rect.width() / 72.0;
+    pos2(rect.left() + (x - 18.0) * k, rect.top() + (y - 18.0) * k)
+}
+
+/// The drop of the app's icon as a closed outline in `rect`, moved by `shift` drawing units.
+pub fn icon_drop(rect: Rect, shift: f32) -> Vec<Pos2> {
+    // The vector drawable's four curves (ic_launcher_foreground.xml).
+    const CURVES: [[(f32, f32); 4]; 4] = [
+        [(54.0, 26.0), (54.0, 26.0), (74.56, 49.39), (74.56, 62.86)],
+        [(74.56, 62.86), (74.56, 73.85), (65.34, 82.0), (54.0, 82.0)],
+        [(54.0, 82.0), (42.66, 82.0), (33.44, 73.85), (33.44, 62.86)],
+        [(33.44, 62.86), (33.44, 49.39), (54.0, 26.0), (54.0, 26.0)],
+    ];
+    const STEPS: usize = 10;
+    let mut points = Vec::with_capacity(CURVES.len() * STEPS);
+    for c in CURVES {
+        for i in 0..STEPS {
+            let t = i as f32 / STEPS as f32;
+            let u = 1.0 - t;
+            let at = |p: [f32; 4]| u * u * u * p[0] + 3.0 * u * u * t * p[1] + 3.0 * u * t * t * p[2] + t * t * t * p[3];
+            points.push(icon_point(rect, at(c.map(|p| p.0)) + shift, at(c.map(|p| p.1)) + shift));
+        }
+    }
+    points
+}
+
+/// One of the icons the app can wear, as a tile to tap; `on` rings the one worn. True when tapped.
+pub fn app_icon_tile(ui: &mut Ui, icon: &crate::launcher_icon::Icon, on: bool) -> bool {
+    let m = material::scheme();
+    let (slot, resp) = ui.allocate_exact_size(Vec2::splat(TOUCH), Sense::click());
+    let resp = named(resp, icon.name);
+    if !ui.is_rect_visible(slot) {
+        return resp.clicked();
+    }
+    let rgb = |c: u32| Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+    let rect = slot.shrink(4.0);
+    let radius = rect.width() * 0.28;
+    let p = ui.painter();
+    p.rect_filled(rect, radius, rgb(icon.ground));
+    let line = Stroke::new(1.2, rgb(icon.wave));
+    if icon.lined {
+        p.add(egui::Shape::convex_polygon(icon_drop(rect, 4.0), rgb(icon.wave), line));
+        p.add(egui::Shape::convex_polygon(icon_drop(rect, 0.0), rgb(icon.drop), line));
+    } else {
+        p.add(egui::Shape::convex_polygon(icon_drop(rect, 0.0), rgb(icon.drop), Stroke::NONE));
+    }
+    // The wave: three half-turns across the drop's belly.
+    let wave: Vec<Pos2> = (0..=24)
+        .map(|i| {
+            let t = i as f32 / 24.0;
+            icon_point(rect, 38.41 + 31.18 * t, 64.28 - 3.2 * (t * 4.0 * std::f32::consts::PI).sin())
+        })
+        .collect();
+    p.add(egui::Shape::line(wave, Stroke::new((rect.width() / 72.0 * 4.6).max(1.5), rgb(icon.wave))));
+    // The one worn is ringed; the others get a hairline so a pale icon shows on a pale page.
+    let ring = if on { Stroke::new(2.0, m.primary) } else { Stroke::new(1.0, m.outline_variant) };
+    p.rect_stroke(if on { slot.shrink(1.0) } else { rect }, radius + if on { 3.0 } else { 0.0 }, ring, StrokeKind::Inside);
+    resp.clicked()
+}

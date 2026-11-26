@@ -3170,6 +3170,20 @@ pub(super) fn settings_row(app: &mut App, ui: &mut Ui, row: Row) {
                 app.apply_look(ui.ctx());
             }
         }
+        Row::AppIcon => {
+            let mut pick = None;
+            setting_row(ui, "App icon", Some("The icon Aoto wears on the home screen. Some launchers take a moment to show the new one."), |ui| {
+                ui.spacing_mut().item_spacing.x = 10.0;
+                for icon in &crate::launcher_icon::ALL {
+                    if m3::app_icon_tile(ui, icon, std::ptr::eq(icon, app.launcher_icon)) {
+                        pick = Some(icon);
+                    }
+                }
+            });
+            if let Some(icon) = pick {
+                app.launcher_icon = icon;
+            }
+        }
         // Sticker's dark is its own near-black: there is nothing for this switch to change.
         Row::PureBlack if app.look == crate::material::Look::Sticker => {}
         Row::PureBlack => {

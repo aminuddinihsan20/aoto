@@ -197,6 +197,10 @@ public class MainActivity extends GameActivity {
                 done.finish(true, "");
                 break;
             }
+            case "icon":
+                // The icon chosen in Settings ("indigo", "sticker", …): the home screen shows that one.
+                done.finish(LauncherIcon.set(this, arg), "");
+                break;
             case "open-url":
                 // Web pages only: nothing the app hands over may start another kind of app.
                 if (!arg.startsWith("https://") && !arg.startsWith("http://")) {

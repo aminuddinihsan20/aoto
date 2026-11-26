@@ -514,6 +514,8 @@ pub struct App {
     pure_black: bool,
     /// Which look is drawn: Indigo or Sticker (Settings › Appearance › Theme).
     look: crate::material::Look,
+    /// The icon on the home screen (Settings › Appearance › App icon).
+    launcher_icon: &'static crate::launcher_icon::Icon,
     anim_bg: bool,
     reactive_bg: bool,
     /// Apple's moving album art. Off unless asked for: a sleeve needs a decoder, a
@@ -914,6 +916,7 @@ impl App {
             // Dev hook: YTM_APPEARANCE=light|dark|system tries a mode without saving it.
             pure_black,
             look,
+            launcher_icon: crate::launcher_icon::from_code(&get("launcher_icon").unwrap_or_default()),
             appearance: theme::Appearance::from_key(&dev_var("YTM_APPEARANCE").map(str::to_owned).or_else(|| get("appearance")).unwrap_or_default()),
             anim_bg: get("anim_bg").is_none_or(|v| v == "1"),
             reactive_bg: get("reactive_bg").is_none_or(|v| v == "1"),
@@ -1527,6 +1530,7 @@ impl eframe::App for App {
         theme::set_mode(&ctx, light);
         if crate::platform::phone() {
             crate::platform::set_light_bars(light);
+            crate::platform::set_launcher_icon(self.launcher_icon.code);
         }
         if self.chrome_applied.as_deref() != Some(look.id.as_str()) {
             if self.chrome_applied.is_none() {
@@ -1841,6 +1845,7 @@ impl eframe::App for App {
         if std::env::var_os("YTM_UPDATE_AS").is_none() {
             storage.set_string("last_version", crate::update::current_version());
         }
+        storage.set_string("launcher_icon", self.launcher_icon.code.to_owned());
         if dev_var("YTM_APPEARANCE").is_none() {
             storage.set_string("appearance", self.appearance.key().to_owned());
             storage.set_string("pure_black", b(self.pure_black));

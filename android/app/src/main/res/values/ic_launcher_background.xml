@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#2F3E9E</color>
+    <!-- The Sticker look's icon stands on its butter yellow. -->
+    <color name="ic_launcher_sticker_background">#FCE7A2</color>
+    <color name="ic_launcher_sky_background">#BDE3F6</color>
+    <color name="ic_launcher_rose_background">#F6B8BE</color>
+    <color name="ic_launcher_midnight_background">#141414</color>
 </resources>
