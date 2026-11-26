@@ -1238,8 +1238,13 @@ fn tool_chip_body(ui: &Ui, rect: Rect, label: &str, on: bool, id: egui::Id) -> (
     let m = material::scheme();
     let resp = named(ui.interact(rect, id, Sense::click()), label);
     let body = Rect::from_center_size(rect.center(), vec2(rect.width(), TOOL_H));
-    ui.painter().rect_filled(body, TOOL_H / 2.0, m.glass(0.1));
-    let ink = if on { m.primary } else { m.on_surface };
+    if material::style().outlined() {
+        // Sticker: a small card; at work it is sky blue.
+        plate(ui, body, round(TOOL_H / 2.0), if on { m.secondary_container } else { m.surface_container }, Stack::None);
+    } else {
+        ui.painter().rect_filled(body, TOOL_H / 2.0, m.glass(0.1));
+    }
+    let ink = if material::style().outlined() { if on { m.on_secondary_container } else { m.on_surface } } else if on { m.primary } else { m.on_surface };
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(body, TOOL_H / 2.0, ink.gamma_multiply(PRESSED));
     }

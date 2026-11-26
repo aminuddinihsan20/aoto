@@ -352,9 +352,15 @@ fn art_view(app: &mut App, ui: &mut Ui, screen: Rect, insets: Insets, track: &Tr
     nowplaying::options_popup(app, &menu, heard, false);
 
     // The artwork.
-    widgets::soft_shadow(ui, g.art, shape::ARTWORK, 40.0, 0.35);
+    let art_radius = m3::round(shape::ARTWORK);
+    if material::style().outlined() {
+        // Sticker: the cover is a card, with a second card behind it instead of a shadow.
+        m3::plate(ui, g.art, art_radius, material::scheme().surface_container, m3::Stack::Card);
+    } else {
+        widgets::soft_shadow(ui, g.art, shape::ARTWORK, 40.0, 0.35);
+    }
     let px = (g.art.width() * ui.ctx().pixels_per_point()) as u32;
-    widgets::paint_cover_xfade_px(ui, egui::Id::unique("np-art"), g.art, &track.thumbs, shape::ARTWORK, 1.0, px);
+    widgets::paint_cover_xfade_px(ui, egui::Id::unique("np-art"), g.art, &track.thumbs, art_radius, 1.0, px);
     // Apple's motion sleeve, over the still until its first frame arrives.
     if let Some(album) = track.album.as_ref().map(|a| a.name.clone()).filter(|a| !a.is_empty()) {
         let artist = track.artists.first().map(|a| a.name.clone()).unwrap_or_else(|| track.artist_line());
@@ -506,7 +512,6 @@ fn times(app: &App, ui: &mut Ui, row: Rect, s: &nowplaying::SeekState) {
 
 /// Previous, play/pause and next, in the transport's three middle targets.
 fn middle(app: &mut App, ui: &Ui, t: &Transport, now: f64) {
-    let m = material::scheme();
     let id = ui.scope_id();
     if m3::IconButton::new(glyphs::PREVIOUS, "Previous").style(m3::IconStyle::Tonal).size(t.skip).glyph(t.skip * 0.6).show_at(ui, t.targets[1].center(), id.with("previous")).clicked() {
         app.prev();
@@ -516,23 +521,30 @@ fn middle(app: &mut App, ui: &Ui, t: &Transport, now: f64) {
     let rect = t.targets[2];
     let resp = named(ui.interact(rect, id.with("play"), Sense::click()), if on { "Pause" } else { "Play" });
     let morph = theme::anim_bool(ui.ctx(), "np-play-morph", on, 0.2);
-    let radius = play_radius(t.play, morph);
-    widgets::soft_shadow(ui, rect, radius, 16.0, 0.25);
-    ui.painter().rect_filled(rect, radius, m.primary);
+    let look = material::style();
+    let radius = look.round(play_radius(t.play, morph));
+    // The one filled button: Sticker's is the accent on a second card, with no soft shadow.
+    let (play_fill, play_ink) = (look.accent, look.on_accent);
+    if look.outlined() {
+        m3::plate(ui, rect, radius, play_fill, m3::Stack::Ink);
+    } else {
+        widgets::soft_shadow(ui, rect, radius, 16.0, 0.25);
+        ui.painter().rect_filled(rect, radius, play_fill);
+    }
     if resp.is_pointer_button_down_on() {
-        ui.painter().rect_filled(rect, radius, m.on_primary.gamma_multiply(0.1));
+        ui.painter().rect_filled(rect, radius, play_ink.gamma_multiply(0.1));
     }
     let c = rect.center();
     if app.buffering {
         let a = now as f32 * 6.0;
         let pts: Vec<Pos2> = (0..16).map(|i| c + vec2((a + i as f32 * 0.24).cos(), (a + i as f32 * 0.24).sin()) * t.play * 0.17).collect();
-        ui.painter().add(egui::Shape::Path(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(3.0, m.on_primary))));
+        ui.painter().add(egui::Shape::Path(egui::epaint::PathShape::line(pts, egui::epaint::PathStroke::new(3.0, play_ink))));
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
     } else {
         // The two marks cross-fade: a hard cut between them flickers.
         let size = t.play * 0.45;
-        glyphs::draw(ui, c, size, glyphs::PLAY, theme::with_alpha(m.on_primary, 1.0 - morph));
-        glyphs::draw(ui, c, size, glyphs::PAUSE, theme::with_alpha(m.on_primary, morph));
+        glyphs::draw(ui, c, size, glyphs::PLAY, theme::with_alpha(play_ink, 1.0 - morph));
+        glyphs::draw(ui, c, size, glyphs::PAUSE, theme::with_alpha(play_ink, morph));
     }
     if resp.clicked() {
         app.toggle();
@@ -548,6 +560,7 @@ fn peek(app: &mut App, ui: &Ui, rect: Rect, gesture_area: f32) {
     let corners = CornerRadius { nw: shape::CARD as u8, ne: shape::CARD as u8, sw: 0, se: 0 };
     let resp = named(ui.interact(rect, ui.scope_id().with("np-peek"), Sense::click()), "Up next");
     ui.painter().rect_filled(rect, corners, m.surface_container_low);
+    m3::outline(ui, rect, corners);
     if resp.is_pointer_button_down_on() {
         ui.painter().rect_filled(rect, corners, m.on_surface.gamma_multiply(0.08));
     }
