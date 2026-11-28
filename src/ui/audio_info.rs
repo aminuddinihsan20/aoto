@@ -64,7 +64,8 @@ pub(super) fn stages(f: &Facts) -> Vec<Stage> {
     track.push(match f.info {
         Some(i) if i.source.is_empty() => i.badge().to_owned(),
         Some(i) => format!("{} · {}", i.badge(), i.source),
-        None => "Lossy · YouTube Music".to_owned(),
+        // No mark: a lossy file from the phone, or what YouTube Music streams.
+        None => format!("Lossy · {}", s.origin.as_deref().unwrap_or("YouTube Music")),
     });
 
     // The decoder: everything after it is 32-bit float.
@@ -206,7 +207,7 @@ mod tests {
     use crate::stream::Stats;
 
     fn flac() -> Stats {
-        Stats { codec: "FLAC".into(), bit_depth: Some(16), sample_rate: 44_100, channels: 2, bitrate_kbps: Some(1411), file_kbps: Some(966), container: None, decoder: "Symphonia" }
+        Stats { codec: "FLAC".into(), bit_depth: Some(16), sample_rate: 44_100, channels: 2, bitrate_kbps: Some(1411), file_kbps: Some(966), container: None, decoder: "Symphonia", origin: None }
     }
 
     fn plain(stats: &Stats) -> Facts<'_> {
@@ -236,10 +237,16 @@ mod tests {
 
     #[test]
     fn a_youtube_stream_is_said_to_be_lossy() {
-        let s = Stats { codec: "Opus".into(), bit_depth: None, sample_rate: 48_000, channels: 2, bitrate_kbps: Some(133), file_kbps: Some(133), container: Some("WebM"), decoder: "Opus (built in)" };
+        let s = Stats { codec: "Opus".into(), bit_depth: None, sample_rate: 48_000, channels: 2, bitrate_kbps: Some(133), file_kbps: Some(133), container: Some("WebM"), decoder: "Opus (built in)", origin: None };
         let st = stages(&plain(&s));
         assert_eq!(lines(&st, "Track"), ["Opus in WebM · Stereo", "48 kHz · 133 kbps", "Lossy · YouTube Music"]);
         assert_eq!(lines(&st, "Decoder"), ["Opus (built in)", "To 32-bit float"]);
+    }
+
+    #[test]
+    fn a_lossy_file_from_the_phone_is_not_said_to_come_from_youtube() {
+        let s = Stats { codec: "Vorbis".into(), bit_depth: None, sample_rate: 44_100, channels: 2, bitrate_kbps: Some(163), file_kbps: Some(163), container: Some("Ogg"), decoder: "Symphonia", origin: Some("This phone".into()) };
+        assert_eq!(lines(&stages(&plain(&s)), "Track"), ["Vorbis in Ogg · Stereo", "44.1 kHz · 163 kbps", "Lossy · This phone"]);
     }
 
     #[test]

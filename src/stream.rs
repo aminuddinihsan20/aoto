@@ -118,6 +118,8 @@ pub struct Shared {
     pub info: Option<crate::hires::Info>,
     /// What a file on the phone was found to hold, read from its own bytes.
     pub probed: std::sync::OnceLock<crate::probe::Probe>,
+    /// Where a file on the phone is from ("This phone", "Downloaded"); unset for a stream.
+    pub origin: std::sync::OnceLock<String>,
     /// Flips to true once the download task has stopped (complete, failed or cancelled).
     done: tokio::sync::watch::Sender<bool>,
     /// Wakes waiting workers: `limit` lifted, a reader moved or left, or cancelled.
@@ -152,6 +154,7 @@ impl Shared {
             format,
             info,
             probed: std::sync::OnceLock::new(),
+            origin: std::sync::OnceLock::new(),
             done: tokio::sync::watch::Sender::new(false),
             changed: tokio::sync::Notify::new(),
         })
@@ -193,6 +196,7 @@ impl Shared {
         if let Some(p) = probed {
             let _ = shared.probed.set(p);
         }
+        let _ = shared.origin.set(source.to_owned());
         shared
     }
 
@@ -806,6 +810,8 @@ pub struct Stats {
     pub container: Option<&'static str>,
     /// What decodes it: the app's own Opus decoder, or Symphonia.
     pub decoder: &'static str,
+    /// Where a file on the phone is from ("This phone", "Downloaded"); `None` for a stream.
+    pub origin: Option<String>,
 }
 
 impl Stats {
@@ -819,6 +825,7 @@ impl Stats {
             TrackDecoder::Opus(_) => "Opus (built in)",
             TrackDecoder::Pcm(_) => "None (already PCM)",
         };
+        stats.origin = shared.origin.get().cloned();
         // A file from the phone says what it is itself.
         if let Some(p) = shared.probed.get() {
             stats.codec = codec_label(p.codec);
@@ -849,7 +856,7 @@ impl Stats {
             Format::Opus => Some("WebM"),
             _ => None,
         };
-        Self { codec, bit_depth, sample_rate, channels, bitrate_kbps: bitrate_kbps.filter(|k| *k > 0), file_kbps: measured.filter(|k| *k > 0), container, decoder: "Symphonia" }
+        Self { codec, bit_depth, sample_rate, channels, bitrate_kbps: bitrate_kbps.filter(|k| *k > 0), file_kbps: measured.filter(|k| *k > 0), container, decoder: "Symphonia", origin: None }
     }
 }
 
