@@ -241,6 +241,64 @@ mod tests {
         }
     }
 
+    /// `YTM_PROBE_DIR=<folder> cargo test probe::tests::which_files_decode -- --ignored --nocapture`
+    /// says, for each file in the folder, whether the decoder opens it as a file from the
+    /// phone is opened, and with the hint its own bytes call for.
+    #[test]
+    #[ignore = "reads files from a folder named in YTM_PROBE_DIR"]
+    fn which_files_decode() {
+        use rodio::Source;
+        let dir = std::env::var("YTM_PROBE_DIR").expect("YTM_PROBE_DIR");
+        let mut files: Vec<_> = std::fs::read_dir(dir).unwrap().flatten().map(|e| e.path()).collect();
+        files.sort();
+        for path in files {
+            let data = std::fs::read(&path).unwrap();
+            let try_with = |format: crate::stream::Format| {
+                let shared = crate::stream::Shared::from_bytes_with_format(data.clone(), 0, None, format, None);
+                match crate::stream::decoder(shared, true) {
+                    Ok(d) => format!("ok, {} Hz, {} samples", d.sample_rate().get(), d.count()),
+                    Err(e) => format!("FAILS: {e}"),
+                }
+            };
+            let hint = crate::stream::Format::File { hint: "", mime: None };
+            println!("{:>10}: as a phone file: {} | with no hint: {}", path.file_name().unwrap().to_string_lossy(), try_with(crate::stream::Format::Aac), try_with(hint));
+        }
+    }
+
+    /// `YTM_PROBE_DIR=<folder> cargo test probe::tests::lossless_is_lossless -- --ignored --nocapture`
+    /// decodes each `<name>.flac` in the folder the way a file from the phone is opened and
+    /// compares it, sample for sample, with `<name>.m4a` beside it: the same audio packed by
+    /// another lossless codec (ALAC). Two different codecs agreeing on every sample is only
+    /// possible if neither loses anything.
+    #[test]
+    #[ignore = "reads pairs of files from a folder named in YTM_PROBE_DIR"]
+    fn lossless_is_lossless() {
+        use rodio::Source;
+        let dir = std::path::PathBuf::from(std::env::var("YTM_PROBE_DIR").expect("YTM_PROBE_DIR"));
+        let play = |path: &std::path::Path| -> (u32, u16, Vec<f32>) {
+            let shared = crate::stream::Shared::from_file(std::fs::read(path).unwrap(), 0, None, crate::stream::Format::Aac, "This phone");
+            let d = crate::stream::decoder(shared, true).unwrap_or_else(|e| panic!("{path:?} doesn't decode: {e}"));
+            (d.sample_rate().get(), d.channels().get(), d.collect())
+        };
+        let mut pairs = 0;
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let flac = entry.path();
+            let wav = flac.with_extension("m4a");
+            if flac.extension().is_none_or(|e| e != "flac") || !wav.is_file() {
+                continue;
+            }
+            let (rate, channels, packed) = play(&flac);
+            let (wav_rate, wav_channels, plain) = play(&wav);
+            let differing = packed.iter().zip(&plain).filter(|(a, b)| a != b).count();
+            let loudest = packed.iter().zip(&plain).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+            println!("{:>10}: {rate} Hz, {channels} ch, {} samples; differing from the ALAC copy: {differing} (largest difference {loudest})", flac.file_name().unwrap().to_string_lossy(), packed.len());
+            assert_eq!((rate, channels, packed.len()), (wav_rate, wav_channels, plain.len()));
+            assert_eq!(differing, 0, "a lossless file decodes to exactly the audio it was made from");
+            pairs += 1;
+        }
+        assert!(pairs > 0, "no <name>.flac with a <name>.m4a beside it in {dir:?}");
+    }
+
     #[test]
     fn a_lossless_files_info_carries_what_the_player_shows() {
         let p = probe(&flac_head(44_100, 2, 16)).unwrap();
