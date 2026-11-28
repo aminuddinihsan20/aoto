@@ -94,6 +94,8 @@ pub struct AudioStatus {
     level: AtomicU32,
     /// How far the output device runs behind the position (its buffer), in ms.
     latency_ms: AtomicU32,
+    /// The sample rate the output device runs at; 0 while none is open.
+    output_rate: AtomicU32,
     /// Crossfade length in ms; 0 = off.
     crossfade_ms: AtomicU32,
     /// DJ-style handoff rather than a straight-line crossfade (see `Ramp`).
@@ -197,6 +199,11 @@ impl AudioStatus {
 
     pub fn mixing(&self) -> bool {
         self.mix_active.load(Ordering::Relaxed)
+    }
+
+    /// The sample rate the output device runs at; 0 while none is open.
+    pub fn output_rate(&self) -> u32 {
+        self.output_rate.load(Ordering::Relaxed)
     }
 
     /// How far what is heard runs behind the position, in the song's time.
@@ -1006,6 +1013,7 @@ impl Output {
             rodio::cpal::BufferSize::Default => 0,
         };
         status.latency_ms.store((buffer_ms + 10) as u32, Ordering::Relaxed);
+        status.output_rate.store(rate, Ordering::Relaxed);
         log::info!("audio: output device {:?} at {} Hz", id, rate);
         self.sink = Some(sink);
         self.device = id;

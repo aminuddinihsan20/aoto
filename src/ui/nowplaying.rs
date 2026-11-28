@@ -937,6 +937,11 @@ fn options_contents(app: &mut App, ui: &mut Ui, track: &crate::model::Track, lyr
         app.speed_sheet = true;
         ui.close();
     }
+    // The path from the file to the ears: what the song is and what is done to it.
+    if crate::platform::phone() && widgets::menu_action_drawn(ui, "Audio info", |ui, at, color| super::glyphs::draw(ui, at, widgets::menu_icon(), super::glyphs::WAVE, color)) {
+        app.audio_info_sheet = true;
+        ui.close();
+    }
     menu_divider(ui);
     widgets::song_actions(ui, track, liked, None, false, &mut app.actions);
     menu_divider(ui);
