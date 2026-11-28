@@ -87,13 +87,24 @@ pub fn outline(ui: &Ui, rect: Rect, radius: impl Into<CornerRadius>) {
 /// look that draws lines an outlined card, since its wash alone is too near the page.
 pub fn row_wash(ui: &Ui, rect: Rect, fill: Color32) {
     if material::style().outlined() {
-        // Kept inside what the list shows, so the line's sides are not cut off.
-        let clip = ui.clip_rect();
-        let rect = Rect::from_min_max(pos2(rect.left().max(clip.left() + 1.0), rect.top()), pos2(rect.right().min(clip.right() - 1.0), rect.bottom()));
-        plate(ui, rect, round(shape::CARD_SMALL), fill, Stack::None);
+        // The card reaches past the row's sides, round its cover. A list that shows
+        // exactly its rows' width would cut the line's sides off (or leave the cover
+        // standing out of it), so the card is drawn through the list's sides, as far as
+        // the screen's; top and bottom stay the list's, so it still scrolls under a header.
+        let (frame, clip) = row_frame(rect, ui.clip_rect(), ui.ctx().content_rect());
+        // (The list's own painter can only be narrowed, so the layer's is used.)
+        ui.ctx().layer_painter(ui.layer_id()).with_clip_rect(clip).add(plate_shape(frame, round(shape::CARD_SMALL), fill, Stack::None));
     } else {
         ui.painter().rect_filled(rect, shape::CARD_SMALL, fill);
     }
+}
+
+/// Where a lined look's card under a row is drawn, and what it is clipped to: the row's
+/// ground `rect` kept on the `screen`, and the list's `clip` widened to let its sides show.
+pub fn row_frame(rect: Rect, clip: Rect, screen: Rect) -> (Rect, Rect) {
+    let frame = Rect::from_min_max(pos2(rect.left().max(screen.left() + 2.0), rect.top()), pos2(rect.right().min(screen.right() - 2.0), rect.bottom()));
+    let clip = Rect::from_min_max(pos2(clip.left().min(frame.left()), clip.top()), pos2(clip.right().max(frame.right()), clip.bottom()));
+    (frame, clip)
 }
 
 /// A corner as the look rounds it (Sticker's are squarer).
@@ -1677,6 +1688,23 @@ mod tests {
     }
 
     // -------------------------------------------------------------- carousel
+
+    #[test]
+    fn the_card_under_a_row_keeps_the_rows_cover_inside_it_in_a_list_as_wide_as_its_rows() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(412.0, 900.0));
+        // The queue: rows from 16 to 396, shown through a list exactly that wide.
+        let row = Rect::from_min_max(pos2(16.0, 200.0), pos2(396.0, 264.0));
+        let list = Rect::from_min_max(pos2(16.0, 150.0), pos2(396.0, 700.0));
+        let (frame, clip) = row_frame(row.expand2(vec2(8.0, 0.0)), list, screen);
+        let cover = row_geom(row, 48.0, 0.0, true).cover;
+        assert!(frame.left() <= cover.left() - 6.0, "the cover stands inside the card: {frame:?} {cover:?}");
+        assert!(clip.left() <= frame.left() && clip.right() >= frame.right(), "its sides are not cut off");
+        assert_eq!((clip.top(), clip.bottom()), (list.top(), list.bottom()), "it still scrolls out under the list's top");
+        // A row at the screen's very edge keeps its card on the screen.
+        let edge = Rect::from_min_max(pos2(0.0, 200.0), pos2(412.0, 264.0));
+        let (frame, _) = row_frame(edge.expand2(vec2(8.0, 0.0)), screen, screen);
+        assert!(screen.contains_rect(frame));
+    }
 
     #[test]
     fn a_carousel_at_rest_is_a_large_a_medium_and_a_small_item_filling_the_row() {
