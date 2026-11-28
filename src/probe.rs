@@ -261,7 +261,12 @@ mod tests {
                 }
             };
             let hint = crate::stream::Format::File { hint: "", mime: None };
-            println!("{:>10}: as a phone file: {} | with no hint: {}", path.file_name().unwrap().to_string_lossy(), try_with(crate::stream::Format::Aac), try_with(hint));
+            // The decoder alone, reading plain memory: what it can do without the app's reader.
+            let alone = match rodio::Decoder::builder().with_data(std::io::Cursor::new(data.clone())).with_byte_len(data.len() as u64).with_seekable(true).build() {
+                Ok(d) => format!("ok, {} Hz, {} samples", d.sample_rate().get(), d.count()),
+                Err(e) => format!("FAILS: {e}"),
+            };
+            println!("{:>10}: as a phone file: {} | with no hint: {} | decoder alone: {alone}", path.file_name().unwrap().to_string_lossy(), try_with(crate::stream::Format::Aac), try_with(hint));
         }
     }
 
@@ -297,6 +302,56 @@ mod tests {
             pairs += 1;
         }
         assert!(pairs > 0, "no <name>.flac with a <name>.m4a beside it in {dir:?}");
+    }
+
+    /// A WAV file, written here: 16-bit stereo at 44.1 kHz holding `samples`.
+    fn wav_file(samples: &[i16]) -> Vec<u8> {
+        let data = samples.len() as u32 * 2;
+        let mut f = b"RIFF".to_vec();
+        f.extend((36 + data).to_le_bytes());
+        f.extend(b"WAVEfmt ");
+        f.extend(16u32.to_le_bytes());
+        f.extend(1u16.to_le_bytes());
+        f.extend(2u16.to_le_bytes());
+        f.extend(44_100u32.to_le_bytes());
+        f.extend((44_100u32 * 4).to_le_bytes());
+        f.extend(4u16.to_le_bytes());
+        f.extend(16u16.to_le_bytes());
+        f.extend(b"data");
+        f.extend(data.to_le_bytes());
+        f.extend(samples.iter().flat_map(|s| s.to_le_bytes()));
+        f
+    }
+
+    /// A WAV file from the phone plays, and plays exactly what is in it. (It did not: the
+    /// file was read but nothing was there to decode its PCM.)
+    #[test]
+    fn a_wav_file_from_the_phone_decodes_to_exactly_its_samples() {
+        use rodio::Source;
+        let samples: Vec<i16> = (0..4000).map(|i| ((i * 37) % 20_000 - 10_000) as i16).collect();
+        let file = wav_file(&samples);
+        assert_eq!(probe(&file).map(|p| (p.codec, p.bit_depth, p.sample_rate)), Some(("WAV", Some(16), Some(44_100))));
+        let shared = crate::stream::Shared::from_file(file, 0, None, crate::stream::Format::Aac, "This phone");
+        let d = crate::stream::decoder(shared, true).expect("a WAV file decodes");
+        assert_eq!((d.sample_rate().get(), d.channels().get()), (44_100, 2));
+        let heard: Vec<f32> = d.collect();
+        let wanted: Vec<f32> = samples.iter().map(|s| *s as f32 / 32_768.0).collect();
+        assert_eq!(heard, wanted);
+    }
+
+    /// The decoders a file from the phone may need are built in: without `pcm` a WAV or
+    /// AIFF file does not decode, and without `ogg` a Vorbis file is not even opened.
+    #[test]
+    fn the_decoders_for_wav_ogg_and_aiff_files_are_built_in() {
+        let manifest = include_str!("../Cargo.toml");
+        let line = manifest.lines().find(|l| l.starts_with("symphonia =")).expect("the symphonia dependency");
+        for feature in ["\"pcm\"", "\"ogg\"", "\"aiff\"", "\"flac\"", "\"isomp4\""] {
+            assert!(line.contains(feature), "{feature} is missing from: {line}");
+        }
+        let lock = include_str!("../Cargo.lock");
+        for package in ["symphonia-codec-pcm", "symphonia-format-ogg", "symphonia-codec-vorbis", "symphonia-format-riff"] {
+            assert!(lock.contains(&format!("name = \"{package}\"")), "{package} is not built");
+        }
     }
 
     #[test]
