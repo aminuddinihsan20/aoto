@@ -116,6 +116,8 @@ pub struct Shared {
     pub format: Format,
     /// What the player can say about this stream, when its source reported it (addons).
     pub info: Option<crate::hires::Info>,
+    /// What a file on the phone was found to hold, read from its own bytes.
+    pub probed: std::sync::OnceLock<crate::probe::Probe>,
     /// Flips to true once the download task has stopped (complete, failed or cancelled).
     done: tokio::sync::watch::Sender<bool>,
     /// Wakes waiting workers: `limit` lifted, a reader moved or left, or cancelled.
@@ -149,6 +151,7 @@ impl Shared {
             tempo: Arc::new(std::sync::OnceLock::new()),
             format,
             info,
+            probed: std::sync::OnceLock::new(),
             done: tokio::sync::watch::Sender::new(false),
             changed: tokio::sync::Notify::new(),
         })
@@ -176,6 +179,20 @@ impl Shared {
             inner.fetched = n;
         }
         shared.done.send_replace(true);
+        shared
+    }
+
+    /// A file from the phone (`source` says where: its folders, or the downloads), whole
+    /// in memory. What it is comes from its own bytes, so a FLAC file is not called AAC;
+    /// a lossless one also carries what the player shows about it. How it is decoded is
+    /// `format`'s business alone and is not changed by what was found.
+    pub fn from_file(data: Vec<u8>, duration_ms: u64, loudness_db: Option<f32>, format: Format, source: &str) -> Arc<Self> {
+        let probed = crate::probe::probe(&data);
+        let info = probed.as_ref().filter(|p| p.lossless).map(|p| p.info(source, data.len() as u64, duration_ms));
+        let shared = Self::from_bytes_with_format(data, duration_ms, loudness_db, format, info);
+        if let Some(p) = probed {
+            let _ = shared.probed.set(p);
+        }
         shared
     }
 
@@ -782,6 +799,13 @@ pub struct Stats {
     pub sample_rate: u32,
     pub channels: u16,
     pub bitrate_kbps: Option<u32>,
+    /// The file's own bitrate (its size over its length), where both are known: for a
+    /// lossless file, less than `bitrate_kbps`, which is what it unpacks to.
+    pub file_kbps: Option<u32>,
+    /// The container, when it is worth saying (`MP4`, `Ogg`, `WebM`).
+    pub container: Option<&'static str>,
+    /// What decodes it: the app's own Opus decoder, or Symphonia.
+    pub decoder: &'static str,
 }
 
 impl Stats {
@@ -789,7 +813,19 @@ impl Stats {
     pub fn of(shared: &Shared, decoder: &TrackDecoder) -> Self {
         let rate = rodio::Source::sample_rate(decoder).get();
         let channels = rodio::Source::channels(decoder).get();
-        Self::from_parts(&shared.format, shared.info.as_ref(), shared.total, shared.duration_ms, rate, channels)
+        let mut stats = Self::from_parts(&shared.format, shared.info.as_ref(), shared.total, shared.duration_ms, rate, channels);
+        stats.decoder = match decoder {
+            TrackDecoder::Rodio(_) => "Symphonia",
+            TrackDecoder::Opus(_) => "Opus (built in)",
+            TrackDecoder::Pcm(_) => "None (already PCM)",
+        };
+        // A file from the phone says what it is itself.
+        if let Some(p) = shared.probed.get() {
+            stats.codec = codec_label(p.codec);
+            stats.container = p.container;
+            stats.bit_depth = stats.bit_depth.or(p.bit_depth);
+        }
+        stats
     }
 
     fn from_parts(format: &Format, info: Option<&crate::hires::Info>, size: u64, duration_ms: u64, sample_rate: u32, channels: u16) -> Self {
@@ -808,7 +844,12 @@ impl Stats {
             Some(bits) if info.is_some_and(|i| i.lossless()) => Some(sample_rate * bits * channels as u32 / 1000),
             _ => info.and_then(|i| i.bitrate_kbps).or(measured),
         };
-        Self { codec, bit_depth, sample_rate, channels, bitrate_kbps: bitrate_kbps.filter(|k| *k > 0) }
+        let container = match format {
+            Format::Aac => Some("MP4"),
+            Format::Opus => Some("WebM"),
+            _ => None,
+        };
+        Self { codec, bit_depth, sample_rate, channels, bitrate_kbps: bitrate_kbps.filter(|k| *k > 0), file_kbps: measured.filter(|k| *k > 0), container, decoder: "Symphonia" }
     }
 }
 

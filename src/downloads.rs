@@ -394,10 +394,8 @@ pub fn open(video_id: &str) -> Option<Arc<Shared>> {
     let entry = STATE.read().unwrap().index.get(video_id).cloned()?;
     let data = std::fs::read(&entry.path).ok()?;
     log::info!("{video_id}: playing the downloaded file");
-    Some(match playback_format(&entry.path) {
-        Some(format) => Shared::from_bytes_with_format(data, entry.duration_ms, entry.loudness_db, format, None),
-        None => Shared::from_bytes(data, entry.duration_ms, entry.loudness_db),
-    })
+    let format = playback_format(&entry.path).unwrap_or(crate::stream::Format::Aac);
+    Some(Shared::from_file(data, entry.duration_ms, entry.loudness_db, format, "Downloaded"))
 }
 
 /// Write a downloaded song into the folder and remember it. Returns the file.

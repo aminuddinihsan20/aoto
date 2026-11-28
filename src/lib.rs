@@ -43,6 +43,7 @@ pub mod playon;
 mod opus;
 mod material;
 mod preset;
+mod probe;
 mod quality;
 mod shader;
 mod sleep;

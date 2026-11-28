@@ -254,7 +254,8 @@ pub fn open(id: &str) -> Option<Arc<Shared>> {
     };
     let data = std::fs::read(path).ok()?;
     log::info!("{id}: playing a local file");
-    Some(Shared::from_bytes(data, duration_ms, None))
+    // Whatever the file is (FLAC, MP3, …), it says so itself; it is decoded as before.
+    Some(Shared::from_file(data, duration_ms, None, crate::stream::Format::Aac, "This phone"))
 }
 
 #[cfg(test)]
