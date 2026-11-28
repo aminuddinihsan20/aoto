@@ -34,6 +34,7 @@
 - **Equalizer**: seven bands, presets and a bass boost, plus volume normalization and spatial audio for headphones, in three strengths.
 - **Sleep timer**: after a time, at the end of the song or of the queue, with a fade-out.
 - **Play on**: names where the sound goes and opens Android's own output switcher.
+- **Audio info**: the path from the file to your ears, stage by stage (track, decoder, sound, resampling, output).
 
 **Lyrics**
 - Timed, word-by-word lyrics from several providers, with romanization and translation.
@@ -41,7 +42,7 @@
 
 **Your music**
 - **Downloads** for offline playback, including a whole album or playlist at once, on Wi-Fi only if you like. They can be saved as the addon's **FLAC** copy with tags, cover and lyrics, downloaded playlists keep up with new songs, and a download can be removed from the menu.
-- **Music on your phone**: add folders and play what is in them.
+- **Music on your phone**: add folders and play what is in them (FLAC, ALAC, WAV, AIFF, AAC, MP3, OGG Vorbis), each labelled as what it really is.
 - **Listening stats**, kept on the device only.
 - **Last.fm** scrobbling, **Listen together** sessions, and **Spotify transfer** for bringing playlists over.
 
