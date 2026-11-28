@@ -113,20 +113,21 @@ impl Scheme {
         on_error: rgb(0xFFFFFF),
     };
 
-    /// The Sticker look on dark pages: a neutral black (no blue in it), cream for text and
-    /// lines, the same pastel fills with the same ink on them.
+    /// The Sticker look on dark pages: a neutral black (no blue in it), cream for text, a
+    /// quieter cream for lines (`secondary`), and the pastels a step deeper than on light
+    /// pages, where their full brightness would glare, with the same ink on them.
     pub const STICKER_DARK: Scheme = Scheme {
         primary: rgb(0xF5F2EB),
         on_primary: rgb(0x141414),
-        primary_container: rgb(0xFCE7A2),
+        primary_container: rgb(0xDFC577),
         on_primary_container: rgb(0x33314A),
-        secondary: rgb(0xD6D2C8),
+        secondary: rgb(0xCFCBC2),
         on_secondary: rgb(0x141414),
-        secondary_container: rgb(0xBDE3F6),
+        secondary_container: rgb(0x93C1DA),
         on_secondary_container: rgb(0x33314A),
-        tertiary: rgb(0xF6B8BE),
+        tertiary: rgb(0xDE9BA3),
         on_tertiary: rgb(0x33314A),
-        tertiary_container: rgb(0xF6B8BE),
+        tertiary_container: rgb(0xDE9BA3),
         on_tertiary_container: rgb(0x33314A),
         surface: rgb(0x141414),
         surface_container_lowest: rgb(0x0E0E0E),
@@ -295,7 +296,14 @@ impl Style {
     pub fn of(look: Look, scheme: &Scheme) -> Style {
         match look {
             Look::Indigo => Style { outline: 0.0, stack: 0.0, line: scheme.outline_variant, accent: scheme.primary, on_accent: scheme.on_primary, corner: None },
-            Look::Sticker => Style { outline: 1.5, stack: 4.0, line: scheme.on_surface, accent: scheme.primary_container, on_accent: scheme.on_primary_container, corner: Some(12.0) },
+            Look::Sticker => {
+                // In the dark the lines are a step quieter than the text (the scheme's
+                // secondary), so a page full of outlined cards does not glare; in the
+                // light they are the ink itself.
+                let dark = scheme.surface.r() < 0x80;
+                let line = if dark { scheme.secondary } else { scheme.on_surface };
+                Style { outline: 1.5, stack: 4.0, line, accent: scheme.primary_container, on_accent: scheme.on_primary_container, corner: Some(12.0) }
+            }
         }
     }
 
